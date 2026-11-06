@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — never commit real environment files or secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+firebase-admin-sdk*.json
+serviceAccountKey*.json
+secrets/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Coverage / cache
+coverage/
+.nyc_output/
+.eslintcache
+.turbo/
+
+# Node agent builds
+apps/node-agent/bin/
+apps/node-agent/nimbus-agent

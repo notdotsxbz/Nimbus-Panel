@@ -1,0 +1,13 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "docker",
+  "label": "Docker Hosting",
+  "subdomainPattern": null,
+  "requiresPort": true,
+  "protocols": ["tcp", "udp"],
+  "software": [
+    { "id": "approved-catalogue", "label": "Approved Image Catalogue", "image": "catalogue", "versions": ["any"], "minRamMb": 256 }
+  ],
+  "features": ["templates", "console", "logs", "env-vars", "port-mappings", "volumes", "limits", "backups", "rebuild"],
+  "notes": "Customers never receive Docker daemon access — the agent runs a fixed, whitelisted operation set."
+}

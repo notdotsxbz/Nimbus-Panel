@@ -1,0 +1,16 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "backends",
+  "label": "Backend / API Hosting",
+  "subdomainPattern": "api-{username}",
+  "requiresPort": true,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "nodejs20", "label": "Node.js 20", "image": "node:20-alpine", "versions": ["20"], "minRamMb": 512 },
+    { "id": "python312", "label": "Python 3.12", "image": "python:3.12-alpine", "versions": ["3.12"], "minRamMb": 512 },
+    { "id": "php82", "label": "PHP 8.2", "image": "php:8.2-fpm-alpine", "versions": ["8.2"], "minRamMb": 512 },
+    { "id": "docker", "label": "Approved Docker Image", "image": "custom", "versions": ["any"], "minRamMb": 512 }
+  ],
+  "features": ["console", "files", "env-vars", "github-deploy", "build-logs", "health-checks", "auto-restart", "backups", "custom-domains"],
+  "notes": "Approved Docker images only — no unrestricted daemon access."
+}

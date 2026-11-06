@@ -1,0 +1,15 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "discord",
+  "label": "Discord Bot Hosting",
+  "subdomainPattern": "bot-{username}",
+  "requiresPort": false,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "nodejs20", "label": "Node.js 20", "image": "node:20-alpine", "versions": ["20"], "minRamMb": 256 },
+    { "id": "nodejs22", "label": "Node.js 22", "image": "node:22-alpine", "versions": ["22"], "minRamMb": 256 },
+    { "id": "python312", "label": "Python 3.12", "image": "python:3.12-alpine", "versions": ["3.12"], "minRamMb": 256 }
+  ],
+  "features": ["console", "files", "env-vars", "github-deploy", "auto-restart", "backups"],
+  "notes": "No public port is allocated for outgoing-only bots. HTTP APIs get a bot-username subdomain."
+}

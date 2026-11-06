@@ -1,0 +1,15 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "databases",
+  "label": "Database Hosting",
+  "subdomainPattern": null,
+  "requiresPort": true,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "mongodb", "label": "MongoDB 7", "image": "mongo:7.0", "versions": ["7.0"], "minRamMb": 512 },
+    { "id": "mysql", "label": "MySQL 8", "image": "mysql:8.0", "versions": ["8.0"], "minRamMb": 512 },
+    { "id": "postgres", "label": "PostgreSQL 16", "image": "postgres:16-alpine", "versions": ["16"], "minRamMb": 512 }
+  ],
+  "features": ["db-create", "db-delete", "users", "permissions", "password-reset", "connection-strings", "backups", "restore"],
+  "notes": "Private networking is the default. Database hostnames stay off public DNS."
+}

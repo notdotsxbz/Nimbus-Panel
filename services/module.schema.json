@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NIMBUS service module definition",
+  "type": "object",
+  "required": ["name", "label", "software"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z]+$" },
+    "label": { "type": "string" },
+    "subdomainPattern": { "type": ["string", "null"], "description": "Pattern with {username} placeholder, or null when no subdomain is issued" },
+    "requiresPort": { "type": "boolean" },
+    "protocols": { "type": "array", "items": { "enum": ["tcp", "udp"] } },
+    "software": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "image", "minRamMb"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "image": { "type": "string", "description": "Docker image, or kvm/ prefix for VM templates" },
+          "versions": { "type": "array", "items": { "type": "string" } },
+          "minRamMb": { "type": "integer", "minimum": 128 }
+        }
+      }
+    },
+    "features": { "type": "array", "items": { "type": "string" } },
+    "notes": { "type": "string" }
+  }
+}

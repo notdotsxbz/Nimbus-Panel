@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build node agent binaries
+        run: |
+          mkdir -p dist
+          cd apps/node-agent
+          GOOS=linux GOARCH=amd64 go build -o ../../dist/nimbus-agent-linux-amd64 .
+          GOOS=linux GOARCH=arm64 go build -o ../../dist/nimbus-agent-linux-arm64 .
+          sha256sum ../../dist/nimbus-agent-* > ../../dist/SHA256SUMS
+
+      - name: Extract release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          {
+            echo "## NIMBUS ${GITHUB_REF_NAME}"
+            echo
+            echo "### Node agent binaries"
+            echo "- \`nimbus-agent-linux-amd64\` / \`nimbus-agent-linux-arm64\` (sha256 in SHA256SUMS)"
+            echo
+            echo "### Install"
+            echo '```bash'
+            echo "curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/installer/install.sh | sudo bash"
+            echo '```'
+          } > RELEASE_NOTES.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/nimbus-agent-*
+            dist/SHA256SUMS

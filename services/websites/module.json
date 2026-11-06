@@ -1,0 +1,16 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "websites",
+  "label": "Website Hosting",
+  "subdomainPattern": "{username}",
+  "requiresPort": true,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "static", "label": "Static Site", "image": "nginx:alpine", "versions": ["stable"], "minRamMb": 128 },
+    { "id": "php82", "label": "PHP 8.2", "image": "php:8.2-fpm-alpine", "versions": ["8.2"], "minRamMb": 256 },
+    { "id": "nodejs20", "label": "Node.js 20", "image": "node:20-alpine", "versions": ["20"], "minRamMb": 512 },
+    { "id": "python312", "label": "Python 3.12", "image": "python:3.12-alpine", "versions": ["3.12"], "minRamMb": 512 }
+  ],
+  "features": ["domains", "ssl", "file-manager", "github-deploy", "rollback", "access-logs", "health-checks", "backups"],
+  "notes": "Free Nimbus subdomain (username.nimbushost.com) is generated automatically with automatic SSL."
+}

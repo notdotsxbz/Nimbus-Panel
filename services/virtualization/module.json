@@ -1,0 +1,15 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "virtualization",
+  "label": "VPS / VDS Hosting",
+  "subdomainPattern": null,
+  "requiresPort": false,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "ubuntu-2404", "label": "Ubuntu 24.04 LTS", "image": "kvm/ubuntu-2404", "versions": ["24.04"], "minRamMb": 1024 },
+    { "id": "ubuntu-2204", "label": "Ubuntu 22.04 LTS", "image": "kvm/ubuntu-2204", "versions": ["22.04"], "minRamMb": 1024 },
+    { "id": "debian-12", "label": "Debian 12", "image": "kvm/debian-12", "versions": ["12"], "minRamMb": 1024 }
+  ],
+  "features": ["ssh", "vnc-console", "reinstall", "power-controls", "monitoring", "backups", "expiration"],
+  "notes": "Genuine virtualization via KVM/libvirt or Proxmox only. A Docker container is never marketed as a VPS. VPS nodes run the virtualization adapter separately from container nodes."
+}

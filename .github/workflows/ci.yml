@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Shared package tests
+        run: node --test tests/shared.test.mjs
+
+      - name: Type check (shared)
+        run: npx tsc --noEmit -p tsconfig.base.json
+
+      - name: Build web
+        run: npm run build --workspace @nimbus/web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Build api
+        run: npm run build --workspace @nimbus/api
+
+      - name: Verify agent builds
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: apps/node-agent/go.mod
+      - run: go vet ./...
+        working-directory: apps/node-agent
+      - run: go build ./...
+        working-directory: apps/node-agent
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: npm audit (high+)
+        run: npm audit --audit-level=high || true
+      - name: Secret scan
+        run: |
+          ! grep -rInE "(sk_live|AKIA[0-9A-Z]{16}|-----BEGIN (RSA )?PRIVATE KEY-----)" \
+            --include="*.ts" --include="*.tsx" --include="*.go" --include="*.sh" \
+            apps packages services installer docs
