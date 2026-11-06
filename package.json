@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "NIMBUS — One Platform. Every Service. Every Device. Total Control.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "workspaces": [
     "packages/*",
     "apps/*"
