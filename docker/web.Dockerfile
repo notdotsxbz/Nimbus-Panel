@@ -1,5 +1,5 @@
 # Control Plane — Web (Next.js standalone)
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /build
 # All workspace package.json files must be present or npm install fails (workspaces)
 COPY package.json ./
@@ -12,7 +12,7 @@ COPY packages/shared packages/shared
 COPY apps/web apps/web
 RUN npm run build --workspace @nimbus/shared && npm run build --workspace @nimbus/web
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
 COPY --from=build /build/apps/web/.next/standalone ./

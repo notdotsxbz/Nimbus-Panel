@@ -1,5 +1,5 @@
 # Control Plane — API
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /build
 # All workspace package.json files must be present or npm install fails (workspaces)
 COPY package.json ./
@@ -12,7 +12,7 @@ COPY packages/shared packages/shared
 COPY apps/api apps/api
 RUN npm run build --workspace @nimbus/shared && npm run build --workspace @nimbus/api
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /build/package.json ./

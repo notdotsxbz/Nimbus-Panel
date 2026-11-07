@@ -75,7 +75,7 @@ apt-get update -qq
 apt-get install -y -qq ca-certificates curl gnupg git nginx >/dev/null
 
 if ! command -v node >/dev/null || [ "$(node -e 'console.log(parseInt(process.versions.node))')" -lt 20 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
   apt-get install -y -qq nodejs >/dev/null
 fi
 

@@ -7,7 +7,7 @@
 | OS | Ubuntu 20.04+ / Debian 11+ |
 | RAM | 4 GB (control plane), 8 GB recommended with workers |
 | Disk | 10 GB free |
-| Software | Node.js 20+, MongoDB 6+, Redis 6+, nginx (installed automatically) |
+| Software | Node.js 22+, MongoDB 6+, Redis 6+, nginx (installed automatically) |
 
 ## One-command install
 

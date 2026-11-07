@@ -74,7 +74,7 @@ npm run dev:api            # NestJS API on :4000
 npm run dev:web            # Next.js UI on :3000
 ```
 
-Requirements: Node.js ≥ 20, MongoDB ≥ 6, Redis ≥ 6 (background jobs).
+Requirements: Node.js ≥ 22, MongoDB ≥ 6, Redis ≥ 6 (background jobs).
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the full guide.
 
 ## Security

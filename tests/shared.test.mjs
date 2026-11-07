@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSubdomain, canTransition, DEFAULT_PORT_RANGE, isStaff } from "../packages/shared/src/index.ts";
+// Tests run against the COMPILED shared package (dist) — Node cannot execute
+// TypeScript directly. `npm run test --workspace @nimbus/shared` builds first.
+import { buildSubdomain, canTransition, DEFAULT_PORT_RANGE, isStaff } from "../packages/shared/dist/index.js";
 
 test("subdomain patterns per service type", () => {
   assert.equal(buildSubdomain("minecraft", "Steve", "nimbushost.com"), "play-steve.nimbushost.com");
