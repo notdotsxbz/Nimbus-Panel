@@ -38,66 +38,66 @@ check() { # check <name> <expected> <actual>
   fi
 }
 
-select() { # select <fixture> <arch> → runs selection, returns its exit code
+run_select() { # run_select <fixture> <arch> → runs selection, returns its exit code
   select_mongodb_compat "$1" "$2" >/dev/null 2>&1
 }
 
 echo "MongoDB compatibility selection tests"
 
 # ── Ubuntu 26.04 (the previously broken release) ──────────────────
-f=$(make_os ubuntu 26.04 resolute); select "${f}" amd64
+f=$(make_os ubuntu 26.04 resolute); run_select "${f}" amd64
 check "Ubuntu 26.04 detected as supported"      "yes"  "${MONGO_SUPPORTED}"
 check "Ubuntu 26.04 selects MongoDB 9.0"        "9.0"  "${MONGO_VERSION}"
 check "Ubuntu 26.04 codename resolute"          "resolute" "${MONGO_CODENAME}"
 
 # ── Ubuntu 24.04 / 22.04 / 20.04 ──────────────────────────────────
-f=$(make_os ubuntu 24.04 noble); select "${f}" amd64
+f=$(make_os ubuntu 24.04 noble); run_select "${f}" amd64
 check "Ubuntu 24.04 supported"                  "yes"  "${MONGO_SUPPORTED}"
 check "Ubuntu 24.04 selects 9.0"                "9.0"  "${MONGO_VERSION}"
 
-f=$(make_os ubuntu 22.04 jammy); select "${f}" amd64
+f=$(make_os ubuntu 22.04 jammy); run_select "${f}" amd64
 check "Ubuntu 22.04 supported"                  "yes"  "${MONGO_SUPPORTED}"
 check "Ubuntu 22.04 selects 9.0"                "9.0"  "${MONGO_VERSION}"
 
-f=$(make_os ubuntu 20.04 focal); select "${f}" amd64
+f=$(make_os ubuntu 20.04 focal); run_select "${f}" amd64
 check "Ubuntu 20.04 supported"                  "yes"  "${MONGO_SUPPORTED}"
 check "Ubuntu 20.04 selects 8.0 (last for focal)" "8.0" "${MONGO_VERSION}"
 
 # ── Debian releases ───────────────────────────────────────────────
-f=$(make_os debian 12 bookworm); select "${f}" amd64
+f=$(make_os debian 12 bookworm); run_select "${f}" amd64
 check "Debian 12 supported"                     "yes"  "${MONGO_SUPPORTED}"
 check "Debian 12 selects 9.0"                   "9.0"  "${MONGO_VERSION}"
 
-f=$(make_os debian 11 bullseye); select "${f}" amd64
+f=$(make_os debian 11 bullseye); run_select "${f}" amd64
 check "Debian 11 supported"                     "yes"  "${MONGO_SUPPORTED}"
 check "Debian 11 selects 7.0 (last for bullseye)" "7.0" "${MONGO_VERSION}"
 
 # ── Unsupported releases must be REJECTED (no repo ever constructed) ─
-f=$(make_os ubuntu 25.10 questing); select "${f}" amd64
+f=$(make_os ubuntu 25.10 questing); run_select "${f}" amd64
 check "Ubuntu 25.10 (interim) rejected"         "no"   "${MONGO_SUPPORTED}"
 check "Ubuntu 25.10 selects no version"         ""     "${MONGO_VERSION}"
 
-f=$(make_os ubuntu 23.10 mantic); select "${f}" amd64
+f=$(make_os ubuntu 23.10 mantic); run_select "${f}" amd64
 check "Ubuntu 23.10 (EOL interim) rejected"     "no"   "${MONGO_SUPPORTED}"
 
-f=$(make_os centos 9 stream); select "${f}" amd64
+f=$(make_os centos 9 stream); run_select "${f}" amd64
 check "CentOS rejected"                         "no"   "${MONGO_SUPPORTED}"
 
 # ── Architecture validation ───────────────────────────────────────
-f=$(make_os ubuntu 26.04 resolute); select "${f}" ppc64le
+f=$(make_os ubuntu 26.04 resolute); run_select "${f}" ppc64le
 check "ppc64le rejected"                        "no"   "${MONGO_SUPPORTED}"
 
-f=$(make_os ubuntu 26.04 resolute); select "${f}" arm64
+f=$(make_os ubuntu 26.04 resolute); run_select "${f}" arm64
 check "arm64 supported"                         "yes"  "${MONGO_SUPPORTED}"
 
-select "${f}" x86_64
+run_select "${f}" x86_64
 check "x86_64 alias of amd64 supported"         "yes"  "${MONGO_SUPPORTED}"
 
 # ── Degenerate inputs ─────────────────────────────────────────────
-select "${TMP}/does-not-exist" amd64
+run_select "${TMP}/does-not-exist" amd64
 check "missing os-release rejected"             "no"   "${MONGO_SUPPORTED}"
 
-f=$(make_os ubuntu 26.04 ""); select "${f}" amd64
+f=$(make_os ubuntu 26.04 ""); run_select "${f}" amd64
 check "empty codename rejected (no repo guess)" "no"   "${MONGO_SUPPORTED}"
 
 # ── Override helper sanity ────────────────────────────────────────

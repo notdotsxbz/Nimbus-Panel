@@ -24,10 +24,7 @@ jobs:
         run: npm run build --workspace @nimbus/shared
 
       - name: Installer script syntax check (bash -n)
-        run: |
-          for f in installer/*.sh installer/lib/*.sh scripts/*.sh; do
-            bash -n "$f" && echo "syntax OK: $f"
-          done
+        run: bash installer/tests/syntax-check.sh
 
       - name: Installer compatibility tests (mocked, real bash)
         run: bash installer/tests/mongo-compat.sh
