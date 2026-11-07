@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { AppearanceSync } from "@/components/appearance-sync";
+import { NO_FLASH_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,8 +19,15 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className="bg-ink font-sans text-paper">{children}</body>
+    <html lang="en" suppressHydrationWarning data-animations="on">
+      <head>
+        {/* Applies the cached theme before first paint — no flash, no layout shift */}
+        <script id="nimbus-theme-noflash" dangerouslySetInnerHTML={{ __html: NO_FLASH_SCRIPT }} />
+      </head>
+      <body className="font-sans">
+        <AppearanceSync />
+        {children}
+      </body>
     </html>
   );
 }

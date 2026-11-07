@@ -4,7 +4,10 @@
 
 NIMBUS is a professional multi-service hosting control platform with a premium
 **Liquid Glass + Minimalism** interface. It pairs a lightweight central Control
-Plane with secure remote Compute Nodes running a Go Node Agent.
+Plane with secure remote Compute Nodes running a Go Node Agent. Administrators
+control the whole customer experience through the built-in **Theme & Animation
+Studio** (10 themes, live-preview editor, animation presets) — enforced
+server-side via the appearance API.
 
 ## Supported products
 

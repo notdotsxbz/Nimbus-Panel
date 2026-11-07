@@ -38,7 +38,10 @@ const SECTIONS: NavSection[] = [
   },
   {
     title: "Platform",
-    items: [{ href: "/admin/settings", label: "Settings", icon: "⚙" }],
+    items: [
+      { href: "/admin/appearance", label: "Appearance", icon: "◑" },
+      { href: "/admin/settings", label: "Settings", icon: "⚙" },
+    ],
   },
 ];
 

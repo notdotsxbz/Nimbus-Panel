@@ -13,6 +13,7 @@ import { AllocationsModule } from "./modules/allocations/allocations.module";
 import { DomainsModule } from "./modules/domains/domains.module";
 import { BackupsModule } from "./modules/backups/backups.module";
 import { AuditModule } from "./modules/audit/audit.module";
+import { AppearanceModule } from "./modules/appearance/appearance.module";
 import { FirebaseAdminService } from "./firebase/firebase-admin.service";
 
 @Module({
@@ -33,6 +34,7 @@ import { FirebaseAdminService } from "./firebase/firebase-admin.service";
     DomainsModule,
     BackupsModule,
     AuditModule,
+    AppearanceModule,
   ],
   providers: [
     FirebaseAdminService,

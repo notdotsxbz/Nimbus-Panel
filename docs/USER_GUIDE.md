@@ -46,6 +46,19 @@ retention and restore are managed from the same page.
 Invite subusers with scoped permissions (console, files, backups, view-only) from
 your account page. They can never exceed what your plan allows.
 
+## Appearance
+
+**Account → Appearance** (if your provider allows it):
+
+- **Theme** — choose from the themes your administrator published; your choice
+  follows your account on every device.
+- **Color mode** — Light, Dark or System (follows your device).
+- **Animations** — on/off, reduced motion, and a preset if permitted.
+
+If your administrator disabled customization you'll see the panel default
+instead. Reduced motion and your OS's `prefers-reduced-motion` setting always
+minimize animation.
+
 ## Low Bandwidth Mode
 
 Sidebar bottom → **Low Bandwidth Mode**: disables blur/animations and slows graph

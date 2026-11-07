@@ -2,12 +2,39 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, currentUser } from "@/lib/api";
+import { api } from "@/lib/api";
 import { GlassCard, Toast, useToast } from "@/components/glass";
+import { syncAppearance } from "@/lib/theme";
+import { ANIMATION_PRESETS } from "@nimbus/shared";
+
+interface ThemeRow {
+  key: string;
+  name: string;
+  mode: string;
+  isBuiltIn: boolean;
+}
+
+interface PublicSettings {
+  allowCustomerThemes: boolean;
+  allowCustomerAnimations: boolean;
+  defaultThemeKey: string;
+  defaultAnimationPreset: string;
+}
+
+interface MeAppearance {
+  themeKey: string;
+  colorMode: "light" | "dark" | "system";
+  animationsEnabled: boolean;
+  reducedMotion: boolean;
+  animationPreset: string;
+}
 
 export default function AccountSettings() {
   const router = useRouter();
   const [user, setUser] = useState<{ username: string; email: string; role: string; mustChangePassword?: boolean } | null>(null);
+  const [themes, setThemes] = useState<ThemeRow[]>([]);
+  const [pub, setPub] = useState<PublicSettings | null>(null);
+  const [prefs, setPrefs] = useState<MeAppearance | null>(null);
   const { show, node } = useToast();
 
   useEffect(() => {
@@ -16,9 +43,41 @@ export default function AccountSettings() {
         setUser(await api.get<typeof user>("/auth/me"));
       } catch {
         router.replace("/login");
+        return;
+      }
+      try {
+        const [t, s, me] = await Promise.all([
+          api.get<{ items?: ThemeRow[] } | ThemeRow[]>("/appearance/themes"),
+          api.get<PublicSettings>("/appearance/public-settings"),
+          api.get<MeAppearance>("/appearance/me"),
+        ]);
+        setThemes(Array.isArray(t) ? t : t.items ?? []);
+        setPub(s);
+        setPrefs(me);
+      } catch {
+        /* appearance is optional — leave defaults */
       }
     })();
   }, [router]);
+
+  const savePrefs = async (patch: Partial<MeAppearance>) => {
+    try {
+      setPrefs(await api.put<MeAppearance>("/appearance/me", patch));
+      await syncAppearance(); // apply immediately across the whole app
+      show("Appearance updated", "ok");
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Update failed", "err");
+    }
+  };
+
+  const resetPrefs = async () => {
+    if (!confirm("Reset your appearance preferences to the panel defaults?")) return;
+    await api.post("/appearance/me/reset");
+    await syncAppearance();
+    const me = await api.get<MeAppearance>("/appearance/me");
+    setPrefs(me);
+    show("Appearance reset to defaults", "ok");
+  };
 
   const changePassword = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -91,6 +150,91 @@ export default function AccountSettings() {
           </div>
           <button className="btn-ghost">Update username</button>
         </form>
+      </GlassCard>
+
+      <GlassCard className="p-6">
+        <h2 className="mb-2 font-semibold">Appearance</h2>
+        {pub && prefs ? (
+          <div className="space-y-4 text-sm">
+            <div>
+              <label className="label" htmlFor="ap-theme">Theme</label>
+              {pub.allowCustomerThemes ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {themes.map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => void savePrefs({ themeKey: t.key })}
+                      className={`flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 text-left transition-colors ${
+                        prefs.themeKey === t.key || (prefs.themeKey === undefined && t.key === pub.defaultThemeKey)
+                          ? "bg-white/10 font-medium"
+                          : "glass-soft hover:bg-white/5"
+                      }`}
+                    >
+                      <span>{t.name}</span>
+                      <span className="text-[10px] uppercase tracking-wider text-muted">{t.mode}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="glass-soft px-3.5 py-2.5 text-muted">Theme selection is managed by your administrator.</p>
+              )}
+            </div>
+
+            <div>
+              <label className="label" htmlFor="ap-mode">Color mode</label>
+              <select
+                id="ap-mode"
+                className="input"
+                value={prefs.colorMode}
+                onChange={(e) => void savePrefs({ colorMode: e.target.value as MeAppearance["colorMode"] })}
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <span>Animations</span>
+              <input
+                type="checkbox" className="h-5 w-5 accent-white" aria-label="Animations enabled"
+                checked={prefs.animationsEnabled}
+                onChange={(e) => void savePrefs({ animationsEnabled: e.target.checked })}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <span>Reduced motion</span>
+              <input
+                type="checkbox" className="h-5 w-5 accent-white" aria-label="Reduced motion"
+                checked={prefs.reducedMotion}
+                onChange={(e) => void savePrefs({ reducedMotion: e.target.checked })}
+              />
+            </div>
+
+            {pub.allowCustomerAnimations ? (
+              <div>
+                <label className="label" htmlFor="ap-preset">Animation preset</label>
+                <select
+                  id="ap-preset"
+                  className="input"
+                  value={prefs.animationPreset ?? pub.defaultAnimationPreset}
+                  onChange={(e) => void savePrefs({ animationPreset: e.target.value })}
+                >
+                  {ANIMATION_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p className="glass-soft px-3.5 py-2.5 text-muted">Animation preferences are managed by your administrator.</p>
+            )}
+
+            <button className="btn-ghost" onClick={() => void resetPrefs()}>Reset to default</button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted">Loading appearance preferences…</p>
+        )}
       </GlassCard>
 
       <GlassCard className="p-6">

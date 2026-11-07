@@ -25,9 +25,12 @@ jobs:
 
       - name: Installer script syntax check (bash -n)
         run: |
-          for f in installer/*.sh scripts/*.sh; do
+          for f in installer/*.sh installer/lib/*.sh scripts/*.sh; do
             bash -n "$f" && echo "syntax OK: $f"
           done
+
+      - name: Installer compatibility tests (mocked, real bash)
+        run: bash installer/tests/mongo-compat.sh
 
       - name: Shared package tests (imports compiled dist)
         run: npm run test --workspace @nimbus/shared

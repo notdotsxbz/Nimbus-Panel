@@ -128,6 +128,82 @@ async function call(path, { method = "GET", token, body } = {}) {
   const out = await call("/auth/logout", { method: "POST", token: owner });
   check("logout", out.status === 200);
 
+  // ── Appearance system ───────────────────────────────────────────
+  // Re-login (previous token cleared server-side is cookie-only; bearer stays valid)
+  const relogin = await call("/auth/login", { method: "POST", body: { identifier: ADMIN_ID, password: ADMIN_PW } });
+  const ownerToken = relogin.body?.token ?? owner;
+  const custToken = cust;
+
+  const pubThemes = await call("/appearance/themes", { token: custToken });
+  check(
+    "customer sees only published themes (10 built-ins seeded)",
+    pubThemes.status === 200 && Array.isArray(pubThemes.body) && pubThemes.body.length >= 10,
+    `count=${Array.isArray(pubThemes.body) ? pubThemes.body.length : "?"}`,
+  );
+
+  const pubSettings = await call("/appearance/public-settings", { token: custToken });
+  check("public settings reachable", pubSettings.status === 200 && typeof pubSettings.body?.defaultThemeKey === "string");
+
+  const suffix2 = Date.now().toString(36);
+  const badTheme = await call("/appearance/themes", {
+    method: "POST", token: ownerToken,
+    body: { name: `Bad ${suffix2}`, colors: { bg: "#000000", surface: "#111111", text: "url(javascript:alert(1))", border: "#222222" } },
+  });
+  check("invalid color rejected (CSS injection guard)", badTheme.status === 400, `status=${badTheme.status}`);
+
+  const newTheme = await call("/appearance/themes", {
+    method: "POST", token: ownerToken,
+    body: {
+      name: `Smoke Theme ${suffix2}`,
+      description: "created by api smoke test",
+      mode: "dark",
+      colors: { bg: "#000000", surface: "#141414", surfaceRaised: "#1c1c1c", border: "#262626", text: "#ffffff", textMuted: "#a3a3a3", primary: "#7cc4ff", primaryText: "#000000", secondary: "#4f6b84" },
+    },
+  });
+  check("admin creates theme", newTheme.status === 201 && !!newTheme.body?.key, `status=${newTheme.status}`);
+  const themeKey = newTheme.body?.key;
+
+  const unpubPick = await call("/appearance/me", {
+    method: "PUT", token: custToken, body: { themeKey },
+  });
+  check("customer cannot pick an unpublished theme", unpubPick.status === 403, `status=${unpubPick.status}`);
+
+  await call(`/appearance/themes/${themeKey}/publish`, { method: "POST", token: ownerToken, body: { published: true } });
+  const custPick = await call("/appearance/me", { method: "PUT", token: custToken, body: { themeKey } });
+  check("customer picks published theme", custPick.status === 200 && custPick.body?.themeKey === themeKey, `status=${custPick.status}`);
+
+  const resolved = await call("/appearance/me", { token: custToken });
+  check("resolved appearance returns theme + preset", resolved.status === 200 && !!resolved.body?.themeKey && !!resolved.body?.animationPreset);
+
+  const rbacSettings = await call("/appearance/settings", { method: "PATCH", token: custToken, body: { animationsEnabled: false } });
+  check("RBAC: customer cannot change global appearance settings", rbacSettings.status === 403, `status=${rbacSettings.status}`);
+
+  const rbacCreate = await call("/appearance/themes", { method: "POST", token: custToken, body: { name: "Nope", colors: { bg: "#000000", surface: "#111111", text: "#ffffff", border: "#222222" } } });
+  check("RBAC: customer cannot create themes", rbacCreate.status === 403, `status=${rbacCreate.status}`);
+
+  // Lock themes down — customer pick must now be forced back to default
+  await call("/appearance/settings", { method: "PATCH", token: ownerToken, body: { allowCustomerThemes: false } });
+  const locked = await call("/appearance/me", { token: custToken });
+  check("admin lock forces customer back to default theme", locked.status === 200 && locked.body?.themeKey !== themeKey, `resolved=${locked.body?.themeKey}`);
+  const lockedPick = await call("/appearance/me", { method: "PUT", token: custToken, body: { themeKey } });
+  check("customer pick rejected while themes locked", lockedPick.status === 403, `status=${lockedPick.status}`);
+  await call("/appearance/settings", { method: "PATCH", token: ownerToken, body: { allowCustomerThemes: true } });
+
+  const badImport = await call("/appearance/themes/import", { method: "POST", token: ownerToken, body: { payload: { name: "Evil", colors: { bg: "#000000", surface: "#111111", text: "#ffffff", border: "#222222", inject: "position:fixed" } } } });
+  check("invalid theme import rejected", badImport.status === 400, `status=${badImport.status}`);
+
+  const goodImport = await call("/appearance/themes/import", {
+    method: "POST", token: ownerToken,
+    body: { payload: JSON.stringify({ name: `Imported ${suffix2}`, mode: "dark", colors: { bg: "#04121f", surface: "#0a1f33", surfaceRaised: "#0f2b45", border: "#1d3d5c", text: "#dbeeff", textMuted: "#7fa3c0", primary: "#38bdf8", primaryText: "#04121f", secondary: "#0e7490" } }) },
+  });
+  check("valid theme import succeeds", goodImport.status === 201, `status=${goodImport.status}`);
+
+  const animPref = await call("/appearance/me", { method: "PUT", token: custToken, body: { reducedMotion: true } });
+  check("customer sets reduced motion", animPref.status === 200 && animPref.body?.reducedMotion === true);
+
+  const resetPrefs = await call("/appearance/me/reset", { method: "POST", token: custToken });
+  check("customer resets appearance preferences", resetPrefs.status === 200 || resetPrefs.status === 201, `status=${resetPrefs.status}`);
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => {

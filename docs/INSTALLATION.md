@@ -4,10 +4,39 @@
 
 | Component | Minimum |
 | --- | --- |
-| OS | Ubuntu 20.04+ / Debian 11+ |
+| OS | Ubuntu 20.04 / 22.04 / 24.04 / 26.04 LTS, Debian 11 / 12 |
 | RAM | 4 GB (control plane), 8 GB recommended with workers |
 | Disk | 10 GB free |
-| Software | Node.js 22+, MongoDB 6+, Redis 6+, nginx (installed automatically) |
+| Software | Node.js 22+, MongoDB (installed automatically), Redis 6+, nginx |
+
+## Tested OS → MongoDB compatibility matrix
+
+The installer selects the MongoDB series automatically from
+`installer/lib/mongo-compat.sh` and **refuses to construct a repository for an
+untested combination** (override with `MONGO_VERSION_OVERRIDE` at your own risk):
+
+| Operating system | Codename | MongoDB series |
+| --- | --- | --- |
+| Ubuntu 26.04 LTS | resolute | 9.0 |
+| Ubuntu 24.04 LTS | noble | 9.0 |
+| Ubuntu 22.04 LTS | jammy | 9.0 |
+| Ubuntu 20.04 LTS | focal | 8.0 |
+| Debian 12 | bookworm | 9.0 |
+| Debian 11 | bullseye | 7.0 |
+
+Architectures: x86_64 (amd64) and aarch64 (arm64).
+
+### MongoDB troubleshooting
+
+- **`Release file does not exist`** — the codename is not in the matrix above.
+  Upgrade the OS or use `MONGO_VERSION_OVERRIDE` consciously; the installer will
+  never guess.
+- **`Unit mongod.service does not exist`** — the package installation failed.
+  Check `dpkg -L mongodb-org-server`. Re-running the installer resumes safely.
+- **Existing MongoDB installation** — NIMBUS never upgrades or downgrades an
+  existing database automatically. Version mismatches are reported as warnings.
+- **Connection refused after start** — `journalctl -u mongod -n 50`; the
+  installer waits up to 20 s for a local `ping` before continuing.
 
 ## One-command install
 

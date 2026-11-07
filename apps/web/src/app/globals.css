@@ -3,42 +3,80 @@
 @tailwind utilities;
 
 /* ── NIMBUS Liquid Glass Design System ─────────────────────────
-   Black canvas, white light. Frosted surfaces stay restrained:
-   readable tables, terminals and forms are never over-blurred.  */
+   All colors are CSS variables (--nb-*) applied by the appearance
+   system. Defaults below are the Nimbus Dark theme; the admin
+   Theme Studio and per-user preferences override them at runtime.
+   Themes are strictly token maps — no arbitrary CSS is injected. */
 
 :root {
-  --glass: rgba(255, 255, 255, 0.055);
-  --glass-2: rgba(255, 255, 255, 0.035);
-  --glass-3: rgba(255, 255, 255, 0.09);
-  --line: rgba(255, 255, 255, 0.15);
-  --hi: rgba(255, 255, 255, 0.18);
-  --muted: #a3a3a3;
+  /* Nimbus Dark defaults */
+  --nb-bg: #000000;
+  --nb-surface: #141414;
+  --nb-surface-raised: #1c1c1c;
+  --nb-border: #262626;
+  --nb-border-strong: #3a3a3a;
+  --nb-text: #ffffff;
+  --nb-text-muted: #a3a3a3;
+  --nb-primary: #ffffff;
+  --nb-primary-rgb: 255, 255, 255;
+  --nb-primary-text: #000000;
+  --nb-secondary: #8b8b8b;
+  --nb-glass-bg: rgba(255, 255, 255, 0.055);
+  --nb-glass-2: rgba(255, 255, 255, 0.035);
+  --nb-glass-3: rgba(255, 255, 255, 0.09);
+  --nb-sidebar-bg: #141414;
+  --nb-sidebar-text: #ffffff;
+  --nb-navbar-bg: #141414;
+  --nb-input-bg: #1c1c1c;
+  --nb-input-border: #262626;
+  --nb-modal-bg: #1c1c1c;
+  --nb-status-online: #4ade80;
+  --nb-status-pending: #fbbf24;
+  --nb-status-error: #f87171;
+  --nb-chart-1: #ffffff;
+  --nb-chart-2: #8b8b8b;
+  --nb-chart-3: #a3a3a3;
+
+  /* Animation controls (set by the Animation Studio / user prefs) */
+  --nb-anim-speed: 1;
+  --nb-anim-intensity: 0.8;
+  --nb-dur-fast: calc(0.15s * var(--nb-anim-speed));
+  --nb-dur-base: calc(0.25s * var(--nb-anim-speed));
+  --nb-dur-slow: calc(0.4s * var(--nb-anim-speed));
+
   color-scheme: dark;
 }
 
+/* Light-mode theming — color-scheme flips native controls */
+html[data-color-mode="light"] { color-scheme: light; }
+
 html {
-  background: #000;
-  color: #fff;
+  background: var(--nb-bg);
+  color: var(--nb-text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 body {
   min-height: 100dvh;
+  background: var(--nb-bg);
+  color: var(--nb-text);
   font-feature-settings: "tnum" 1;
+  /* Prevent theme swaps from causing layout shift */
+  transition: background-color var(--nb-dur-base) ease, color var(--nb-dur-base) ease;
 }
 
 /* Solid-surface fallback for devices where backdrop-filter is costly */
 @media (prefers-reduced-transparency: reduce) {
-  .glass { background: #151515 !important; backdrop-filter: none !important; }
+  .glass, .glass-raised { background: var(--nb-surface) !important; backdrop-filter: none !important; }
 }
 
 @layer components {
   .glass {
-    background: var(--glass);
+    background: var(--nb-glass-bg);
     backdrop-filter: blur(14px) saturate(1.1);
     -webkit-backdrop-filter: blur(14px) saturate(1.1);
-    border: 1px solid var(--line);
+    border: 1px solid var(--nb-border);
     border-radius: 1rem;
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.08),
@@ -46,45 +84,65 @@ body {
   }
 
   .glass-soft {
-    background: var(--glass-2);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--nb-glass-2);
+    border: 1px solid var(--nb-border);
     border-radius: 0.9rem;
   }
 
   .glass-raised {
-    background: var(--glass-3);
+    background: var(--nb-glass-3);
     backdrop-filter: blur(18px) saturate(1.15);
     -webkit-backdrop-filter: blur(18px) saturate(1.15);
-    border: 1px solid var(--hi);
+    border: 1px solid var(--nb-border-strong);
     border-radius: 1.25rem;
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   }
 
   .btn {
     @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
-      transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40
+      transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40
       disabled:cursor-not-allowed disabled:opacity-40;
+    transition-duration: var(--nb-dur-fast);
   }
 
   .btn-primary {
-    @apply btn bg-white text-black hover:bg-white/90 active:scale-[0.98];
+    @apply btn;
+    background: var(--nb-primary);
+    color: var(--nb-primary-text);
   }
+  .btn-primary:hover:not(:disabled) { filter: brightness(0.92); }
+  .btn-primary:active:not(:disabled) { transform: scale(0.98); }
 
   .btn-ghost {
-    @apply btn border border-white/15 bg-white/5 text-white hover:bg-white/10 active:scale-[0.98];
+    @apply btn;
+    border: 1px solid var(--nb-border);
+    background: var(--nb-glass-2);
+    color: var(--nb-text);
   }
+  .btn-ghost:hover:not(:disabled) { background: var(--nb-glass-3); }
+  .btn-ghost:active:not(:disabled) { transform: scale(0.98); }
 
   .btn-danger {
-    @apply btn border border-red-400/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 active:scale-[0.98];
+    @apply btn;
+    border: 1px solid var(--nb-status-error);
+    background: color-mix(in srgb, var(--nb-status-error) 12%, transparent);
+    color: var(--nb-status-error);
   }
+  .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--nb-status-error) 20%, transparent); }
 
   .input {
-    @apply w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-sm text-white
-      placeholder:text-neutral-500 focus:border-white/35 focus:outline-none focus:ring-2 focus:ring-white/20;
+    @apply w-full rounded-xl px-3.5 py-2.5 text-sm
+      focus:outline-none focus:ring-2 focus:ring-white/20;
+    background: var(--nb-input-bg);
+    border: 1px solid var(--nb-input-border);
+    color: var(--nb-text);
   }
+  .input::placeholder { color: var(--nb-text-muted); }
+  .input:focus { border-color: var(--nb-border-strong); }
 
   .label {
-    @apply mb-1.5 block text-xs font-medium uppercase tracking-wider text-neutral-400;
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wider;
+    color: var(--nb-text-muted);
   }
 
   .tnum {
@@ -97,15 +155,15 @@ body {
 }
 
 /* Status states — subtle, never neon */
-.status-online { background: #4ade80; box-shadow: 0 0 8px rgba(74, 222, 128, 0.5); }
-.status-offline { background: #525252; }
+.status-online { background: var(--nb-status-online); box-shadow: 0 0 8px color-mix(in srgb, var(--nb-status-online) 50%, transparent); }
+.status-offline { background: var(--nb-border-strong); }
 .status-starting,
 .status-restarting,
-.status-updating { background: #fbbf24; animation: pulse-soft 1.6s ease-in-out infinite; }
-.status-stopping { background: #fbbf24; }
-.status-installing { background: #93c5fd; animation: pulse-soft 1.6s ease-in-out infinite; }
-.status-suspended { background: #f87171; }
-.status-error { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.5); }
+.status-updating { background: var(--nb-status-pending); animation: pulse-soft 1.6s ease-in-out infinite; }
+.status-stopping { background: var(--nb-status-pending); }
+.status-installing { background: var(--nb-chart-2); animation: pulse-soft 1.6s ease-in-out infinite; }
+.status-suspended { background: var(--nb-status-error); }
+.status-error { background: var(--nb-status-error); box-shadow: 0 0 8px color-mix(in srgb, var(--nb-status-error) 50%, transparent); }
 
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; }
@@ -117,9 +175,21 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.animate-rise { animation: rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-rise { animation: rise var(--nb-dur-slow) cubic-bezier(0.22, 1, 0.36, 1) both; }
 
-/* Reduced motion — honour the user's preference everywhere */
+/* ── Animation control switch (Animation Studio / user prefs) ──
+   html[data-animations="off"] removes non-essential motion while
+   keeping instant state changes; reduced motion resolves to "off". */
+html[data-animations="off"] *,
+html[data-animations="off"] *::before,
+html[data-animations="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* OS-level reduced motion always wins */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -132,13 +202,13 @@ body {
 html.low-bandwidth .glass,
 html.low-bandwidth .glass-raised {
   backdrop-filter: none !important;
-  background: #141414 !important;
+  background: var(--nb-surface) !important;
 }
 html.low-bandwidth .animate-rise { animation: none !important; }
 
 /* Scrollbars stay quiet */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: var(--nb-border-strong); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-::selection { background: rgba(255, 255, 255, 0.25); }
+::selection { background: color-mix(in srgb, var(--nb-primary) 25%, transparent); }

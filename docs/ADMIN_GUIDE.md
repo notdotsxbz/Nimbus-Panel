@@ -59,3 +59,29 @@ Settings; refresh tokens are encrypted at rest. Restores stage before replacing 
 sudo bash installer/upgrade.sh    # backs up first, never destroys data
 sudo bash installer/recovery.sh <archive> --confirm
 ```
+
+## Appearance — Theme & Animation Studio
+
+Admin → **Appearance**. All settings are stored in MongoDB and enforced
+server-side (RBAC: only owner/admin can change global appearance settings).
+
+- **Theme Studio** — 10 built-in themes (Nimbus Dark/Light, Pure Black/White,
+  Liquid Glass, Midnight Glass, Ocean Blue, Forest Green, Hacker Blue, Minimal
+  Gray). Create, duplicate, edit, rename, publish and delete custom themes with
+  the color editor and live preview. Only validated `#rrggbb` tokens are
+  accepted; unreadable text/background combinations are rejected.
+- **Set default / publish** — publishing exposes a theme to customers; the
+  default theme applies to everyone without a personal preference.
+- **Animation Studio** — global enable/disable, speed and intensity sliders,
+  five presets (Minimal, Smooth, Premium, Liquid Glass, Motion Rich) with a
+  live preview.
+- **Customer Appearance** — allow/disallow customer theme selection and
+  animation customization. When disabled, customers get the published default.
+- **Advanced** — export/import theme JSON (sanitized, size-bounded) and restore
+  the Nimbus Dark default.
+
+## Supported operating systems
+
+See the compatibility matrix in [INSTALLATION.md](INSTALLATION.md) — the
+installer validates the OS and refuses unsupported combinations **before**
+modifying the server.
