@@ -20,19 +20,21 @@ export default function AdminDashboard() {
     if (!user) return;
     void (async () => {
       try {
-        const [services, nodes] = await Promise.all([
+        const [services, nodesRaw] = await Promise.all([
           api.get<DashboardData["services"]>("/services/stats"),
-          api.get<{ items: { online: boolean; ramTotalMb: number }[] }>("/nodes"),
+          api.get<{ items?: { online: boolean; ramTotalMb: number }[] } | { online: boolean; ramTotalMb: number }[]>("/nodes"),
         ]);
         const usersRes = await api.get<{ total: number }>("/users");
-        const online = nodes.items.filter((n) => n.online).length;
+        // /nodes returns a plain array; tolerate both shapes defensively
+        const nodeList = Array.isArray(nodesRaw) ? nodesRaw : nodesRaw.items ?? [];
+        const online = nodeList.filter((n) => n.online).length;
         setData({
           users: usersRes.total,
           services,
           nodes: {
             online,
-            offline: nodes.items.length - online,
-            ramTotalMb: nodes.items.reduce((s, n) => s + (n.ramTotalMb ?? 0), 0),
+            offline: nodeList.length - online,
+            ramTotalMb: nodeList.reduce((s, n) => s + (n.ramTotalMb ?? 0), 0),
             ramAllocatedMb: 0,
           },
         });

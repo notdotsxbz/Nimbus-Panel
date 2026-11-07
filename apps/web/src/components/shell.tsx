@@ -28,8 +28,15 @@ export function Shell({
   useEffect(() => {
     const u = currentUser();
     if (!u) router.replace("/login");
-    else setUser(u);
-  }, [router]);
+    else {
+      setUser(u);
+      // Role-based route guard: customers never belong in the admin panel.
+      // (The API enforces this server-side too — this only fixes the UX.)
+      if (u.role === "customer" && pathname.startsWith("/admin")) {
+        router.replace("/dashboard");
+      }
+    }
+  }, [router, pathname]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
