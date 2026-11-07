@@ -19,6 +19,36 @@ die()  { printf '\033[1;31m[nimbus] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Run with sudo (the installer configures system services)."
 
+# ── 0. Interactive-terminal guard ────────────────────────────────
+# When launched as `curl … | sudo bash`, stdin is the PIPE containing the
+# script itself — every `read` would consume script text instead of user
+# input (producing bogus "Password too short" aborts or garbage credentials).
+# Re-exec from a downloaded file with prompts attached to the terminal.
+if [ ! -t 0 ]; then
+  if [ ! -e /dev/tty ]; then
+    die "No interactive terminal detected. Download the script and run it directly: sudo bash install.sh"
+  fi
+  command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 \
+    || die "Neither curl nor wget is available to fetch the installer."
+  TMP_INSTALLER=$(mktemp /tmp/nimbus-install-XXXXXX.sh)
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/installer/install.sh" -o "${TMP_INSTALLER}"
+  else
+    wget -qO "${TMP_INSTALLER}" "https://raw.githubusercontent.com/${REPO}/${BRANCH}/installer/install.sh"
+  fi
+  log "Re-launching installer from a file so prompts can read your terminal…"
+  exec bash "${TMP_INSTALLER}" </dev/tty
+fi
+
+# Prompts must NEVER read from piped stdin — always prefer the terminal.
+tty_read() {
+  if [ -t 0 ]; then
+    read "$@"
+  else
+    read "$@" </dev/tty
+  fi
+}
+
 # ── 1. System checks ─────────────────────────────────────────────
 if [ -r /etc/os-release ]; then
   . /etc/os-release
@@ -42,22 +72,36 @@ fi
 echo
 log "────────── NIMBUS Installation Wizard ──────────"
 read -rp "Panel domain or IP [panel.example.com]: " PANEL_DOMAIN
-PANEL_DOMAIN=${PANEL_DOMAIN:-panel.example.com}
+PANEL_DOMAIN=$(printf '%s' "${PANEL_DOMAIN:-panel.example.com}" | tr -d '\r')
 read -rp "Hosting domain for free subdomains [nimbushost.com]: " HOSTING_DOMAIN
-HOSTING_DOMAIN=${HOSTING_DOMAIN:-nimbushost.com}
+HOSTING_DOMAIN=$(printf '%s' "${HOSTING_DOMAIN:-nimbushost.com}" | tr -d '\r')
 read -rp "Administrator email [admin@gmail.com]: " ADMIN_EMAIL
-ADMIN_EMAIL=${ADMIN_EMAIL:-admin@gmail.com}
-read -rsp "Administrator password (min 8 chars, blank = bootstrap 'admin'): " ADMIN_PASSWORD
-echo
-read -rp "SSL via Let's Encrypt now? Requires the domain to point here [Y/n]: " SSL_CONFIRM
-SSL_CONFIRM=${SSL_CONFIRM:-Y}
+ADMIN_EMAIL=$(printf '%s' "${ADMIN_EMAIL:-admin@gmail.com}" | tr -d '\r')
 
-if [ -z "${ADMIN_PASSWORD}" ]; then
-  warn "Bootstrap credentials accepted: ${ADMIN_EMAIL} / admin"
-  warn "The administrator MUST change them on first login (enforced)."
-  ADMIN_PASSWORD="admin"
-fi
-[ ${#ADMIN_PASSWORD} -ge 8 ] || [ "${ADMIN_PASSWORD}" = "admin" ] || die "Password too short (min 8 chars)."
+# Password policy: min 8 chars, or the explicitly accepted bootstrap password.
+# Short input RE-PROMPTS instead of aborting the whole installation.
+while true; do
+  tty_read -rsp "Administrator password (min 8 chars, blank = bootstrap 'admin'): " ADMIN_PASSWORD || ADMIN_PASSWORD=""
+  echo
+  ADMIN_PASSWORD="${ADMIN_PASSWORD%$'\r'}"
+  if [ -z "${ADMIN_PASSWORD}" ]; then
+    warn "Bootstrap credentials accepted: ${ADMIN_EMAIL} / admin"
+    warn "The administrator MUST change them on first login (enforced by the panel)."
+    read -rp "Type CONFIRM to accept the bootstrap password: " BOOTSTRAP_CONFIRM
+    if [ "$(printf '%s' "${BOOTSTRAP_CONFIRM:-}" | tr -d '\r')" = "CONFIRM" ]; then
+      ADMIN_PASSWORD="admin"
+      break
+    fi
+    warn "Bootstrap not confirmed — enter a real password."
+    continue
+  fi
+  if [ "${#ADMIN_PASSWORD}" -ge 8 ]; then
+    break
+  fi
+  warn "Password too short (min 8 chars, ${#ADMIN_PASSWORD} entered) — please try again (Ctrl+C to abort)."
+done
+read -rp "SSL via Let's Encrypt now? Requires the domain to point here [Y/n]: " SSL_CONFIRM
+SSL_CONFIRM=$(printf '%s' "${SSL_CONFIRM:-Y}" | tr -d '\r')
 
 echo
 log "Installation plan:"
@@ -65,8 +109,8 @@ echo "  Panel domain : ${PANEL_DOMAIN}"
 echo "  Hosting domain: ${HOSTING_DOMAIN}"
 echo "  Admin email  : ${ADMIN_EMAIL}"
 echo "  SSL          : $([ "${SSL_CONFIRM}" = "Y" ] && echo "Let's Encrypt" || echo "manual/none")"
-read -rp "Proceed? [y/N]: " CONFIRM
-[ "${CONFIRM:-n}" = "y" ] || die "Aborted by user."
+tty_read -rp "Proceed? [y/N]: " CONFIRM || CONFIRM="n"
+[ "$(printf '%s' "${CONFIRM:-n}" | tr -d '\r')" = "y" ] || die "Aborted by user."
 
 # ── 3. Dependencies ──────────────────────────────────────────────
 log "Installing dependencies…"

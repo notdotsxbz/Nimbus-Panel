@@ -23,6 +23,12 @@ jobs:
       - name: Build shared (required before api/web typecheck, build and tests)
         run: npm run build --workspace @nimbus/shared
 
+      - name: Installer script syntax check (bash -n)
+        run: |
+          for f in installer/*.sh scripts/*.sh; do
+            bash -n "$f" && echo "syntax OK: $f"
+          done
+
       - name: Shared package tests (imports compiled dist)
         run: npm run test --workspace @nimbus/shared
 
