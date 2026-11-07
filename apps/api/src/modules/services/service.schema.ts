@@ -40,4 +40,6 @@ export class Service {
 export type ServiceDocument = HydratedDocument<Service>;
 export const ServiceSchema = SchemaFactory.createForClass(Service);
 ServiceSchema.index({ ownerId: 1, type: 1 });
-ServiceSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // index for expiration sweep jobs
+// NOTE: deliberately NOT a TTL index — expired services must be suspended and
+// kept for the admin (expireSweep), never silently deleted by MongoDB.
+ServiceSchema.index({ expiresAt: 1 });

@@ -9,7 +9,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import type { Request } from "express";
-import { Public } from "../../common/auth.decorators";
+import { Public } from "../../common/public.decorator";
 import { Roles } from "../../common/auth.decorators";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
 import { NodesService } from "./nodes.service";

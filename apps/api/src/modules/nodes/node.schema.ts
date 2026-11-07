@@ -18,7 +18,8 @@ export class Node {
   @Prop({ required: true }) diskTotalGb!: number;
   @Prop({ default: false }) online!: boolean;
   @Prop() lastHeartbeatAt?: Date;
-  @Prop() lastHeartbeat?: NodeHeartbeat;
+  // Interface-typed embedded document — mongoose needs the explicit raw type.
+  @Prop({ type: Object }) lastHeartbeat?: NodeHeartbeat;
   @Prop({ default: false }) maintenanceMode!: boolean;
   @Prop({ default: "active" }) status!: "enrolling" | "active" | "maintenance" | "retired";
   @Prop({ type: [String], default: [] }) tags!: string[];

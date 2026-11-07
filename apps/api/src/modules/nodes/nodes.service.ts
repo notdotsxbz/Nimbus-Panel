@@ -4,6 +4,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import { JwtService } from "@nestjs/jwt";
 import { Model } from "mongoose";
 import axios from "axios";
+import { Agent as HttpsAgent } from "node:https";
 import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
 import { Node, NodeDocument } from "./node.schema";
@@ -90,7 +91,9 @@ export class NodesService {
 
   /** Heartbeat authentication: agent token checked against stored hash. */
   async authenticateAgent(nodeId: string, token: string): Promise<NodeDocument> {
-    const node = await this.nodes.findById(nodeId);
+    if (!/^[a-f\d]{24}$/i.test(nodeId)) throw new NotFoundException("Unknown node");
+    // agentTokenHash is select:false — it must be explicitly included here.
+    const node = await this.nodes.findById(nodeId).select("+agentTokenHash");
     if (!node?.agentTokenHash) throw new NotFoundException("Unknown node");
     const expected = Buffer.from(node.agentTokenHash, "hex");
     const provided = Buffer.from(hashAgentToken(token), "hex");
@@ -176,7 +179,7 @@ export class NodesService {
       headers: { authorization: `Bearer ${token}` },
       timeout: 15_000,
       // Agents use self-signed certificates scoped to their own IP
-      httpsAgent: new (require("https").Agent)({ rejectUnauthorized: false }),
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
     });
     return res.data;
   }

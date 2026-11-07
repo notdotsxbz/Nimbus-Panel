@@ -20,10 +20,20 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
 func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
+
+// storedNodeID reads the persisted node id written next to the agent token.
+func storedNodeID() (string, error) {
+	raw, err := os.ReadFile("/etc/nimbus/node-id")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(raw)), nil
+}
 
 type Config struct {
 	APIURL          string
@@ -54,10 +64,18 @@ func main() {
 	}
 
 	if cfg.AgentToken == "" {
-		if err := enroll(cfg, client); err != nil {
+		// Survive restarts: load the credential issued at first enrollment.
+		if stored, err := os.ReadFile("/etc/nimbus/agent-token"); err == nil && len(stored) > 0 {
+			cfg.AgentToken = strings.TrimSpace(string(stored))
+			if claims, err := storedNodeID(); err == nil {
+				cfg.NodeID = claims
+			}
+			log.Printf("loaded existing agent credentials from /etc/nimbus/agent-token")
+		} else if err := enroll(cfg, client); err != nil {
 			log.Fatalf("enrollment failed: %v", err)
+		} else {
+			log.Printf("enrolled successfully; credentials stored")
 		}
-		log.Printf("enrolled successfully; credentials stored")
 	}
 
 	srv := NewAgentServer(cfg)
@@ -91,7 +109,11 @@ func enroll(cfg *Config, client *http.Client) error {
 	}
 	cfg.NodeID = claims.NodeID
 	cfg.AgentToken = out.AgentToken
-	return os.WriteFile("/etc/nimbus/agent-token", []byte(out.AgentToken), 0o600)
+	_ = os.MkdirAll("/etc/nimbus", 0o700)
+	if err := os.WriteFile("/etc/nimbus/agent-token", []byte(out.AgentToken), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile("/etc/nimbus/node-id", []byte(claims.NodeID), 0o600)
 }
 
 // heartbeatLoop reports live telemetry every 15 seconds.

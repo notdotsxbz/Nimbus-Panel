@@ -9,14 +9,14 @@
     "apps/*"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.9.0"
   },
   "scripts": {
     "dev:web": "npm run dev --workspace @nimbus/web",
     "dev:api": "npm run start:dev --workspace @nimbus/api",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace @nimbus/shared && npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspace @nimbus/shared && npm run typecheck --workspaces --if-present"
   }
 }

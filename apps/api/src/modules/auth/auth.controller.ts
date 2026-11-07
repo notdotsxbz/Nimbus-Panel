@@ -17,8 +17,7 @@ import { AuditService } from "../audit/audit.service";
 import { UsersService } from "../users/users.service";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
 import { Public } from "../../common/public.decorator";
-
-export const JWT_COOKIE = "nimbus_session";
+import { JWT_COOKIE } from "../../common/constants";
 
 @Controller("auth")
 export class AuthController {
@@ -110,7 +109,6 @@ export class AuthController {
       httpOnly: true,
       secure: env.nodeEnv === "production",
       sameSite: "lax" as const,
-      maxMs: undefined,
       path: "/",
     };
   }

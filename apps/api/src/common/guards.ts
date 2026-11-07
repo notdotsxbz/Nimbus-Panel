@@ -8,10 +8,11 @@ import {
 import { Reflector } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
 import type { Request } from "express";
-import { env } from "../../config/env";
-import type { AuthUser } from "../auth.decorators";
-import { ROLES_KEY } from "../auth.decorators";
-import { IS_PUBLIC_KEY } from "../public.decorator";
+import { env } from "../config/env";
+import type { AuthUser } from "./auth.decorators";
+import { ROLES_KEY } from "./auth.decorators";
+import { IS_PUBLIC_KEY } from "./public.decorator";
+import { JWT_COOKIE } from "./constants";
 import type { Role } from "@nimbus/shared";
 import { isStaff } from "@nimbus/shared";
 

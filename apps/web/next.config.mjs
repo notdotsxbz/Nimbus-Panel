@@ -3,6 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   output: "standalone",
+  transpilePackages: ["@nimbus/shared"],
   async headers() {
     return [
       {

@@ -14,17 +14,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 20.19
           cache: npm
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
       - name: Shared package tests
-        run: node --test tests/shared.test.mjs
+        run: npm run test --workspace @nimbus/shared
 
-      - name: Type check (shared)
-        run: npx tsc --noEmit -p tsconfig.base.json
+      - name: Build shared (required before api/web typecheck and build)
+        run: npm run build --workspace @nimbus/shared
 
       - name: Build web
         run: npm run build --workspace @nimbus/web
@@ -34,24 +34,72 @@ jobs:
       - name: Build api
         run: npm run build --workspace @nimbus/api
 
-      - name: Verify agent builds
-        uses: actions/setup-go@v5
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache-dependency-path: apps/node-agent/go.mod
-      - run: go vet ./...
+      - name: Vet node agent
+        run: go vet ./...
         working-directory: apps/node-agent
-      - run: go build ./...
+      - name: Build node agent (linux amd64 + arm64)
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o /tmp/nimbus-agent-amd64 .
+          GOOS=linux GOARCH=arm64 go build -o /tmp/nimbus-agent-arm64 .
         working-directory: apps/node-agent
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27017/nimbus-ci
+      JWT_SECRET: ci-only-secret-not-used-in-production-0123456789
+      AGENT_SHARED_SECRET: ci-only-agent-secret
+      API_PORT: 4100
+      SMOKE_BASE_URL: http://127.0.0.1:4100/api/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - name: Build shared + api
+        run: |
+          npm run build --workspace @nimbus/shared
+          npm run build --workspace @nimbus/api
+      - name: Boot API and run smoke tests
+        run: |
+          node apps/api/dist/main.js &
+          for i in $(seq 1 30); do
+            curl -fs http://127.0.0.1:4100/api/v1/auth/me >/dev/null 2>&1 && break || sleep 1
+          done
+          node tests/api-smoke.mjs
+          AGENT_SHARED_SECRET=ci-only-agent-secret node tests/agent-enrollment-smoke.mjs
 
   security:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: npm audit (high+)
-        run: npm audit --audit-level=high || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19
+          cache: npm
+      - name: npm audit (must be clean)
+        run: npm audit --audit-level=low
       - name: Secret scan
         run: |
           ! grep -rInE "(sk_live|AKIA[0-9A-Z]{16}|-----BEGIN (RSA )?PRIVATE KEY-----)" \
             --include="*.ts" --include="*.tsx" --include="*.go" --include="*.sh" \
-            apps packages services installer docs
+            apps packages services installer docs tests

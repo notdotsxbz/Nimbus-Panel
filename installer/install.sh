@@ -192,7 +192,7 @@ EOF
 ln -sf /etc/nginx/sites-available/nimbus /etc/nginx/sites-enabled/nimbus
 nginx -t && systemctl reload nginx
 
-if [ "${SSL_CONFIRM}" = "Y" ] && command -v certbot >/dev/null 2>&1 || [ "${SSL_CONFIRM}" = "Y" ]; then
+if [ "${SSL_CONFIRM}" = "Y" ]; then
   apt-get install -y -qq certbot python3-certbot-nginx >/dev/null 2>&1 || true
   certbot --nginx -d "${PANEL_DOMAIN}" --non-interactive --agree-tos \
     -m "${ADMIN_EMAIL}" --redirect || warn "Let's Encrypt failed — configure SSL manually (docs/INSTALLATION.md)."

@@ -1,17 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import type { ServiceStatus } from "@nimbus/shared";
 
 export function GlassCard({
   children,
   className = "",
   raised = false,
+  role,
 }: {
   children: React.ReactNode;
   className?: string;
   raised?: boolean;
+  role?: string;
 }) {
-  return <div className={`${raised ? "glass-raised" : "glass"} ${className}`}>{children}</div>;
+  return (
+    <div className={`${raised ? "glass-raised" : "glass"} ${className}`} role={role}>
+      {children}
+    </div>
+  );
 }
 
 export function Stat({

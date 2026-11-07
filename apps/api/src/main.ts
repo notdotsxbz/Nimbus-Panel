@@ -2,9 +2,10 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import { WsAdapter } from "@nestjs/platform-ws";
+import type { NextFunction, Request, Response } from "express";
 import { AppModule } from "./app.module";
 import { env, isProduction } from "./config/env";
-import { JWT_COOKIE } from "./modules/auth/auth.controller";
+import { JWT_COOKIE } from "./common/constants";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
@@ -21,14 +22,11 @@ async function bootstrap(): Promise<void> {
 
   if (isProduction) {
     // Secure headers (behind nginx/caddy TLS termination)
-    app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+    app.use((_req: Request, res: Response, next: NextFunction) => {
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("X-Frame-Options", "DENY");
       res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-      res.setHeader(
-        "Strict-Transport-Security",
-        "max-age=31536000; includeSubDomains",
-      );
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
       res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
       next();
     });

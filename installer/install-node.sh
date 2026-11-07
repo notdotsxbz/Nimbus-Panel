@@ -63,9 +63,7 @@ openssl req -x509 -newkey rsa:2048 -keyout /etc/nimbus/agent.key -out /etc/nimbu
   -days 825 -nodes -subj "/CN=nimbus-agent" 2>/dev/null
 chmod 600 /etc/nimbus/agent.key
 
-log "Enrolling with ${API_URL}…"
-NIMBUS_API_URL="${API_URL}" NIMBUS_ENROLLMENT_TOKEN="${TOKEN}" /usr/local/bin/nimbus-agent --api "${API_URL}" --token "${TOKEN}" --dry-run 2>/dev/null \
-  || true   # enrollment runs inside the service on first start
+log "Enrolling with ${API_URL} (performed by the agent service on first start)…"
 
 cat > /etc/systemd/system/nimbus-agent.service <<EOF
 [Unit]

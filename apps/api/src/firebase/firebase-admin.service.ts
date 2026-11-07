@@ -4,7 +4,7 @@ import { env } from "../config/env";
 /**
  * Firebase Admin SDK wrapper. Lazy-initialised so the API still boots
  * (local JWT auth works) when Firebase credentials are not yet configured —
- * the admin can configure Firebase later from Admin → Platform → Firebase.
+ * the admin can configure Firebase later from Admin → Settings.
  */
 @Injectable()
 export class FirebaseAdminService implements OnModuleInit {
@@ -22,10 +22,10 @@ export class FirebaseAdminService implements OnModuleInit {
       const json = JSON.parse(
         Buffer.from(env.firebaseCredentialsBase64, "base64").toString("utf8"),
       ) as { project_id?: string };
-      const admin = await import("firebase-admin/app");
-      const credential = await import("firebase-admin/credential");
-      this.app = admin.initializeApp(
-        { credential: credential.cert(json as never), projectId: json.project_id },
+      // `cert` and `initializeApp` are both exported from firebase-admin/app.
+      const appMod = await import("firebase-admin/app");
+      this.app = appMod.initializeApp(
+        { credential: appMod.cert(json as never), projectId: json.project_id },
         "nimbus-api",
       );
       this.logger.log(`Firebase Admin initialised for project ${json.project_id}`);
