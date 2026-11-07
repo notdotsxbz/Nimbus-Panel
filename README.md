@@ -90,4 +90,12 @@ before exposing the panel to the internet.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+`SPDX-License-Identifier: Apache-2.0`
+
+**License:** Apache License 2.0
+Copyright 2026 Shahbaz.
+
+This project is licensed under the Apache License, Version 2.0. You may obtain a
+copy of the License at: [https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0)
+
+The complete license text is in the [LICENSE](LICENSE) file at the repository root.
