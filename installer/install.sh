@@ -41,6 +41,7 @@ trap 'on_error $LINENO' ERR
 BOOTSTRAP_DIR="/tmp/nimbus-installer"
 REQUIRED_HELPERS=(
   "installer/lib/mongo-compat.sh"
+  "installer/lib/apt-repos.sh"
   "installer/lib/bootstrap.sh"
 )
 # NIMBUS_INSTALL_REF can pin an exact commit SHA; defaults to the branch.
@@ -50,19 +51,23 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || SELF_DIR="
 
 load_helper_libs() {
   # 1. Real script directory with helpers (repo checkout)
-  if [ -n "${SELF_DIR}" ] && [ -s "${SELF_DIR}/lib/mongo-compat.sh" ] && [ -s "${SELF_DIR}/lib/bootstrap.sh" ]; then
+  if [ -n "${SELF_DIR}" ] && [ -s "${SELF_DIR}/lib/mongo-compat.sh" ] && [ -s "${SELF_DIR}/lib/bootstrap.sh" ] && [ -s "${SELF_DIR}/lib/apt-repos.sh" ]; then
     # shellcheck disable=SC1091
     . "${SELF_DIR}/lib/bootstrap.sh"
     # shellcheck disable=SC1091
     . "${SELF_DIR}/lib/mongo-compat.sh"
+    # shellcheck disable=SC1091
+    . "${SELF_DIR}/lib/apt-repos.sh"
     return 0
   fi
   # 2. Bootstrap dir from this run or a previous one
-  if [ -s "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh" ]; then
+  if [ -s "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh" ]; then
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh"
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh"
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh"
     return 0
   fi
   # 3. Download from the official repository — every file verified
@@ -88,9 +93,12 @@ Installation stopped safely. No changes were made."
     # shellcheck disable=SC1090
     . "${first}"
     bootstrap_fetch_files "${RAW_BASE}" "${BOOTSTRAP_DIR}" \
-      "installer/lib/mongo-compat.sh" || die "Installer dependency download failed — see the message above."
+      "installer/lib/mongo-compat.sh" \
+      "installer/lib/apt-repos.sh" || die "Installer dependency download failed — see the message above."
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh"
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh"
     return 0
   fi
   die "installer/lib/mongo-compat.sh not found next to the installer and neither curl nor wget is available to fetch it."
@@ -187,6 +195,37 @@ fi
 
 # Allow an explicit override for environments outside the tested matrix.
 MONGO_VERSION_OVERRIDE="${MONGO_VERSION_OVERRIDE:-}"
+MONGO_SERIES="${MONGO_VERSION_OVERRIDE:-${MONGO_VERSION}}"
+
+# ── Installer lock (prevents simultaneous runs) ──────────────────
+if command -v flock >/dev/null 2>&1; then
+  exec 9>/run/lock/nimbus-install.lock
+  flock -n 9 || die "Another NIMBUS installer instance is already running (lock: /run/lock/nimbus-install.lock)."
+fi
+
+# ── Connectivity check ───────────────────────────────────────────
+NET_OK=0
+for i in 1 2 3; do
+  if curl -fsI --max-time 10 https://repo.mongodb.org/ >/dev/null 2>&1 \
+     || curl -fsI --max-time 10 http://archive.ubuntu.com/ubuntu/ >/dev/null 2>&1; then
+    NET_OK=1
+    break
+  fi
+  warn "Network check failed (attempt ${i}/3) — retrying in 5 s…"
+  sleep 5
+done
+[ "${NET_OK}" -eq 1 ] || die "No internet connectivity detected. The installer needs to download packages — check DNS/network and re-run."
+
+# ── Port availability check (advisory, never closes anything) ────
+if command -v ss >/dev/null 2>&1; then
+  BUSY_PORTS=$(ss -ltn 2>/dev/null | grep -oE ':(4000|3000)\b' | sort -u | tr -d ':' | tr '\n' ' ')
+  [ -n "${BUSY_PORTS}" ] && warn "TCP port(s) ${BUSY_PORTS} already in use — NIMBUS services may conflict (existing installation?)"
+fi
+
+# ── Existing installation detection ──────────────────────────────
+if [ -f "${INSTALL_DIR}/.env" ]; then
+  log "Existing NIMBUS installation detected — configuration (.env) and MongoDB data will be preserved."
+fi
 
 # ── 2. Installation wizard ───────────────────────────────────────
 step "Installation wizard"
@@ -233,10 +272,20 @@ echo "  SSL           : $([ "${SSL_CONFIRM}" = "Y" ] && echo "Let's Encrypt" || 
 tty_read -rp "Proceed? [y/N]: " CONFIRM || CONFIRM="n"
 [ "$(printf '%s' "${CONFIRM:-n}" | tr -d '\r')" = "y" ] || die "Aborted by user."
 
-# ── 3. Base dependencies ─────────────────────────────────────────
+# ── 3. MongoDB APT repository audit and repair ───────────────────
+# Runs BEFORE any apt-get update: a stale MongoDB repo (e.g. mongodb-org/7.0
+# left by an earlier run) makes apt-get update fail even when the selected
+# version is correct. Audits file CONTENTS (.list and deb822 .sources),
+# backs up and disables everything not matching the selected series.
+step "MongoDB APT repository audit and repair"
+log "Active MongoDB repositories before repair:"
+audit_mongo_repos | while IFS= read -r l; do echo "  ${l}"; done
+repair_mongo_repos "${MONGO_SERIES}" "${MONGO_CODENAME}"
+
+# ── 4. Base dependencies ─────────────────────────────────────────
 step "Base dependencies"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq || die "apt-get update failed — check network connectivity and repository health (manually run: apt-get update)."
+apt_update_validated || die "apt-get update failed — see the failing repository above. Nothing else was modified."
 apt-get install -y -qq ca-certificates curl gnupg git nginx >/dev/null
 
 # Node.js 22 (required by the API and web stacks)
@@ -252,10 +301,9 @@ if [ "${NEED_NODE}" -eq 1 ]; then
 fi
 command -v node >/dev/null 2>&1 || die "Node.js installation failed — see ${INSTALL_LOG}."
 
-# ── 4. MongoDB (OS-aware, validated, health-checked) ─────────────
+# ── 5. MongoDB (OS-aware, validated, health-checked) ─────────────
 step "MongoDB installation and health verification"
 
-MONGO_SERIES="${MONGO_VERSION_OVERRIDE:-${MONGO_VERSION}}"
 if [ -n "${MONGO_VERSION_OVERRIDE}" ]; then
   warn "Using explicit override: MongoDB ${MONGO_SERIES} (MONGO_VERSION_OVERRIDE) — unsupported combinations are your responsibility."
 fi
@@ -279,11 +327,15 @@ ensure_mongodb() {
     local repo_list="/etc/apt/sources.list.d/mongodb-org-${MONGO_SERIES}.list"
     echo "deb [ arch=${ARCH} signed-by=/etc/apt/keyrings/mongodb-server-${MONGO_SERIES}.gpg ] https://repo.mongodb.org/apt/${OS_ID} ${MONGO_CODENAME}/mongodb-org/${MONGO_SERIES} multiverse" \
       > "${repo_list}"
-    # Remove stale mongodb list files from earlier failed attempts (only ours)
-    find /etc/apt/sources.list.d -maxdepth 1 -name 'mongodb-org-*.list' ! -name "$(basename "${repo_list}")" -delete 2>/dev/null || true
+    chmod 0644 "${repo_list}"
+
+    # Repository consistency enforcement: the ONLY active MongoDB repo must
+    # be the selected series — any conflicting entries are removed to the
+    # backup directory (repair_mongo_repos also handles sources.list inline).
+    repair_mongo_repos "${MONGO_SERIES}" "${MONGO_CODENAME}"
 
     log "Refreshing APT package lists…"
-    apt-get update -qq || die "apt-get update failed after adding the MongoDB ${MONGO_SERIES} repository. This usually means the codename/architecture combination has no official packages. Check https://repo.mongodb.org/apt/${OS_ID}/dists/${MONGO_CODENAME}/mongodb-org/${MONGO_SERIES}/ exists."
+    apt_update_validated || die "apt-get update failed after adding the MongoDB ${MONGO_SERIES} repository. This usually means the codename/architecture combination has no official packages. Check https://repo.mongodb.org/apt/${OS_ID}/dists/${MONGO_CODENAME}/mongodb-org/${MONGO_SERIES}/ exists."
     apt-get install -y -qq mongodb-org || die "mongodb-org installation failed. Check APT output above; existing data was not touched."
   fi
 
