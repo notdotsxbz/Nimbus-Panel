@@ -2,154 +2,142 @@
 
 > **One Platform. Every Service. Every Device. Total Control.**
 
-NIMBUS is a professional multi-service hosting control platform with a premium
-**Liquid Glass + Minimalism** interface. It pairs a lightweight central Control
-Plane with secure remote Compute Nodes running a Go Node Agent. Administrators
-control the whole customer experience through the built-in **Theme & Animation
-Studio** (10 themes, live-preview editor, animation presets) — enforced
-server-side via the appearance API.
+NIMBUS is a hosting control panel for Minecraft, Discord bots, websites, backends,
+databases, Docker apps and more — with a clean, modern dashboard for **customers**
+and a powerful admin panel for **you**.
 
-📖 **Complete command reference:** [docs/COMMANDS.md](docs/COMMANDS.md)
-
-## Supported products
-
-Minecraft · Discord Bots · Websites · Backends · Node.js · Python · VPS · VDS ·
-MongoDB · Databases · Docker · Custom Applications — extensible through
-independent service modules.
-
-## Architecture
-
-```
-┌────────────────────────── CONTROL PLANE ──────────────────────────┐
-│  apps/web      Next.js UI (Admin + Customer dashboards, PWA)      │
-│  apps/api      NestJS REST API + WebSocket gateway                │
-│  MongoDB       Datastore (users, nodes, services, domains, …)     │
-│  Redis/BullMQ  Background jobs (backups, expirations, recovery)   │
-└──────────────────────────────┬────────────────────────────────────┘
-                               │  authenticated + encrypted
-┌──────────────────────────────▼────────────────────────────────────┐
-│  COMPUTE NODES (Ubuntu/Debian VPS)                                │
-│  apps/node-agent  Go agent — containers, lifecycle, ports,        │
-│                   console streaming, telemetry, backups           │
-└───────────────────────────────────────────────────────────────────┘
-```
-
-## Repository layout
-
-| Path              | Purpose                                          |
-| ----------------- | ------------------------------------------------ |
-| `apps/web`        | Next.js + Tailwind Liquid Glass frontend          |
-| `apps/api`        | NestJS REST API, auth (Firebase + local), RBAC    |
-| `apps/node-agent` | Go node agent for Ubuntu/Debian compute nodes     |
-| `packages/shared` | Shared TypeScript types, enums and contracts      |
-| `services/`       | Service module definitions (per product adapters) |
-| `installer/`      | One-command install / node enrollment / upgrade / backup / recovery |
-| `docs/`           | Installation, commands, admin, user, node, API, security… |
-| `docker/`         | Container build files for the control plane       |
-| `tests/`          | Live API + agent smoke suites                     |
-| `installer/tests/`| Installer suites (bootstrap, OS detection, APT repair) |
-| `.github/`        | CI + release workflows                            |
+📖 **Every command in detail:** [docs/COMMANDS.md](docs/COMMANDS.md)
 
 ---
 
-## ⚡ Production installation (Ubuntu 20.04/22.04/24.04/26.04 LTS, Debian 11/12)
+## 🚀 Installation — Step by Step
+
+### Step 1 — Check your server
+
+You need a **fresh Ubuntu or Debian server** (a small VPS is enough to start):
+
+| Requirement | Minimum | Recommended |
+| --- | --- | --- |
+| Operating system | Ubuntu 20.04 / 22.04 / 24.04 / 26.04 LTS or Debian 11 / 12 | Ubuntu 24.04 / 26.04 LTS |
+| CPU | 1 core | 2+ cores |
+| RAM | 2 GB | 4–8 GB |
+| Disk | 10 GB free | 20+ GB |
+| Access | Root SSH access | — |
+
+> 💡 Point your domain to the server IP **before** installing if you want a
+> free HTTPS certificate (for example `panel.yourdomain.com` → server IP).
+
+### Step 2 — Run the installer (one command)
+
+SSH into your server and run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install.sh | sudo bash
 ```
 
-The wizard asks for the panel domain, hosting domain, admin credentials
-(min 8 chars — short input re-prompts; bootstrap `admin@gmail.com` / `admin`
-only after typing `CONFIRM`) and SSL mode. The installer is **OS-aware**:
-it validates your release against the tested
-[compatibility matrix](docs/INSTALLATION.md), selects a compatible MongoDB
-series automatically (Ubuntu 26.04 → 9.0), **repairs stale MongoDB APT
-repositories** before updating packages, verifies every step (package →
-binary → `mongod.service` → connection ping), and prints an installation
-report. Re-running after a failure is safe — existing data is preserved.
+The installer does **everything** for you: checks your system, installs
+MongoDB, Node.js, Redis and nginx, builds the panel, sets up auto-start
+services, configures HTTPS, and verifies everything works.
 
-Pin a release for production: `sudo env NIMBUS_INSTALL_REF=<commit-sha> bash install.sh`
+### Step 3 — Answer the wizard
 
-## 🖥 Adding a compute node
+The installer asks a few simple questions:
+
+| Question | What to type | Example |
+| --- | --- | --- |
+| Panel domain or IP | The address you will open in your browser | `panel.yourdomain.com` |
+| Hosting domain | Domain for free customer subdomains | `yourdomain.com` |
+| Administrator email | Your login email | `you@yourdomain.com` |
+| Administrator password | At least **8 characters** (leave empty to use the temporary `admin` password — you must change it later) | `mySecret123` |
+| SSL certificate | `Y` if your domain already points to this server, otherwise `N` | `Y` |
+| Proceed? | Type `y` to start | `y` |
+
+⏱ The build takes a few minutes. When finished you get an installation report
+showing every service status.
+
+### Step 4 — Log in
+
+1. Open `https://panel.yourdomain.com` in your browser.
+2. Sign in with your email and password.
+3. If you used the temporary password (`admin@gmail.com` / `admin`), the panel
+   **forces** you to set a new one — do this first.
+
+### Step 5 — Add your first server (node)
+
+Customer services run on "nodes" — your game/application servers:
+
+1. In the admin panel go to **Nodes → Add Node** and fill in the node's IP,
+   SSH port, location and capacity.
+2. Copy the **enrollment token** shown after saving (valid for 30 minutes).
+3. On that node's terminal, run the command the panel shows you:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install-node.sh | sudo bash -s -- \
-  --api https://YOUR-PANEL-DOMAIN \
-  --token <ENROLLMENT_TOKEN>
+  --api https://panel.yourdomain.com \
+  --token <PASTE-YOUR-TOKEN-HERE>
 ```
 
-Tokens are single-use and expire in 30 minutes (Admin → Nodes → Add Node).
+4. The node appears **online** in Admin → Nodes within seconds. Now you can
+   assign services to it.
 
-## 🚀 Three-command deployment
+---
 
-| # | Purpose | Command |
-| --- | --- | --- |
-| 1 | **Fresh installation** — OS detection, MongoDB 9.0 selection + dedicated DB user, dependencies, build (with standalone assets), reverse proxy, SSL, systemd, health checks | `curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install.sh | sudo bash` |
-| 2 | **Upgrade** — DB + config backup, code update, rebuild, idempotent migrations, restart, health checks | `curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/upgrade.sh | sudo bash` |
-| 3 | **Diagnostics & safe repair** — checks every component (services, API, web, MongoDB, migrations, agents, proxy, SSL, disk, Docker exposure, .env perms), writes a report, restarts dead services with `--repair` | `curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash` (add `--repair` to auto-restart dead services) |
+## ⬆️ Upgrade — one command
 
-The installer creates a dedicated least-privilege MongoDB user (`nimbus_app`)
-with generated credentials, verifies the authenticated connection, and runs
-versioned database migrations on every boot (recorded in the `migrations`
-collection).
-
-## ⬆️ One-command upgrade (existing installs)
+Already installed? Upgrading is safe: it backs up your database first and
+never touches customer data or your `.env` secrets.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/upgrade.sh | sudo bash
 ```
 
-Backs up the database and configuration, updates the code, rebuilds both apps
-(including the standalone asset copy), restarts services and verifies health.
-Never touches `.env` secrets or customer data.
+## 🩺 Something not working? — one command
 
-## 🔧 Management commands
+Run the doctor: it checks every component (services, API, web, MongoDB,
+node agents, nginx, SSL, disk, security) and prints a full report. Add
+`--repair` to automatically restart services that have stopped:
 
 ```bash
-sudo bash /opt/nimbus/installer/upgrade.sh                        # backup → update → rebuild → restart
-sudo bash /opt/nimbus/installer/backup.sh                         # MongoDB dump + .env + sha256
-sudo bash /opt/nimbus/installer/recovery.sh <archive> --confirm   # verified restore
-sudo bash /opt/nimbus/installer/uninstall.sh                      # remove app, keep all data
-bash /opt/nimbus/scripts/health-check.sh                          # API/web/MongoDB/Redis status
+curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash -s -- --repair
 ```
 
-`uninstall.sh --purge-data` also deletes data and requires typing `DESTROY`.
-
-## 🧑‍💻 Development
+## 🔧 Everyday management commands
 
 ```bash
+sudo systemctl status nimbus-api          # is the API running?
+sudo systemctl status nimbus-web          # is the website running?
+sudo journalctl -u nimbus-api -n 100      # last 100 API log lines
+sudo bash /opt/nimbus/installer/backup.sh # back up the database now
+```
+
+More commands: [docs/COMMANDS.md](docs/COMMANDS.md) ·
+Troubleshooting help: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+
+---
+
+## 🎨 What's inside the panel
+
+| Area | Highlights |
+| --- | --- |
+| **Customer dashboard** | Services at a glance, one-tap start/stop/restart, live console, file manager, backups, support tickets, dark/light themes |
+| **Admin panel** | Users, roles, ban/delete, nodes (safe + owner force delete), services, allocations, domains, appearance studio, notifications, audit trail |
+| **Security** | Login rate limiting, hashed passwords, session revocation on role change/ban, MongoDB user isolation, audit logs |
+
+## 🧑‍💻 For developers
+
+```bash
+git clone https://github.com/notdotsxbz/Nimbus-Panel.git
+cd Nimbus-Panel
 npm install
-cp .env.example .env       # fill in real values; JWT_SECRET: openssl rand -hex 48
-npm run dev:api            # NestJS API on :4000
-npm run dev:web            # Next.js UI on :3000
-npm run build              # production builds (shared → api → web)
-npm run typecheck          # strict TypeScript checks
-npm run test               # unit tests
+cp .env.example .env    # fill in real values; JWT_SECRET: openssl rand -hex 48
+npm run dev:api         # API  → http://localhost:4000
+npm run dev:web         # UI   → http://localhost:3000
 ```
 
 Requirements: **Node.js ≥ 22**, MongoDB ≥ 6, Redis ≥ 6.
-Full guide: [docs/INSTALLATION.md](docs/INSTALLATION.md) ·
-Docker: `docker compose up -d --build` ·
-Tests: `bash installer/tests/syntax-check.sh && bash installer/tests/mongo-compat.sh && bash installer/tests/apt-repos.sh && bash installer/tests/bootstrap.sh && bash installer/tests/os-detect.sh`
-
-## 🎨 Appearance
-
-Admin → **Appearance**: Theme Studio (create/edit/publish/default, live
-preview), Animation Studio (presets, speed, intensity), customer permissions,
-import/export. Customers: Account → **Appearance** (theme, light/dark/system,
-reduced motion). All enforced server-side — see
-[docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) and [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
-
-## 🔐 Security
-
-- Firebase Authentication + server-side token validation, internal RBAC
-- bcrypt password hashing, JWT sessions, rate limiting, CSRF-safe cookies
-- Docker API never exposed publicly; customers never get host shell access
-- All infrastructure operations flow through authenticated node-agent calls
-- Secrets encrypted at rest; audit logs for every sensitive operation
-
-Read [docs/SECURITY.md](docs/SECURITY.md) and [SECURITY.md](SECURITY.md)
-before exposing the panel to the internet.
+Tests: `bash installer/tests/syntax-check.sh` (and the other suites in
+`installer/tests/`) · all guides in the [docs/](docs/) folder.
 
 ## 📚 Documentation
 
