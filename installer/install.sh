@@ -23,14 +23,17 @@ die()  { printf '\033[1;31m[nimbus] ERROR:\033[0m %s\n' "$*" >&2; printf '[nimbu
 step() { CURRENT_STEP="$1"; echo; log "── ${CURRENT_STEP}"; }
 
 on_error() {
-  local exit_code=$? line_no=${1:-?}
+  local exit_code=$? line_no=${1:-?} cmd=${2:-}
   printf '\033[1;31m[nimbus] ERROR:\033[0m installation failed in step "%s" (line %s, exit %s).\n' \
     "${CURRENT_STEP}" "${line_no}" "${exit_code}" >&2
+  # Record the exact failing command (no secrets: commands never embed
+  # credentials — secrets live in .env written via heredoc).
+  [ -n "${cmd}" ] && printf '\033[1;31m[nimbus] Failed command:\033[0m %s\n' "${cmd}" >&2
   printf '\033[1;33m[nimbus]\033[0m Existing data was preserved. Fix the issue and re-run the installer — steps are idempotent.\n' >&2
   printf '\033[1;33m[nimbus]\033[0m Full log: %s\n' "${INSTALL_LOG}" >&2
   exit "${exit_code}"
 }
-trap 'on_error $LINENO' ERR
+trap 'on_error $LINENO "$BASH_COMMAND"' ERR
 
 # ── Helper loading (bootstrap architecture) ──────────────────────
 # A piped script has no usable script directory, and a lone downloaded
@@ -42,32 +45,44 @@ BOOTSTRAP_DIR="/tmp/nimbus-installer"
 REQUIRED_HELPERS=(
   "installer/lib/mongo-compat.sh"
   "installer/lib/apt-repos.sh"
+  "installer/lib/os-detect.sh"
   "installer/lib/bootstrap.sh"
 )
 # NIMBUS_INSTALL_REF can pin an exact commit SHA; defaults to the branch.
 INSTALL_REF="${NIMBUS_INSTALL_REF:-${BRANCH}}"
 RAW_BASE="${NIMBUS_RAW_BASE:-https://raw.githubusercontent.com/${REPO}/${INSTALL_REF}}"
-SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || SELF_DIR=""
+# Safe script-path resolution — BASH_SOURCE is UNSET when bash executes a
+# script from stdin (curl | bash) and would abort under set -u. Fall back
+# to $0, then to "no script path" (stdin execution → bootstrap dir used).
+_SELF="${BASH_SOURCE[0]:-${0:-}}"
+SELF_DIR=""
+if [ -n "${_SELF}" ] && [ -f "${_SELF}" ]; then
+  SELF_DIR=$(cd "$(dirname "${_SELF}")" 2>/dev/null && pwd) || SELF_DIR=""
+fi
 
 load_helper_libs() {
-  # 1. Real script directory with helpers (repo checkout)
-  if [ -n "${SELF_DIR}" ] && [ -s "${SELF_DIR}/lib/mongo-compat.sh" ] && [ -s "${SELF_DIR}/lib/bootstrap.sh" ] && [ -s "${SELF_DIR}/lib/apt-repos.sh" ]; then
+  # 1. Real script directory with helpers (repo checkout / verified bundle)
+  if [ -n "${SELF_DIR}" ] && [ -s "${SELF_DIR}/lib/mongo-compat.sh" ] && [ -s "${SELF_DIR}/lib/bootstrap.sh" ] && [ -s "${SELF_DIR}/lib/apt-repos.sh" ] && [ -s "${SELF_DIR}/lib/os-detect.sh" ]; then
     # shellcheck disable=SC1091
     . "${SELF_DIR}/lib/bootstrap.sh"
     # shellcheck disable=SC1091
     . "${SELF_DIR}/lib/mongo-compat.sh"
     # shellcheck disable=SC1091
     . "${SELF_DIR}/lib/apt-repos.sh"
+    # shellcheck disable=SC1091
+    . "${SELF_DIR}/lib/os-detect.sh"
     return 0
   fi
   # 2. Bootstrap dir from this run or a previous one
-  if [ -s "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh" ]; then
+  if [ -s "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/os-detect.sh" ]; then
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh"
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh"
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh"
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/os-detect.sh"
     return 0
   fi
   # 3. Download from the official repository — every file verified
@@ -94,11 +109,14 @@ Installation stopped safely. No changes were made."
     . "${first}"
     bootstrap_fetch_files "${RAW_BASE}" "${BOOTSTRAP_DIR}" \
       "installer/lib/mongo-compat.sh" \
-      "installer/lib/apt-repos.sh" || die "Installer dependency download failed — see the message above."
+      "installer/lib/apt-repos.sh" \
+      "installer/lib/os-detect.sh" || die "Installer dependency download failed — see the message above."
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh"
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh"
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/os-detect.sh"
     return 0
   fi
   die "installer/lib/mongo-compat.sh not found next to the installer and neither curl nor wget is available to fetch it."
@@ -151,21 +169,11 @@ touch "${INSTALL_LOG}" && chmod 600 "${INSTALL_LOG}" || true
 
 # ── 1. System detection & supported-OS validation ────────────────
 step "System detection and OS support validation"
-OS_ID="" OS_VERSION_ID="" OS_CODENAME="" OS_PRETTY="unknown" ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
-if [ -r /etc/os-release ]; then
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  OS_ID="${ID:-}" OS_VERSION_ID="${VERSION_ID:-}" OS_CODENAME="${VERSION_CODENAME:-}" OS_PRETTY="${PRETTY_NAME:-unknown}"
-fi
-TOTAL_RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-CPU_CORES=$(nproc)
-DISK_GB=$(df -BG / | awk 'NR==2 {print int($4)}')
-PKG_MANAGER="apt"
-command -v apt-get >/dev/null 2>&1 || PKG_MANAGER="none"
-
+system_detect
 echo "  Operating system : ${OS_PRETTY}"
 echo "  OS id / version  : ${OS_ID} ${OS_VERSION_ID} (${OS_CODENAME:-no codename})"
 echo "  Architecture     : ${ARCH}"
+echo "  Kernel           : ${KERNEL:-unknown}"
 echo "  CPU cores        : ${CPU_CORES}"
 echo "  Available RAM    : ${TOTAL_RAM_MB} MB"
 echo "  Available disk   : ${DISK_GB} GB"
@@ -203,24 +211,12 @@ if command -v flock >/dev/null 2>&1; then
   flock -n 9 || die "Another NIMBUS installer instance is already running (lock: /run/lock/nimbus-install.lock)."
 fi
 
-# ── Connectivity check ───────────────────────────────────────────
-NET_OK=0
-for i in 1 2 3; do
-  if curl -fsI --max-time 10 https://repo.mongodb.org/ >/dev/null 2>&1 \
-     || curl -fsI --max-time 10 http://archive.ubuntu.com/ubuntu/ >/dev/null 2>&1; then
-    NET_OK=1
-    break
-  fi
-  warn "Network check failed (attempt ${i}/3) — retrying in 5 s…"
-  sleep 5
-done
-[ "${NET_OK}" -eq 1 ] || die "No internet connectivity detected. The installer needs to download packages — check DNS/network and re-run."
+# ── Connectivity check (bounded retries) ─────────────────────────
+check_connectivity 3 || die "No internet connectivity detected. The installer needs to download packages — check DNS/network and re-run."
 
 # ── Port availability check (advisory, never closes anything) ────
-if command -v ss >/dev/null 2>&1; then
-  BUSY_PORTS=$(ss -ltn 2>/dev/null | grep -oE ':(4000|3000)\b' | sort -u | tr -d ':' | tr '\n' ' ')
-  [ -n "${BUSY_PORTS}" ] && warn "TCP port(s) ${BUSY_PORTS} already in use — NIMBUS services may conflict (existing installation?)"
-fi
+BUSY_PORTS=$(detect_busy_ports "3000 4000")
+[ -n "${BUSY_PORTS}" ] && warn "TCP port(s) ${BUSY_PORTS} already in use — NIMBUS services may conflict (existing installation?)"
 
 # ── Existing installation detection ──────────────────────────────
 if [ -f "${INSTALL_DIR}/.env" ]; then

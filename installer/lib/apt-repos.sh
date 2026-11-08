@@ -30,8 +30,8 @@ mongo_repo_entries() {
       # Any host is matched (official repo AND mirrors) via the mongodb-org/<version> suite marker.
       while IFS= read -r line; do
         local ver codename
-        ver=$(printf '%s' "${line}" | grep -oE 'mongodb-org/[0-9]+(\.[0-9]+)?' | head -1 | cut -d/ -f2)
-        codename=$(printf '%s' "${line}" | grep -oE '(apt/(ubuntu|debian)|/dists/) [a-z]+/mongodb-org' | awk '{print $2}' | cut -d/ -f1)
+        ver=$(printf '%s' "${line}" | grep -oE 'mongodb-org/[0-9]+(\.[0-9]+)?' | head -1 | cut -d/ -f2 || true)
+        codename=$(printf '%s' "${line}" | grep -oE '(apt/(ubuntu|debian)|/dists/) [a-z]+/mongodb-org' | awk '{print $2}' | cut -d/ -f1 || true)
         [ -n "${ver}" ] && out+="${ver} ${codename:-unknown}"$'\n'
       done < <(grep -E '^[[:space:]]*deb[[:space:]].*mongodb-org/[0-9]' "${file}")
       ;;
@@ -39,8 +39,8 @@ mongo_repo_entries() {
       # deb822: Suites: resolute/mongodb-org/9.0
       if grep -qiE 'mongodb-org/[0-9]' "${file}"; then
         local ver codename
-        ver=$(grep -iE '^Suites:' "${file}" | grep -oE 'mongodb-org/[0-9]+(\.[0-9]+)?' | head -1 | cut -d/ -f2)
-        codename=$(grep -iE '^Suites:' "${file}" | head -1 | sed -E 's/^[^:]*:[[:space:]]*//' | cut -d/ -f1)
+        ver=$(grep -iE '^Suites:' "${file}" | grep -oE 'mongodb-org/[0-9]+(\.[0-9]+)?' | head -1 | cut -d/ -f2 || true)
+        codename=$(grep -iE '^Suites:' "${file}" | head -1 | sed -E 's/^[^:]*:[[:space:]]*//' | cut -d/ -f1 || true)
         [ -n "${ver}" ] && out+="${ver} ${codename:-unknown}"$'\n'
       fi
       ;;
@@ -156,7 +156,7 @@ apt_update_validated() {
     printf '[nimbus] ERROR: apt-get update failed.\n' >&2
     printf '%s\n' "${out}" | grep -E '^(E:|Err:)' | head -10 >&2 || true
     local failing
-    failing=$(printf '%s\n' "${out}" | grep -oE 'https?://[^ "]+|^https?://[^ "]+' | sort -u | head -5)
+    failing=$(printf '%s\n' "${out}" | grep -oE 'https?://[^ "]+|^https?://[^ "]+' | sort -u | head -5 || true)
     [ -n "${failing}" ] && printf 'Failing repository URL(s):\n%s\n' "${failing}" >&2
     printf 'Recovery: fix or remove the failing APT source (files in %s), then re-run the installer.\n' "${APT_SOURCES_DIR}/sources.list.d" >&2
     return 1
