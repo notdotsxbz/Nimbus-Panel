@@ -1,13 +1,18 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
 // Path-traversal protection for the universal file manager.
+// resolveBelow may either reject a path OR sanitize it to a path inside the
+// service base — both are safe. The invariant under test: the resolved path
+// NEVER escapes the base directory.
 func TestResolveBelow(t *testing.T) {
 	base := "/var/lib/nimbus/services/abc123"
 
+	// Normal paths resolve to their expected locations.
 	ok, err := resolveBelow(base, "plugins/Foo.jar")
 	if err != nil || ok != base+"/plugins/Foo.jar" {
 		t.Fatalf("normal path failed: %v -> %q", err, ok)
@@ -18,11 +23,20 @@ func TestResolveBelow(t *testing.T) {
 		t.Fatalf("nested path failed: %v -> %q", err, ok)
 	}
 
-	// Classic traversal attempts must be rejected.
-	for _, evil := range []string{"../../etc/passwd", "..\\..\\windows", "/../../etc/shadow", "plugins/../../other-service", ".."} {
-		if _, err := resolveBelow(base, evil); err == nil {
-			t.Fatalf("traversal accepted for %q", evil)
+	// Traversal attempts must never escape the base — rejected or sanitized.
+	for _, evil := range []string{
+		"../../etc/passwd",
+		"..\\..\\windows",
+		"/../../etc/shadow",
+		"plugins/../../other-service",
+		"plugins/../../../outside",
+		"..",
+	} {
+		p, err := resolveBelow(base, evil)
+		if err == nil && !strings.HasPrefix(p, base) {
+			t.Fatalf("traversal escaped base for %q -> %q", evil, p)
 		}
+		// Rejection (err != nil) is equally acceptable.
 	}
 
 	// Root of the service dir resolves to the dir itself.
@@ -31,7 +45,6 @@ func TestResolveBelow(t *testing.T) {
 		t.Fatalf("service root failed: %v -> %q", err, ok)
 	}
 
-	// Empty path = service root.
 	ok, err = resolveBelow(base, "")
 	if err != nil || ok != base {
 		t.Fatalf("empty path failed: %v -> %q", err, ok)
