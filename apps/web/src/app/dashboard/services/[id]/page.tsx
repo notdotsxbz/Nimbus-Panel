@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api, ApiError, currentUser } from "@/lib/api";
 import { CopyField, GlassCard, Modal, StatusBadge, Toast, useToast } from "@/components/glass";
+import { ConsoleV2 } from "@/components/console-v2";
+import { FileManager } from "@/components/file-manager";
 
 interface ServiceDetail {
   _id: string;
@@ -20,7 +22,7 @@ interface ServiceDetail {
   containerId?: string;
 }
 
-const TABS = ["Overview", "Console", "Files", "Backups", "Network", "Settings"] as const;
+const TABS = ["Overview", "Console", "Files", "Minecraft", "Backups", "Network", "Settings"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ServicePage() {
@@ -30,6 +32,9 @@ export default function ServicePage() {
   const [tab, setTab] = useState<Tab>("Overview");
   const [confirm, setConfirm] = useState<"reinstall" | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [mcCommand, setMcCommand] = useState<string | null>(null);
+  const [mcFile, setMcFile] = useState<string | null>(null);
   const { show, node } = useToast();
 
   const load = useCallback(async () => {
@@ -129,15 +134,120 @@ export default function ServicePage() {
         </div>
       )}
 
-      {tab === "Console" && <Console serviceId={service._id} status={service.status} />}
-
-      {tab === "Files" && (
-        <GlassCard className="p-10 text-center text-sm text-muted">
-          The file manager streams through the node agent (authenticated, per-service root only).
-          Browser upload/download endpoints are served by the agent at the node — this keeps
-          customer file traffic off the control plane.
-        </GlassCard>
+      {tab === "Console" && (
+        <ConsoleV2
+          serviceId={service._id}
+          type={service.type}
+          status={service.status}
+          fullscreen={fullscreen}
+          onToggleFullscreen={() => setFullscreen((f) => !f)}
+          initialCommand={mcCommand}
+          onInitialCommandSent={() => setMcCommand(null)}
+        />
       )}
+
+      {tab === "Files" && <FileManager serviceId={service._id} initialPath={mcFile ?? undefined} onPathConsumed={() => setMcFile(null)} />}
+
+      {tab === "Minecraft" && service.type === "minecraft" && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <GlassCard className="p-6">
+            <h2 className="font-semibold">Player & server commands</h2>
+            <p className="mt-1 text-xs text-muted">
+              One-tap server commands sent through the console. Advanced commands in the Console tab.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {["list", "whitelist list", "banlist players", "op list"].map((cmd) => (
+                <button
+                  key={cmd}
+                  className="btn-ghost !px-3 !py-1.5 text-xs"
+                  onClick={() => {
+                    setTab("Console");
+                    setMcCommand(cmd);
+                  }}
+                >
+                  {cmd}
+                </button>
+              ))}
+            </div>
+            <h3 className="mt-6 text-sm font-semibold">Whitelist a player</h3>
+            <form
+              className="mt-2 flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const name = String(new FormData(e.currentTarget).get("player") ?? "").trim();
+                if (name) {
+                  setMcCommand(`whitelist add ${name}`);
+                  setTab("Console");
+                }
+              }}
+            >
+              <input name="player" required className="input font-mono text-xs" placeholder="Steve" aria-label="Player name" />
+              <button className="btn-primary !px-4 text-xs" type="submit">Add</button>
+            </form>
+            <h3 className="mt-4 text-sm font-semibold">OP a player</h3>
+            <form
+              className="mt-2 flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const name = String(new FormData(e.currentTarget).get("player2") ?? "").trim();
+                if (name) {
+                  setMcCommand(`op ${name}`);
+                  setTab("Console");
+                }
+              }}
+            >
+              <input name="player2" required className="input font-mono text-xs" placeholder="Steve" aria-label="Player name to OP" />
+              <button className="btn-primary !px-4 text-xs" type="submit">OP</button>
+            </form>
+          </GlassCard>
+          <GlassCard className="p-6">
+            <h2 className="font-semibold">Server configuration</h2>
+            <p className="mt-1 text-xs text-muted">
+              Key files open in the built-in editor (Files tab):
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {["server.properties", "eula.txt"].map((f) => (
+                <button
+                  key={f}
+                  className="btn-ghost !px-3 !py-1.5 font-mono text-xs"
+                  onClick={() => {
+                    setMcFile(f);
+                    setTab("Files");
+                  }}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+            <h3 className="mt-6 text-sm font-semibold">World folders</h3>
+            <p className="mt-1 text-xs text-muted">
+              Browse, upload, download and back up worlds in the Files tab (world_nether,
+              world_the_end, or your custom world folders). Changing a seed requires generating a
+              NEW world — editing server.properties never regenerates an existing world.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {["world", "world_nether", "world_the_end", "plugins", "logs"].map((f) => (
+                <button
+                  key={f}
+                  className="btn-ghost !px-3 !py-1.5 font-mono text-xs"
+                  onClick={() => {
+                    setMcFile(f + "/");
+                    setTab("Files");
+                  }}
+                >
+                  {f}/
+                </button>
+              ))}
+            </div>
+            <p className="mt-4 text-[11px] leading-relaxed text-muted">
+              Plugin/mod installs: drop .jar files into plugins/ (Bukkit/Spigot/Paper) or mods/
+              (Fabric/Forge/NeoForge) via the Files tab — the server loads them on next restart.
+              Plugins and mods are different ecosystems; a Bukkit plugin never runs as a Fabric mod.
+            </p>
+          </GlassCard>
+        </div>
+      )}
+      {tab === "Minecraft" && service.type !== "minecraft" ? null : null}
 
       {tab === "Backups" && (
         <GlassCard className="p-6">
@@ -189,94 +299,5 @@ export default function ServicePage() {
 
       {node}
     </div>
-  );
-}
-
-/** Mobile-friendly console: WebSocket to the node stream, touch input,
- *  auto-scroll, copy and full-screen. Authorization is validated per message. */
-function Console({ serviceId, status }: { serviceId: string; status: string }) {
-  const [lines, setLines] = useState<string[]>([]);
-  const [command, setCommand] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-
-  useEffect(() => {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-    const wsUrl = `${apiBase.replace(/^http/, "ws")}/api/v1/services/${serviceId}/console`;
-    try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      ws.onopen = () => setConnected(true);
-      ws.onclose = () => setConnected(false);
-      ws.onmessage = (e) => setLines((prev) => [...prev.slice(-500), String(e.data)]);
-      return () => ws.close();
-    } catch {
-      return undefined;
-    }
-  }, [serviceId]);
-
-  useEffect(() => {
-    boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight });
-  }, [lines]);
-
-  const send = () => {
-    if (command.trim() && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "command", command }));
-      setCommand("");
-    }
-  };
-
-  return (
-    <GlassCard className={`flex flex-col overflow-hidden ${fullscreen ? "fixed inset-4 z-50" : ""}`}>
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2">
-        <div className="flex items-center gap-2 text-xs text-muted">
-          <span className={`status-dot ${connected ? "status-online" : "status-offline"}`} />
-          {connected ? "Stream connected" : "Stream offline"} · {status}
-        </div>
-        <div className="flex gap-2">
-          <button
-            className="btn-ghost !px-2.5 !py-1 text-xs"
-            onClick={() => void navigator.clipboard.writeText(lines.join("\n"))}
-          >
-            Copy log
-          </button>
-          <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => setFullscreen((f) => !f)}>
-            {fullscreen ? "Exit full screen" : "Full screen"}
-          </button>
-        </div>
-      </div>
-      <div
-        ref={boxRef}
-        className="h-80 overflow-y-auto bg-black/60 p-4 font-mono text-xs leading-relaxed"
-        aria-live="polite"
-        aria-label="Service console output"
-      >
-        {lines.length === 0 ? (
-          <p className="text-neutral-600">Console output appears here in real time…</p>
-        ) : (
-          lines.map((l, i) => (
-            <p key={i} className="whitespace-pre-wrap break-words text-neutral-200">{l}</p>
-          ))
-        )}
-      </div>
-      <form
-        className="flex gap-2 border-t border-white/10 p-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          send();
-        }}
-      >
-        <input
-          className="input font-mono text-xs"
-          placeholder="Type a command…"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          aria-label="Console command"
-        />
-        <button className="btn-primary !px-4 text-xs" type="submit">Send</button>
-      </form>
-    </GlassCard>
   );
 }

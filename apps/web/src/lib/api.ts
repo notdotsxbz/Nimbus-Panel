@@ -1,27 +1,53 @@
 /** Minimal typed API client. Session token lives in localStorage and is sent
- *  as a Bearer header; the API also sets an httpOnly cookie for same-site use. */
+ *  as a Bearer header; the API also sets an httpOnly cookie for same-site use.
+ *
+ *  Base URL resolution — the fix for production "Failed to fetch":
+ *   1. NEXT_PUBLIC_API_URL when provided (baked in at build time by the installer)
+ *   2. Same-origin ("/api/v1") otherwise — nginx proxies /api/ to the backend,
+ *      so the panel works on any domain without a rebuild. Never localhost. */
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const API = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "") + "/api/v1";
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
 
+function normalizeNetworkError(err: unknown): ApiError {
+  if (err instanceof ApiError) return err;
+  // fetch() rejects with TypeError "Failed to fetch" on DNS/TLS/mixed-content
+  // failures — surface a readable, actionable message instead.
+  return new ApiError(0, "Cannot reach the NIMBUS API server. Check your connection or try again shortly.");
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("nimbus.token") : null;
-  const res = await fetch(`${API}/api/v1${path}`, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...init.headers,
-    },
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, (body as { message?: string }).message ?? res.statusText);
-  return body as T;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": crypto.randomUUID(),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...init.headers,
+      },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new ApiError(res.status, (body as { message?: string }).message ?? res.statusText, (body as { code?: string }).code);
+    }
+    return body as T;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw normalizeNetworkError(err);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export const api = {
@@ -33,6 +59,17 @@ export const api = {
   patch: <T,>(path: string, data?: unknown) =>
     request<T>(path, { method: "PATCH", body: data ? JSON.stringify(data) : undefined }),
   del: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
+  /** Raw fetch for non-JSON operations (file upload/download) with auth. */
+  raw: (path: string, init: RequestInit = {}) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("nimbus.token") : null;
+    return fetch(`${API}${path}`, {
+      ...init,
+      headers: {
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...init.headers,
+      },
+    });
+  },
 };
 
 export interface SessionUser {

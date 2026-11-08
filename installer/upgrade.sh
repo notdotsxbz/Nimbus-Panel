@@ -16,13 +16,27 @@ mongodump --quiet --db nimbus --archive="${BACKUP_DIR}/nimbus-db-${STAMP}.archiv
   || die "mongodump failed — upgrade aborted, customer data untouched."
 cp "${INSTALL_DIR}/.env" "${BACKUP_DIR}/env-${STAMP}.bak"
 
+# PANEL_DOMAIN from .env — needed to bake NEXT_PUBLIC_API_URL into the build
+PANEL_DOMAIN=""
+if [ -f "${INSTALL_DIR}/.env" ]; then
+  PANEL_DOMAIN=$(grep -E '^PANEL_DOMAIN=' "${INSTALL_DIR}/.env" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+fi
+
 log "Upgrading application code…"
 cd "${INSTALL_DIR}"
 git fetch --depth 1 origin main
 git reset --hard origin/main
 npm install --no-audit --no-fund >/dev/null
 npm run build --workspace @nimbus/api >/dev/null
-npm run build --workspace @nimbus/web >/dev/null
+NEXT_PUBLIC_API_URL="https://${PANEL_DOMAIN:-}" npm run build --workspace @nimbus/web >/dev/null
+
+# Standalone output needs static assets + public copied next to server.js
+WEB_DIR="${INSTALL_DIR}/apps/web"
+STANDALONE="${WEB_DIR}/.next/standalone/apps/web"
+mkdir -p "${STANDALONE}/.next/static" "${STANDALONE}/public"
+cp -a "${WEB_DIR}/.next/static/." "${STANDALONE}/.next/static/"
+cp -a "${WEB_DIR}/public/." "${STANDALONE}/public/"
+chown -R nimbus:nimbus "${WEB_DIR}/.next" 2>/dev/null || true
 chown -R nimbus:nimbus "${INSTALL_DIR}" 2>/dev/null || true
 
 log "Restarting services…"

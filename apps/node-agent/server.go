@@ -28,6 +28,9 @@ func NewAgentServer(cfg *Config) *AgentServer {
 	s.mux = http.NewServeMux()
 	s.mux.Handle("/services/", s.auth(http.HandlerFunc(s.handleService)))
 	s.mux.Handle("/backups/", s.auth(http.HandlerFunc(s.handleBackup)))
+	s.mux.Handle("/files/", s.auth(http.HandlerFunc(handleFiles(s))))
+	s.mux.Handle("/logs/", s.auth(http.HandlerFunc(handleLogs(s))))
+	s.mux.Handle("/exec/", s.auth(http.HandlerFunc(handleExec(s))))
 	return s
 }
 

@@ -70,6 +70,8 @@ jobs:
           cache-dependency-path: apps/node-agent/go.mod
       - name: Vet node agent
         run: go vet ./...
+      - name: Test node agent (path-traversal protection)
+        run: go test ./...
         working-directory: apps/node-agent
       - name: Build node agent (linux amd64 + arm64)
         run: |

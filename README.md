@@ -80,6 +80,16 @@ curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/instal
 
 Tokens are single-use and expire in 30 minutes (Admin → Nodes → Add Node).
 
+## ⬆️ One-command upgrade (existing installs)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/upgrade.sh | sudo bash
+```
+
+Backs up the database and configuration, updates the code, rebuilds both apps
+(including the standalone asset copy), restarts services and verifies health.
+Never touches `.env` secrets or customer data.
+
 ## 🔧 Management commands
 
 ```bash

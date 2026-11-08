@@ -321,6 +321,21 @@ async function call(path, { method = "GET", token, body } = {}) {
   const heartbeatGone = await fetch(`${BASE}/nodes/agent/heartbeat`, { method: "PUT", headers: { "content-type": "application/json", "x-nimbus-node": n2id, authorization: "Bearer deadbeef" }, body: "{}" });
   check("deleted node rejects agent heartbeats", heartbeatGone.status === 404, `status=${heartbeatGone.status}`);
 
+  // ── Console & file manager permissions ────────────────────────
+  const svcRow = await call("/services", { token: ownerToken });
+  const svcId = (Array.isArray(svcRow.body ?? svcRow) ? (svcRow.body ?? svcRow) : []).find?.((s) => s.name === "smoke-svc-" + suffix)?._id
+    ?? (Array.isArray(svcRow) ? svcRow : svcRow.items ?? []).find((s) => s.name === "smoke-svc-" + suffix)?._id;
+  if (svcId) {
+    const xlogs = await call(`/services/${svcId}/console/logs`, { token: custToken });
+    check("customer cannot read another customer's console logs", xlogs.status === 403, `status=${xlogs.status}`);
+    const xfiles = await call(`/services/${svcId}/files?path=/`, { token: custToken });
+    check("customer cannot browse another customer's files", xfiles.status === 403, `status=${xfiles.status}`);
+    const ownLogs = await call(`/services/${svcId}/console/logs`, { token: ownerToken });
+    check("owner console reaches agent path (fails on unreachable agent, not permissions)", ownLogs.status !== 403, `status=${ownLogs.status}`);
+  } else {
+    console.log("  (skipping console/files permission checks — service id not found)");
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => {

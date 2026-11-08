@@ -15,6 +15,7 @@ import { BackupsModule } from "./modules/backups/backups.module";
 import { AuditModule } from "./modules/audit/audit.module";
 import { AppearanceModule } from "./modules/appearance/appearance.module";
 import { TicketsModule } from "./modules/tickets/tickets.module";
+import { ConsoleFilesModule } from "./modules/console-files/console-files.module";
 import { FirebaseAdminService } from "./firebase/firebase-admin.service";
 
 @Module({
@@ -37,6 +38,7 @@ import { FirebaseAdminService } from "./firebase/firebase-admin.service";
     AuditModule,
     AppearanceModule,
     TicketsModule,
+    ConsoleFilesModule,
   ],
   providers: [
     FirebaseAdminService,
