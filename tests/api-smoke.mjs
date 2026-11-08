@@ -279,6 +279,48 @@ async function call(path, { method = "GET", token, body } = {}) {
   const delLogin = await call("/auth/login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
   check("deleted user cannot log in", delLogin.status === 401, `status=${delLogin.status}`);
 
+  // ── Node management & deletion ─────────────────────────────────
+  const n2 = await call("/nodes", { method: "POST", token: ownerToken, body: { name: "smoke-node-del-" + suffix, ip: "192.0.2.200", sshPort: 22, sshUsername: "root", os: "ubuntu", location: "test", cpuCores: 2, ramTotalMb: 4096, diskTotalGb: 50 } });
+  check("node created for deletion tests", n2.status === 201 && !!n2.body?.node?._id, `status=${n2.status}`);
+  const n2id = n2.body?.node?._id;
+
+  // Enroll the node (real flow) so it becomes active/online for workload tests
+  const n2claims = JSON.parse(Buffer.from(n2.body.enrollmentToken.split(".")[1], "base64url").toString("utf8"));
+  const n2enroll = await call("/nodes/agent/enroll", { method: "POST", body: { nodeId: n2id, jti: n2claims.jti } });
+  check("test node enrolled (active/online)", n2enroll.status === 201 && !!n2enroll.body?.agentToken);
+
+  const upd = await call(`/nodes/${n2id}`, { method: "PATCH", token: ownerToken, body: { location: "test-updated", ramTotalMb: 8192 } });
+  check("node edit (metadata/capacity)", upd.status === 200 && upd.body?.ramTotalMb === 8192);
+
+  const health = await call(`/nodes/${n2id}/refresh-health`, { method: "POST", token: ownerToken });
+  check("refresh health returns staleness info", (health.status === 200 || health.status === 201) && typeof health.body?.heartbeatAgeSeconds !== "undefined");
+
+  // workload blocking: place a service on the node (agent unreachable — error state, still references the node)
+  const svc = await call("/services", { method: "POST", token: ownerToken, body: { name: "smoke-svc-" + suffix, type: "docker", ownerId: adminMe.body?.id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" } });
+  check("workload created on node (agent offline, error state)", svc.status === 201, `status=${svc.status}`);
+
+  const safeBlocked = await call(`/nodes/${n2id}`, { method: "DELETE", token: ownerToken, body: { mode: "safe" } });
+  check("Safe Delete blocked with active workloads", safeBlocked.status === 400, `status=${safeBlocked.status}`);
+
+  const forceAsAdmin = await call(`/nodes/${n2id}`, { method: "DELETE", token: custToken, body: { mode: "force", confirmName: "x", password: "x" } });
+  check("Force Delete forbidden for non-owner", forceAsAdmin.status === 403, `status=${forceAsAdmin.status}`);
+
+  const forceWrongName = await call(`/nodes/${n2id}`, { method: "DELETE", token: ownerToken, body: { mode: "force", confirmName: "wrong-name", password: "admin" } });
+  check("Force Delete requires exact node name", forceWrongName.status === 400, `status=${forceWrongName.status}`);
+
+  const forceBadPass = await call(`/nodes/${n2id}`, { method: "DELETE", token: ownerToken, body: { mode: "force", confirmName: "smoke-node-del-" + suffix, password: "wrong-password" } });
+  check("Force Delete requires valid re-authentication", forceBadPass.status === 403, `status=${forceBadPass.status}`);
+
+  const force = await call(`/nodes/${n2id}`, { method: "DELETE", token: ownerToken, body: { mode: "force", confirmName: "smoke-node-del-" + suffix, password: "admin" } });
+  check("Owner Force Delete succeeds", force.status === 200 || force.status === 201, `status=${force.status}`);
+  check("force delete marks orphaned workloads suspended", Array.isArray(force.body?.affectedWorkloads) && force.body.affectedWorkloads.some((n) => n === "smoke-svc-" + suffix));
+
+  const svcAfter = await call(`/services/${svc.body?._id}`, { token: ownerToken });
+  check("orphaned workload suspended, not deleted (data preserved)", svcAfter.status === 200 && svcAfter.body?.status === "suspended");
+
+  const heartbeatGone = await fetch(`${BASE}/nodes/agent/heartbeat`, { method: "PUT", headers: { "content-type": "application/json", "x-nimbus-node": n2id, authorization: "Bearer deadbeef" }, body: "{}" });
+  check("deleted node rejects agent heartbeats", heartbeatGone.status === 404, `status=${heartbeatGone.status}`);
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => {

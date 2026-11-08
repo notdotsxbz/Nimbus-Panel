@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { MongooseModule } from "@nestjs/mongoose";
 import { AuditModule } from "../audit/audit.module";
 import { Node, NodeSchema } from "./node.schema";
+import { Allocation, AllocationSchema } from "../allocations/allocation.schema";
 import { Service, ServiceSchema } from "../services/service.schema";
 import { NodesController } from "./nodes.controller";
 import { NodesService } from "./nodes.service";
@@ -11,6 +12,7 @@ import { NodesService } from "./nodes.service";
     MongooseModule.forFeature([
       { name: Node.name, schema: NodeSchema },
       { name: Service.name, schema: ServiceSchema },
+      { name: Allocation.name, schema: AllocationSchema },
     ]),
     AuditModule,
   ],

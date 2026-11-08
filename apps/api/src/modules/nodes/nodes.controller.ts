@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Req,
@@ -34,6 +36,57 @@ export class NodesController {
   @Roles("owner", "admin")
   create(@Body() dto: Parameters<NodesService["create"]>[0], @CurrentUser() actor: AuthUser) {
     return this.nodes.create(dto, actor.id);
+  }
+
+  /** Edit node metadata/capacity. */
+  @Patch(":id")
+  @Roles("owner", "admin")
+  update(
+    @Param("id") id: string,
+    @Body() dto: Parameters<NodesService["updateNode"]>[1],
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.nodes.updateNode(id, dto, actor.id);
+  }
+
+  /** Cached heartbeat + staleness; marks the node offline when stale. */
+  @Post(":id/refresh-health")
+  @Roles("owner", "admin", "staff")
+  refreshHealth(@Param("id") id: string) {
+    return this.nodes.refreshHealth(id);
+  }
+
+  @Get(":id/workloads")
+  @Roles("owner", "admin", "staff")
+  workloads(@Param("id") id: string) {
+    return this.nodes.workloads(id);
+  }
+
+  @Get(":id/allocations")
+  @Roles("owner", "admin", "staff")
+  allocations(@Param("id") id: string) {
+    return this.nodes.listAllocations(id);
+  }
+
+  /** Revoke the agent credential; node returns to enrolling with a new token. */
+  @Post(":id/revoke-credentials")
+  @Roles("owner", "admin")
+  revokeCredentials(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
+    return this.nodes.revokeCredentials(id, actor.id);
+  }
+
+  /**
+   * Delete Node — mode: "safe" (empty nodes only) or "force"
+   * (owner-only, re-authentication + exact node name).
+   */
+  @Delete(":id")
+  @Roles("owner", "admin")
+  remove(
+    @Param("id") id: string,
+    @CurrentUser() actor: AuthUser,
+    @Body() dto: { mode?: "safe" | "force"; confirmName?: string; password?: string },
+  ) {
+    return this.nodes.removeNode(id, dto.mode === "force" ? "force" : "safe", actor, dto.confirmName, dto.password);
   }
 
   @Post(":id/maintenance")

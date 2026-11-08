@@ -27,6 +27,22 @@ export interface CreateServiceDto {
 
 @Injectable()
 export class ServicesService {
+  /**
+   * Backward-compatible migration: earlier builds stored nodeId/ownerId as
+   * BSON Strings (Mongoose does not infer ObjectId from reflected metadata).
+   * Converts String-stored references to real ObjectIds — idempotent.
+   */
+  private normalizeObjectIds(): void {
+    const pipeline = [{ $set: { nodeId: { $toObjectId: "$nodeId" }, ownerId: { $toObjectId: "$ownerId" } } }];
+    this.services
+      .updateMany({ nodeId: { $type: "string" } }, pipeline)
+      .catch((err) => console.error("[migration] services nodeId/ownerId normalization failed:", err.message));
+  }
+
+  async onModuleInit(): Promise<void> {
+    this.normalizeObjectIds();
+  }
+
   constructor(
     @InjectModel(Service.name) private readonly services: Model<ServiceDocument>,
     private readonly nodes: NodesService,
@@ -60,6 +76,8 @@ export class ServicesService {
 
     const service = await this.services.create({
       ...dto,
+      ownerId: new Types.ObjectId(dto.ownerId),
+      nodeId: new Types.ObjectId(dto.nodeId),
       startupCommand: dto.startupCommand ?? [],
       status: "installing" as ServiceStatus,
       subscriptionStatus: "active",

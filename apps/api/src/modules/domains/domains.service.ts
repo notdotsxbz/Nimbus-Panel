@@ -28,8 +28,8 @@ export class DomainsService {
     return this.domains.create({
       hostname,
       scope: "hosting",
-      ownerId,
-      serviceId,
+      ownerId: new Types.ObjectId(ownerId),
+      serviceId: new Types.ObjectId(serviceId),
       source: "nimbus-subdomain",
       verification: "verified",
       ssl: { status: "pending" },
@@ -51,7 +51,7 @@ export class DomainsService {
     const domain = await this.domains.create({
       hostname: clean,
       scope: "hosting",
-      ownerId,
+      ownerId: new Types.ObjectId(ownerId),
       source: "custom",
       verification: "pending",
       verificationToken: token,

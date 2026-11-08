@@ -1,14 +1,16 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { JwtService } from "@nestjs/jwt";
-import { Model } from "mongoose";
+import { Model, Types } from "mongoose";
+import * as bcrypt from "bcryptjs";
 import axios from "axios";
 import { Agent as HttpsAgent } from "node:https";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
 import { Node, NodeDocument } from "./node.schema";
 import { Service, ServiceDocument } from "../services/service.schema";
+import { Allocation, AllocationDocument } from "../allocations/allocation.schema";
 
 /** Per-node credential issued at enrollment — hashed, never stored raw. */
 export const hashAgentToken = (token: string) =>
@@ -31,6 +33,7 @@ export class NodesService {
   constructor(
     @InjectModel(Node.name) private readonly nodes: Model<NodeDocument>,
     @InjectModel(Service.name) private readonly services: Model<ServiceDocument>,
+    @InjectModel(Allocation.name) private readonly allocations: Model<AllocationDocument>,
     private readonly jwt: JwtService,
     private readonly audit: AuditService,
   ) {}
@@ -43,6 +46,147 @@ export class NodesService {
     const node = await this.nodes.findById(id);
     if (!node) throw new NotFoundException("Node not found");
     return node;
+  }
+
+  /** Admin edit of node metadata/capacity. Registration identity is immutable. */
+  async updateNode(id: string, dto: Partial<NodeDto>, actorId: string) {
+    const node = await this.get(id);
+    const editable = ["name", "ip", "sshPort", "sshUsername", "os", "location", "cpuCores", "ramTotalMb", "diskTotalGb"] as const;
+    for (const key of editable) {
+      if (dto[key] !== undefined) (node as unknown as Record<string, unknown>)[key] = dto[key];
+    }
+    if (dto.ip && dto.ip !== node.ip) node.agentUrl = `https://${dto.ip}:7443`;
+    await node.save();
+    await this.audit.log({ actorId, action: "nodes.update", targetType: "node", targetId: id, sensitive: true });
+    return node;
+  }
+
+  /**
+   * Refresh Health: returns the cached heartbeat plus staleness. Heartbeats
+   * are pushed by the agent every 15 s; if none arrived within 60 s the node
+   * is marked offline. Never fabricates telemetry.
+   */
+  async refreshHealth(id: string) {
+    const node = await this.get(id);
+    const staleMs = node.lastHeartbeatAt ? Date.now() - node.lastHeartbeatAt.getTime() : Infinity;
+    if (staleMs > 60_000 && node.online) {
+      node.online = false;
+      await node.save();
+    }
+    return {
+      nodeId: id,
+      online: node.online,
+      maintenanceMode: node.maintenanceMode,
+      lastHeartbeat: node.lastHeartbeat ?? null,
+      lastHeartbeatAt: node.lastHeartbeatAt ?? null,
+      heartbeatAgeSeconds: Number.isFinite(staleMs) ? Math.round(staleMs / 1000) : null,
+      note: Number.isFinite(staleMs) && staleMs > 60_000
+        ? "Heartbeat is stale — the agent may be down or unreachable."
+        : "Heartbeat is fresh.",
+    };
+  }
+
+  /** Services (workloads) placed on this node. */
+  async workloads(id: string) {
+    await this.get(id);
+    return this.services.find({ nodeId: new Types.ObjectId(id) }, "name type status cpuPercent ramMb diskGb expiresAt");
+  }
+
+  /** Port/IP allocations belonging to this node. */
+  async listAllocations(id: string) {
+    await this.get(id);
+    return this.allocations.find({ nodeId: new Types.ObjectId(id) }).populate("serviceId", "name type");
+  }
+
+  /**
+   * Revoke Credentials: clears the node's agent credential and returns to
+   * enrolling state with a fresh single-use enrollment token. The running
+   * agent loses API access immediately (its token no longer validates).
+   */
+  async revokeCredentials(id: string, actorId: string) {
+    const node = await this.get(id);
+    node.agentTokenHash = undefined;
+    node.status = "enrolling";
+    node.online = false;
+    await node.save();
+    const enrollmentToken = await this.issueEnrollmentToken(node);
+    await this.audit.log({
+      actorId, action: "nodes.credentials.revoke", targetType: "node", targetId: id, sensitive: true,
+    });
+    return { revoked: true, enrollmentToken, note: "The running agent is locked out until it re-enrolls with the new token." };
+  }
+
+  /**
+   * Delete Node — SAFE mode. Refuses while any service (workload) or
+   * in-use allocation references the node. Removes only the Control-Plane
+   * registration and revokes credentials; the remote machine, its software
+   * and all customer data are untouched.
+   */
+  async removeNode(id: string, mode: "safe" | "force", actor: { id: string; role: string }, confirmName?: string, password?: string) {
+    const node = await this.get(id);
+    if (node.status === "retired") throw new BadRequestException("Node is already deleted");
+
+    const services = await this.services.find({ nodeId: node._id }, "name type status");
+    const inUseAllocations = await this.allocations.countDocuments({ nodeId: node._id, serviceId: { $ne: null } });
+
+    if (mode === "safe") {
+      if (services.length > 0 || inUseAllocations > 0) {
+        throw new BadRequestException({
+          message: "Safe Delete requires an empty node — migrate or remove its workloads first.",
+          workloads: services.map((s) => ({ id: s._id, name: s.name, type: s.type, status: s.status })),
+          allocationsInUse: inUseAllocations,
+        });
+      }
+    } else {
+      // FORCE: Owner-only, re-authentication + exact node name required.
+      if (actor.role !== "owner") {
+        throw new ForbiddenException("Force Delete is restricted to the Owner role");
+      }
+      if (confirmName !== node.name) {
+        throw new BadRequestException("Confirmation failed — type the exact node name");
+      }
+      const actorDoc = await this.nodes.db.collection("users").findOne({ _id: new Types.ObjectId(actor.id) });
+      const hash = (actorDoc?.passwordHash as string | undefined) ?? "";
+      if (!password || !hash || !(await bcrypt.compare(password, hash))) {
+        throw new ForbiddenException("Re-authentication failed — enter your own account password");
+      }
+    }
+
+    // Control-plane teardown (never touches the remote machine):
+    if (mode === "force") {
+      // Orphaned workloads are marked suspended so nothing claims a ghost node.
+      await this.services.updateMany(
+        { nodeId: node._id },
+        {
+          $set: { status: "suspended", subscriptionStatus: "suspended" },
+          $push: { activity: { at: new Date(), action: "node.forceDeleted", ok: false, detail: `Node ${node.name} was force-deleted; migrate this service.` } },
+        },
+      );
+      // Allocations are control-plane records bound to this node — removed
+      // with the node in force mode (displayed in the dialog beforehand).
+      await this.allocations.deleteMany({ nodeId: node._id });
+    }
+    node.status = "retired";
+    node.online = false;
+    node.agentTokenHash = undefined; // revoke credentials permanently
+    await node.save();
+    await this.audit.log({
+      actorId: actor.id,
+      action: `nodes.delete.${mode}`,
+      targetType: "node",
+      targetId: id,
+      detail: `node=${node.name} ip=${node.ip} workloads=${services.length} allocationsInUse=${inUseAllocations}`,
+      sensitive: true,
+    });
+    return {
+      deleted: true,
+      mode,
+      node: { id, name: node.name, ip: node.ip },
+      affectedWorkloads: mode === "force" ? services.map((s) => s.name) : [],
+      note:
+        "Control-plane registration removed and credentials revoked. The remote machine, its software, backups and customer data were NOT modified." +
+        (node.online ? "" : " WARNING: the node was unreachable — remote cleanup could not be verified."),
+    };
   }
 
   async create(dto: NodeDto, actorId: string) {
@@ -75,7 +219,6 @@ export class NodesService {
 
   /** Agent completes enrollment and receives its permanent node credential. */
   async completeEnrollment(nodeId: string, jti: string): Promise<string> {
-    // Single-use: the jti must not be replayed (checked via status transition).
     const node = await this.nodes.findById(nodeId);
     if (!node) throw new NotFoundException("Unknown node");
     if (node.status !== "enrolling") throw new BadRequestException("Enrollment already completed");
@@ -92,9 +235,8 @@ export class NodesService {
   /** Heartbeat authentication: agent token checked against stored hash. */
   async authenticateAgent(nodeId: string, token: string): Promise<NodeDocument> {
     if (!/^[a-f\d]{24}$/i.test(nodeId)) throw new NotFoundException("Unknown node");
-    // agentTokenHash is select:false — it must be explicitly included here.
     const node = await this.nodes.findById(nodeId).select("+agentTokenHash");
-    if (!node?.agentTokenHash) throw new NotFoundException("Unknown node");
+    if (!node?.agentTokenHash || node.status === "retired") throw new NotFoundException("Unknown node");
     const expected = Buffer.from(node.agentTokenHash, "hex");
     const provided = Buffer.from(hashAgentToken(token), "hex");
     if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
