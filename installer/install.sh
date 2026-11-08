@@ -32,25 +32,101 @@ on_error() {
 }
 trap 'on_error $LINENO' ERR
 
-# ── 0. Interactive-terminal guard ────────────────────────────────
+# ── Helper loading (bootstrap architecture) ──────────────────────
+# A piped script has no usable script directory, and a lone downloaded
+# install.sh has no lib/ next to it. Resolution order:
+#   1. next to this script        (git clone / full installer folder)
+#   2. existing bootstrap dir     (previous run, re-used safely)
+#   3. official repo download     (pinned ref, verified: non-empty + bash -n)
+BOOTSTRAP_DIR="/tmp/nimbus-installer"
+REQUIRED_HELPERS=(
+  "installer/lib/mongo-compat.sh"
+  "installer/lib/bootstrap.sh"
+)
+# NIMBUS_INSTALL_REF can pin an exact commit SHA; defaults to the branch.
+INSTALL_REF="${NIMBUS_INSTALL_REF:-${BRANCH}}"
+RAW_BASE="${NIMBUS_RAW_BASE:-https://raw.githubusercontent.com/${REPO}/${INSTALL_REF}}"
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || SELF_DIR=""
+
+load_helper_libs() {
+  # 1. Real script directory with helpers (repo checkout)
+  if [ -n "${SELF_DIR}" ] && [ -s "${SELF_DIR}/lib/mongo-compat.sh" ] && [ -s "${SELF_DIR}/lib/bootstrap.sh" ]; then
+    # shellcheck disable=SC1091
+    . "${SELF_DIR}/lib/bootstrap.sh"
+    # shellcheck disable=SC1091
+    . "${SELF_DIR}/lib/mongo-compat.sh"
+    return 0
+  fi
+  # 2. Bootstrap dir from this run or a previous one
+  if [ -s "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh" ]; then
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh"
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh"
+    return 0
+  fi
+  # 3. Download from the official repository — every file verified
+  log "Fetching installer dependencies from ${RAW_BASE} …"
+  # The bootstrap lib itself is required to do verified fetching.
+  if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+    mkdir -p "${BOOTSTRAP_DIR}/installer/lib"
+    local first="${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh"
+    local url="${RAW_BASE}/installer/lib/bootstrap.sh"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "${url}" -o "${first}" || die "Failed to download required installer dependency.
+File: installer/lib/bootstrap.sh
+URL:  ${url}
+Installation stopped safely. No changes were made."
+    else
+      wget -qO "${first}" "${url}" || die "Failed to download required installer dependency.
+File: installer/lib/bootstrap.sh
+URL:  ${url}
+Installation stopped safely. No changes were made."
+    fi
+    [ -s "${first}" ] || die "Downloaded installer/lib/bootstrap.sh is empty — refusing to continue."
+    bash -n "${first}" || die "Downloaded installer/lib/bootstrap.sh failed bash syntax verification — refusing to execute a corrupted download."
+    # shellcheck disable=SC1090
+    . "${first}"
+    bootstrap_fetch_files "${RAW_BASE}" "${BOOTSTRAP_DIR}" \
+      "installer/lib/mongo-compat.sh" || die "Installer dependency download failed — see the message above."
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh"
+    return 0
+  fi
+  die "installer/lib/mongo-compat.sh not found next to the installer and neither curl nor wget is available to fetch it."
+}
+
+# ── 0. Interactive-terminal guard (piped execution) ──────────────
 # When launched as `curl … | sudo bash`, stdin is the PIPE containing the
-# script itself — every `read` would consume script text instead of user
-# input (producing bogus "Password too short" aborts or garbage credentials).
-# Re-exec from a downloaded file with prompts attached to the terminal.
+# script itself — interactive `read` prompts would consume script text.
+# Re-exec from a verified bootstrap copy of the FULL bundle (self + every
+# helper) with prompts attached to the terminal.
 if [ ! -t 0 ]; then
   if [ ! -e /dev/tty ]; then
     die "No interactive terminal detected. Download the script and run it directly: sudo bash install.sh"
   fi
   command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 \
     || die "Neither curl nor wget is available to fetch the installer."
-  TMP_INSTALLER=$(mktemp /tmp/nimbus-install-XXXXXX.sh)
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/installer/install.sh" -o "${TMP_INSTALLER}"
-  else
-    wget -qO "${TMP_INSTALLER}" "https://raw.githubusercontent.com/${REPO}/${BRANCH}/installer/install.sh"
+  # Source the bootstrap module (it may already be loaded by load_helper_libs
+  # later — here we need it before we can re-exec).
+  if ! command -v bootstrap_download_bundle >/dev/null 2>&1; then
+    mkdir -p "${BOOTSTRAP_DIR}/installer/lib"
+    local_bootstrap="${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh"
+    curl -fsSL "${RAW_BASE}/installer/lib/bootstrap.sh" -o "${local_bootstrap}" \
+      || wget -qO "${local_bootstrap}" "${RAW_BASE}/installer/lib/bootstrap.sh" \
+      || die "Failed to download required installer dependency.
+File: installer/lib/bootstrap.sh
+Installation stopped safely. No changes were made."
+    [ -s "${local_bootstrap}" ] || die "Downloaded installer/lib/bootstrap.sh is empty — refusing to continue."
+    bash -n "${local_bootstrap}" || die "Downloaded installer/lib/bootstrap.sh failed bash syntax verification — refusing to execute a corrupted download."
+    # shellcheck disable=SC1090
+    . "${local_bootstrap}"
   fi
-  printf '[nimbus] Re-launching installer from a file so prompts can read your terminal…\n'
-  exec bash "${TMP_INSTALLER}" </dev/tty
+  bootstrap_download_bundle "${RAW_BASE}" "${BOOTSTRAP_DIR}" \
+    || die "Installer bundle download failed — see the message above. Installation stopped safely. No changes were made."
+  log "Re-launching installer from a verified copy so prompts can read your terminal…"
+  # The re-exec'd script finds all helpers next to itself (resolution path 1).
+  exec bash "${BOOTSTRAP_DIR}/installer/install.sh" </dev/tty
 fi
 
 # Prompts must NEVER read from piped stdin — always prefer the terminal.
@@ -89,17 +165,11 @@ echo "  Package manager  : ${PKG_MANAGER}"
 
 [ "${PKG_MANAGER}" = "apt" ] || die "apt-get is required — this installer supports Ubuntu and Debian only (detected: ${PKG_MANAGER})."
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# When re-exec'd from a temp file the lib lives next to the script; prefer repo copy.
-if [ -f "${SCRIPT_DIR}/lib/mongo-compat.sh" ]; then
-  # shellcheck disable=SC1091
-  . "${SCRIPT_DIR}/lib/mongo-compat.sh"
-elif [ -f "${INSTALL_DIR}/installer/lib/mongo-compat.sh" ]; then
-  # shellcheck disable=SC1091
-  . "${INSTALL_DIR}/installer/lib/mongo-compat.sh"
-else
-  die "installer/lib/mongo-compat.sh not found next to the installer."
-fi
+load_helper_libs
+
+# Clean up downloaded bootstrap files when this run ends (helpers are
+# already sourced into memory). No-op when running from a repo checkout.
+trap 'bootstrap_clean "$BOOTSTRAP_DIR"' EXIT
 
 if select_mongodb_compat "/etc/os-release" "${ARCH}"; then
   echo "  Compatibility    : SUPPORTED — ${MONGO_REASON}"

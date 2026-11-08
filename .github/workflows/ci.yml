@@ -29,6 +29,9 @@ jobs:
       - name: Installer compatibility tests (mocked, real bash)
         run: bash installer/tests/mongo-compat.sh
 
+      - name: Installer bootstrap tests (mock HTTP server, real bash)
+        run: bash installer/tests/bootstrap.sh
+
       - name: Shared package tests (imports compiled dist)
         run: npm run test --workspace @nimbus/shared
 
