@@ -336,8 +336,8 @@ ensure_mongodb() {
   else
     log "Installing official MongoDB ${MONGO_SERIES} for ${OS_ID} ${OS_CODENAME} (${ARCH})…"
     install -d -m 0755 /etc/apt/keyrings
-    curl -fsSL "https://www.mongodb.org/static/pgp/server-${MONGO_SERIES}.asc" \
-      | gpg --dearmor --yes -o /etc/apt/keyrings/mongodb-server-${MONGO_SERIES}.gpg
+    curl -fsSL "https://pgp.mongodb.com/server-${MONGO_SERIES%%.*}.asc" \
+  | gpg --dearmor --yes -o "/etc/apt/keyrings/mongodb-server-${MONGO_SERIES}.gpg"
     chmod 0644 /etc/apt/keyrings/mongodb-server-${MONGO_SERIES}.gpg
     local repo_list="/etc/apt/sources.list.d/mongodb-org-${MONGO_SERIES}.list"
     echo "deb [ arch=${ARCH} signed-by=/etc/apt/keyrings/mongodb-server-${MONGO_SERIES}.gpg ] https://repo.mongodb.org/apt/${OS_ID} ${MONGO_CODENAME}/mongodb-org/${MONGO_SERIES} multiverse" \
