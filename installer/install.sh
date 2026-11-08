@@ -326,7 +326,7 @@ fi
 ensure_mongodb() {
   # Idempotent: install official mongodb-org only if absent; never touch data.
   if command -v mongod >/dev/null 2>&1; then
-    INSTALLED_SERIES=$(mongod --version 2>/dev/null | awk '/db version/ {print $3}' | cut -d. -f1,2)
+    INSTALLED_SERIES=$(mongod --version 2>/dev/null | awk '/db version/ {print $3}' | sed 's/^v//' | cut -d. -f1,2)
     log "MongoDB already installed (db version ${INSTALLED_SERIES}) — not upgrading or downgrading automatically."
     if [ "${INSTALLED_SERIES}" != "${MONGO_SERIES}" ]; then
       warn "Installed series ${INSTALLED_SERIES} differs from the recommended ${MONGO_SERIES} for this OS."
@@ -361,7 +361,7 @@ curl -fsSL "https://pgp.mongodb.com/server-${MONGO_KEY_VERSION}.asc" \
 
   # Service verification
   systemctl daemon-reload || true
-  if ! systemctl list-unit-files 2>/dev/null | grep -q '^mongod.service'; then
+  if ! systemctl show mongod.service -p LoadState --value 2>/dev/null | grep -qx 'loaded'; then
     die "mongod.service unit does not exist even though the package is installed. Check: dpkg -L mongodb-org-server | grep systemd"
   fi
   if ! systemctl is-active --quiet mongod; then
