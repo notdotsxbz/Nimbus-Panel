@@ -46,6 +46,7 @@ REQUIRED_HELPERS=(
   "installer/lib/mongo-compat.sh"
   "installer/lib/apt-repos.sh"
   "installer/lib/os-detect.sh"
+  "installer/lib/validation.sh"
   "installer/lib/bootstrap.sh"
 )
 # NIMBUS_INSTALL_REF can pin an exact commit SHA; defaults to the branch.
@@ -62,7 +63,7 @@ fi
 
 load_helper_libs() {
   # 1. Real script directory with helpers (repo checkout / verified bundle)
-  if [ -n "${SELF_DIR}" ] && [ -s "${SELF_DIR}/lib/mongo-compat.sh" ] && [ -s "${SELF_DIR}/lib/bootstrap.sh" ] && [ -s "${SELF_DIR}/lib/apt-repos.sh" ] && [ -s "${SELF_DIR}/lib/os-detect.sh" ]; then
+  if [ -n "${SELF_DIR}" ] && [ -s "${SELF_DIR}/lib/mongo-compat.sh" ] && [ -s "${SELF_DIR}/lib/bootstrap.sh" ] && [ -s "${SELF_DIR}/lib/apt-repos.sh" ] && [ -s "${SELF_DIR}/lib/os-detect.sh" ] && [ -s "${SELF_DIR}/lib/validation.sh" ]; then
     # shellcheck disable=SC1091
     . "${SELF_DIR}/lib/bootstrap.sh"
     # shellcheck disable=SC1091
@@ -71,10 +72,12 @@ load_helper_libs() {
     . "${SELF_DIR}/lib/apt-repos.sh"
     # shellcheck disable=SC1091
     . "${SELF_DIR}/lib/os-detect.sh"
+    # shellcheck disable=SC1091
+    . "${SELF_DIR}/lib/validation.sh"
     return 0
   fi
   # 2. Bootstrap dir from this run or a previous one
-  if [ -s "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/os-detect.sh" ]; then
+  if [ -s "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/os-detect.sh" ] && [ -s "${BOOTSTRAP_DIR}/installer/lib/validation.sh" ]; then
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/bootstrap.sh"
     # shellcheck disable=SC1091
@@ -83,6 +86,8 @@ load_helper_libs() {
     . "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh"
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/os-detect.sh"
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/validation.sh"
     return 0
   fi
   # 3. Download from the official repository — every file verified
@@ -110,13 +115,16 @@ Installation stopped safely. No changes were made."
     bootstrap_fetch_files "${RAW_BASE}" "${BOOTSTRAP_DIR}" \
       "installer/lib/mongo-compat.sh" \
       "installer/lib/apt-repos.sh" \
-      "installer/lib/os-detect.sh" || die "Installer dependency download failed — see the message above."
+      "installer/lib/os-detect.sh" \
+      "installer/lib/validation.sh" || die "Installer dependency download failed — see the message above."
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/mongo-compat.sh"
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/apt-repos.sh"
     # shellcheck disable=SC1091
     . "${BOOTSTRAP_DIR}/installer/lib/os-detect.sh"
+    # shellcheck disable=SC1091
+    . "${BOOTSTRAP_DIR}/installer/lib/validation.sh"
     return 0
   fi
   die "installer/lib/mongo-compat.sh not found next to the installer and neither curl nor wget is available to fetch it."
@@ -167,6 +175,23 @@ tty_read() {
 [ "$(id -u)" -eq 0 ] || die "Run with sudo (the installer configures system services)."
 touch "${INSTALL_LOG}" && chmod 600 "${INSTALL_LOG}" || true
 
+# ── Helper library loading (MUST happen before any helper call) ──
+# Regression: load_helper_libs previously ran AFTER system_detect, which
+# called an unsourced function (exit 127). All helper loading and
+# validation now happens before the first library function is used.
+load_helper_libs
+
+# Required-function validation: every function the installer calls must be
+# defined in THIS shell before execution. A missing helper fails here with
+# its name and expected source file — never as a mid-install
+# "command not found".
+# Function validation lives in installer/lib/validation.sh (sourced above)
+validate_required_functions
+
+# Clean up downloaded bootstrap files when this run ends (helpers are
+# already sourced into memory). No-op when running from a repo checkout.
+trap 'bootstrap_clean "$BOOTSTRAP_DIR"' EXIT
+
 # ── 1. System detection & supported-OS validation ────────────────
 step "System detection and OS support validation"
 system_detect
@@ -180,12 +205,6 @@ echo "  Available disk   : ${DISK_GB} GB"
 echo "  Package manager  : ${PKG_MANAGER}"
 
 [ "${PKG_MANAGER}" = "apt" ] || die "apt-get is required — this installer supports Ubuntu and Debian only (detected: ${PKG_MANAGER})."
-
-load_helper_libs
-
-# Clean up downloaded bootstrap files when this run ends (helpers are
-# already sourced into memory). No-op when running from a repo checkout.
-trap 'bootstrap_clean "$BOOTSTRAP_DIR"' EXIT
 
 if select_mongodb_compat "/etc/os-release" "${ARCH}"; then
   echo "  Compatibility    : SUPPORTED — ${MONGO_REASON}"

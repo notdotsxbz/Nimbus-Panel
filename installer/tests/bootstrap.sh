@@ -73,8 +73,8 @@ echo "Bootstrap dependency tests (mock server: ${BASE})"
 rm -rf "${WORK}/a"
 OUT=$(bootstrap_download_bundle "${BASE}/ok" "${WORK}/a" 2>&1); RC=$?
 check "bundle download succeeds" 0 "$RC"
-[ -s "${WORK}/a/installer/install.sh" ] && [ -s "${WORK}/a/installer/lib/bootstrap.sh" ] && [ -s "${WORK}/a/installer/lib/mongo-compat.sh" ] && [ -s "${WORK}/a/installer/lib/apt-repos.sh" ] && [ -s "${WORK}/a/installer/lib/os-detect.sh" ]
-check "all five bundle files exist and are non-empty" 0 "$?"
+[ -s "${WORK}/a/installer/install.sh" ] && [ -s "${WORK}/a/installer/lib/bootstrap.sh" ] && [ -s "${WORK}/a/installer/lib/mongo-compat.sh" ] && [ -s "${WORK}/a/installer/lib/apt-repos.sh" ] && [ -s "${WORK}/a/installer/lib/os-detect.sh" ] && [ -s "${WORK}/a/installer/lib/validation.sh" ]
+check "all six bundle files exist and are non-empty" 0 "$?"
 # shellcheck disable=SC1090,SC1091
 . "${WORK}/a/installer/lib/mongo-compat.sh"
 TMP_OS=$(mktemp)

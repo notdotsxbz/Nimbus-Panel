@@ -84,9 +84,10 @@ bootstrap_download_bundle() {
     "installer/lib/bootstrap.sh" \
     "installer/lib/mongo-compat.sh" \
     "installer/lib/apt-repos.sh" \
-    "installer/lib/os-detect.sh" || return 1
+    "installer/lib/os-detect.sh" \
+    "installer/lib/validation.sh" || return 1
   local f
-  for f in "installer/install.sh" "installer/lib/bootstrap.sh" "installer/lib/mongo-compat.sh" "installer/lib/apt-repos.sh" "installer/lib/os-detect.sh"; do
+  for f in "installer/install.sh" "installer/lib/bootstrap.sh" "installer/lib/mongo-compat.sh" "installer/lib/apt-repos.sh" "installer/lib/os-detect.sh" "installer/lib/validation.sh"; do
     [ -s "${dest_dir}/${f}" ] || {
       printf '[NIMBUS] ERROR: Bundle file missing after download: %s\n' "${f}" >&2
       return 1

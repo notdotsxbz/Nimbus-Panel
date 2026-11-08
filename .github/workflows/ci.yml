@@ -38,9 +38,12 @@ jobs:
       - name: Installer OS detection & strict-mode tests (real bash)
         run: bash installer/tests/os-detect.sh
 
+      - name: Installer helper loading & function validation tests (real bash)
+        run: bash installer/tests/functions.sh
+
       - name: Verify installer helper files are tracked in Git
         run: |
-          for f in installer/install.sh installer/lib/mongo-compat.sh installer/lib/bootstrap.sh installer/lib/apt-repos.sh installer/lib/os-detect.sh; do
+          for f in installer/install.sh installer/lib/mongo-compat.sh installer/lib/bootstrap.sh installer/lib/apt-repos.sh installer/lib/os-detect.sh installer/lib/validation.sh; do
             git ls-files --error-unmatch "$f" || { echo "MISSING FROM GIT: $f"; exit 1; }
             [ -s "$f" ] || { echo "EMPTY: $f"; exit 1; }
             echo "tracked and non-empty: $f"
