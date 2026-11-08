@@ -27,33 +27,19 @@ export interface CreateServiceDto {
 
 @Injectable()
 export class ServicesService {
-  /**
-   * Backward-compatible migration: earlier builds stored nodeId/ownerId as
-   * BSON Strings (Mongoose does not infer ObjectId from reflected metadata).
-   * Converts String-stored references to real ObjectIds — idempotent.
-   */
-  private normalizeObjectIds(): void {
-    const pipeline = [{ $set: { nodeId: { $toObjectId: "$nodeId" }, ownerId: { $toObjectId: "$ownerId" } } }];
-    this.services
-      .updateMany({ nodeId: { $type: "string" } }, pipeline)
-      .catch((err) => console.error("[migration] services nodeId/ownerId normalization failed:", err.message));
-  }
-
-  async onModuleInit(): Promise<void> {
-    this.normalizeObjectIds();
-  }
-
   constructor(
     @InjectModel(Service.name) private readonly services: Model<ServiceDocument>,
     private readonly nodes: NodesService,
     private readonly audit: AuditService,
   ) {}
 
+  /** Customers see only their own services; staff sees all. */
   async listFor(user: AuthUser, filter: Record<string, unknown> = {}) {
     const query: Record<string, unknown> = isStaffRole(user.role) ? { ...filter } : { ownerId: new Types.ObjectId(user.id), ...filter };
     return this.services.find(query).populate("nodeId", "name location online").limit(200);
   }
 
+  /** Ownership-enforced read — the base for every per-service operation. */
   async get(id: string, user: AuthUser): Promise<ServiceDocument> {
     const service = await this.services.findById(id).populate("nodeId", "name ip agentUrl online");
     if (!service) throw new NotFoundException("Service not found");

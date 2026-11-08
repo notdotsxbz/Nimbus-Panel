@@ -15,6 +15,8 @@ import { BackupsModule } from "./modules/backups/backups.module";
 import { AuditModule } from "./modules/audit/audit.module";
 import { AppearanceModule } from "./modules/appearance/appearance.module";
 import { TicketsModule } from "./modules/tickets/tickets.module";
+import { MigrationsModule } from "./modules/migrations/migrations.module";
+import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { ConsoleFilesModule } from "./modules/console-files/console-files.module";
 import { FirebaseAdminService } from "./firebase/firebase-admin.service";
 
@@ -39,6 +41,8 @@ import { FirebaseAdminService } from "./firebase/firebase-admin.service";
     AppearanceModule,
     TicketsModule,
     ConsoleFilesModule,
+    MigrationsModule,
+    NotificationsModule,
   ],
   providers: [
     FirebaseAdminService,

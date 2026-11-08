@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import { AuditService } from "../audit/audit.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { Ticket, TicketDocument, TicketStatus } from "./ticket.schema";
 
 const STATUSES: TicketStatus[] = ["open", "in_progress", "waiting", "closed"];
@@ -11,6 +12,7 @@ export class TicketsService {
   constructor(
     @InjectModel(Ticket.name) private readonly tickets: Model<TicketDocument>,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private assertBody(body: unknown): string {
@@ -84,6 +86,12 @@ export class TicketsService {
     if (!ticket) throw new NotFoundException("Ticket not found");
     ticket.status = String(status) as TicketStatus;
     await ticket.save();
+    await this.notifications.notify(
+      ticket.ownerId.toString(),
+      "ticket",
+      `Ticket update: ${ticket.subject}`,
+      `Status changed to ${ticket.status}`,
+    );
     await this.audit.log({ actorId: user.id, action: "tickets.status", targetId: id, detail: String(status) });
     return ticket;
   }

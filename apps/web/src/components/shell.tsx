@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { GlassCard } from "@/components/glass";
 import { currentUser, logout, type SessionUser } from "@/lib/api";
 import { useNimbusClient } from "@/lib/pwa";
 
@@ -23,6 +25,9 @@ export function Shell({
   const [user, setUser] = useState<SessionUser | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifs, setNotifs] = useState<{ _id: string; title: string; body: string; readAt?: string; createdAt: string }[]>([]);
   const { lowBandwidth, toggleLowBandwidth } = useNimbusClient();
 
   useEffect(() => {
@@ -51,6 +56,23 @@ export function Shell({
   }, []);
 
   useEffect(() => setDrawer(false), [pathname]);
+
+  // Notification bell — unread count polled lightly; details on open.
+  const loadNotifs = useCallback(async () => {
+    try {
+      const res = await api.get<{ _id: string; title: string; body: string; readAt?: string; createdAt: string }[]>("/notifications");
+      setNotifs(Array.isArray(res) ? res : []);
+      const c = await api.get<{ count: number }>("/notifications/unread-count");
+      setUnread(c.count);
+    } catch {
+      /* notifications are non-critical */
+    }
+  }, []);
+  useEffect(() => {
+    void loadNotifs();
+    const t = setInterval(() => void loadNotifs(), 60_000);
+    return () => clearInterval(t);
+  }, [loadNotifs]);
 
   const doLogout = async () => {
     logout();
@@ -141,6 +163,21 @@ export function Shell({
             </button>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              className="btn-ghost relative !px-3"
+              aria-label={`Notifications (${unread} unread)`}
+              onClick={() => {
+                setNotifOpen((o) => !o);
+                if (!notifOpen) void loadNotifs();
+              }}
+            >
+              🔔
+              {unread > 0 ? (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-err px-1 text-[10px] font-bold text-white">
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              ) : null}
+            </button>
             <Link href="/account" className="btn-ghost !px-3 text-xs">
               Account
             </Link>
@@ -149,6 +186,48 @@ export function Shell({
 
         <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
+
+      {/* Notifications dropdown */}
+      {notifOpen ? (
+        <div className="fixed right-4 top-16 z-40 w-80 sm:right-8">
+          <GlassCard raised className="animate-rise max-h-96 overflow-y-auto p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-semibold">Notifications</p>
+              <button
+                className="btn-ghost !px-2 !py-0.5 text-[10px]"
+                onClick={async () => {
+                  await api.post("/notifications/read-all");
+                  void loadNotifs();
+                }}
+              >
+                Mark all read
+              </button>
+            </div>
+            {notifs.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted">No notifications yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {notifs.map((n) => (
+                  <li
+                    key={n._id}
+                    className={`glass-soft cursor-pointer p-3 text-xs ${n.readAt ? "opacity-60" : ""}`}
+                    onClick={async () => {
+                      if (!n.readAt) {
+                        await api.post(`/notifications/${n._id}/read`);
+                        void loadNotifs();
+                      }
+                    }}
+                  >
+                    <p className="font-medium">{n.title}</p>
+                    <p className="mt-0.5 text-muted">{n.body}</p>
+                    <p className="mt-1 text-[10px] text-muted">{new Date(n.createdAt).toLocaleString()}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </GlassCard>
+        </div>
+      ) : null}
 
       {/* Command palette — searches the current nav scope */}
       {palette ? (

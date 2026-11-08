@@ -80,6 +80,19 @@ curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/instal
 
 Tokens are single-use and expire in 30 minutes (Admin → Nodes → Add Node).
 
+## 🚀 Three-command deployment
+
+| # | Purpose | Command |
+| --- | --- | --- |
+| 1 | **Fresh installation** — OS detection, MongoDB 9.0 selection + dedicated DB user, dependencies, build (with standalone assets), reverse proxy, SSL, systemd, health checks | `curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install.sh | sudo bash` |
+| 2 | **Upgrade** — DB + config backup, code update, rebuild, idempotent migrations, restart, health checks | `curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/upgrade.sh | sudo bash` |
+| 3 | **Diagnostics & safe repair** — checks every component (services, API, web, MongoDB, migrations, agents, proxy, SSL, disk, Docker exposure, .env perms), writes a report, restarts dead services with `--repair` | `curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash` (add `--repair` to auto-restart dead services) |
+
+The installer creates a dedicated least-privilege MongoDB user (`nimbus_app`)
+with generated credentials, verifies the authenticated connection, and runs
+versioned database migrations on every boot (recorded in the `migrations`
+collection).
+
 ## ⬆️ One-command upgrade (existing installs)
 
 ```bash

@@ -75,7 +75,16 @@ Notes: `upgrade.sh` backs up MongoDB before touching anything. `recovery.sh`
 keeps a pre-restore safety dump. `uninstall.sh` never deletes customer data
 without the explicit `--purge-data` + `DESTROY` confirmation.
 
-## 4. Health & maintenance
+## 4. Health & maintenance — diagnostics (command 3)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash          # full diagnostic report
+curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash -s -- --repair   # also restart dead services
+```
+
+Checks: services, API, web, MongoDB (connection + collections + migrations), node agents, nginx config, SSL expiry, disk, Docker exposure, .env permissions. Safe repairs only; destructive actions are never automatic.
+
+## 4b. Health & maintenance
 
 ```bash
 bash /opt/nimbus/scripts/health-check.sh    # API + web + mongod + redis status

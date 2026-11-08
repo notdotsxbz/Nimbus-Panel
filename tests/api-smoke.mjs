@@ -336,6 +336,29 @@ async function call(path, { method = "GET", token, body } = {}) {
     console.log("  (skipping console/files permission checks — service id not found)");
   }
 
+  // ── Notifications & migrations ─────────────────────────────────
+  const bc = await call("/notifications/broadcast", { method: "POST", token: ownerToken, body: { title: "Maintenance window", body: "Scheduled maintenance tonight", type: "info" } });
+  check("admin broadcasts notification", (bc.status === 200 || bc.status === 201) && bc.body?.delivered >= 1, `status=${bc.status}`);
+
+  const myNotifs = await call("/notifications", { token: custToken });
+  check("customer receives broadcast", myNotifs.status === 200 && Array.isArray(myNotifs.body) && myNotifs.body.length >= 1);
+
+  const unread = await call("/notifications/unread-count", { token: custToken });
+  check("unread count reflects broadcast", unread.status === 200 && unread.body?.count >= 1, `count=${unread.body?.count}`);
+
+  const firstNotif = (Array.isArray(myNotifs.body) ? myNotifs.body : [])[0];
+  const markOne = await call(`/notifications/${firstNotif?._id}/read`, { method: "POST", token: custToken });
+  check("mark single notification read", markOne.status === 200 || markOne.status === 201);
+
+  const markAll = await call("/notifications/read-all", { method: "POST", token: custToken });
+  check("mark all read", markAll.status === 200 || markAll.status === 201);
+
+  const unreadAfter = await call("/notifications/unread-count", { token: custToken });
+  check("unread count zero after read-all", unreadAfter.status === 200 && unreadAfter.body?.count === 0, `count=${unreadAfter.body?.count}`);
+
+  const custBcast = await call("/notifications/broadcast", { method: "POST", token: custToken, body: { title: "nope", body: "nope" } });
+  check("customer cannot broadcast (admin-only)", custBcast.status === 403, `status=${custBcast.status}`);
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => {

@@ -379,6 +379,28 @@ curl -fsSL "https://pgp.mongodb.com/server-${MONGO_KEY_VERSION}.asc" \
     sleep 2
   done
   log "MongoDB ${MONGO_SERIES} is active and accepting connections."
+
+  # ── Dedicated application database user (least privilege) ──
+  # Idempotent: skipped when the .env already carries MONGODB_USER.
+  if [ -f "${INSTALL_DIR}/.env" ] && grep -q '^MONGODB_USER=' "${INSTALL_DIR}/.env"; then
+    log "Application database user already configured."
+  else
+    DB_PASS=$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    if mongosh --quiet mongodb://localhost:27017/nimbus --eval "db.createUser({ user: 'nimbus_app', pwd: '${DB_PASS}', roles: [ { role: 'readWrite', db: 'nimbus' } ] })" 2>/dev/null; then
+      AUTH_URI="mongodb://nimbus_app:${DB_PASS}@localhost:27017/nimbus?authSource=nimbus"
+      if [ -f "${INSTALL_DIR}/.env" ] && grep -q '^MONGODB_URI=' "${INSTALL_DIR}/.env"; then
+        sed -i "s|^MONGODB_URI=.*|MONGODB_URI=${AUTH_URI}|" "${INSTALL_DIR}/.env"
+      fi
+      # Reconnect check with the new credentials — never report success unverified.
+      if mongosh --quiet "${AUTH_URI}" --eval "db.runCommand({ ping: 1 }).ok" 2>/dev/null | grep -q '^1$'; then
+        log "Database user 'nimbus_app' created and verified (credentials in .env)."
+      else
+        warn "Database user created but the authenticated connection check failed — verify MONGODB_URI in .env."
+      fi
+    else
+      warn "Could not create the database user (existing authenticated MongoDB?) — MONGODB_URI left unchanged."
+    fi
+  fi
 }
 ensure_mongodb
 
