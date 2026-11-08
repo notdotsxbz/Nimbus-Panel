@@ -1,9 +1,13 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ANIMATION_PRESETS } from "@nimbus/shared";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { Public } from "../../common/public.decorator";
 import { AppearanceService } from "./appearance.service";
 
+// Appearance GETs are cheap and polled by the theme engine — allow a
+// generous read budget; strict global limits still apply to mutations.
+@Throttle({ default: { ttl: 60_000, limit: 300 } })
 @Controller("appearance")
 export class AppearanceController {
   constructor(private readonly appearance: AppearanceService) {}

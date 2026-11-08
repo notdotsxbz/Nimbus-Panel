@@ -36,6 +36,11 @@ export default function AccountSettings() {
   const [pub, setPub] = useState<PublicSettings | null>(null);
   const [prefs, setPrefs] = useState<MeAppearance | null>(null);
   const { show, node } = useToast();
+  // Visible Back navigation — Settings must never be a dead end.
+  const goBack = () => {
+    if (window.history.length > 1) router.back();
+    else router.push("/dashboard");
+  };
 
   useEffect(() => {
     void (async () => {
@@ -63,7 +68,7 @@ export default function AccountSettings() {
   const savePrefs = async (patch: Partial<MeAppearance>) => {
     try {
       setPrefs(await api.put<MeAppearance>("/appearance/me", patch));
-      await syncAppearance(); // apply immediately across the whole app
+      await syncAppearance(true); // apply immediately across the whole app
       show("Appearance updated", "ok");
     } catch (err) {
       show(err instanceof Error ? err.message : "Update failed", "err");
@@ -73,7 +78,7 @@ export default function AccountSettings() {
   const resetPrefs = async () => {
     if (!confirm("Reset your appearance preferences to the panel defaults?")) return;
     await api.post("/appearance/me/reset");
-    await syncAppearance();
+    await syncAppearance(true);
     const me = await api.get<MeAppearance>("/appearance/me");
     setPrefs(me);
     show("Appearance reset to defaults", "ok");
@@ -112,7 +117,8 @@ export default function AccountSettings() {
         </GlassCard>
       ) : null}
 
-      <header>
+      <header className="flex items-center gap-3">
+        <button className="btn-ghost !px-3" onClick={goBack} aria-label="Go back">← Back</button>
         <h1 className="text-2xl font-semibold">Account Settings</h1>
         <p className="mt-1 text-sm text-muted">
           {user ? `${user.email} · ${user.role}` : "Loading…"}

@@ -143,12 +143,20 @@ interface ThemeRow {
   isBuiltIn: boolean;
 }
 
+let lastSyncAt = 0;
+const SYNC_MIN_INTERVAL_MS = 15_000;
+
 /**
  * Re-syncs appearance from the API: user preference → published theme →
  * color-mode pairing → global animation settings. Falls back to the cache
  * on any failure so the UI never renders unthemed.
+ * Guarded against hot loops: skips when the last successful sync is recent
+ * (visibilitychange fires on every tab switch — without the guard this
+ * caused ThrottlerException: Too Many Requests).
  */
-export async function syncAppearance(): Promise<void> {
+export async function syncAppearance(force = false): Promise<void> {
+  const now = Date.now();
+  if (!force && now - lastSyncAt < SYNC_MIN_INTERVAL_MS) return;
   try {
     const token = localStorage.getItem("nimbus.token");
     const [settings, themes] = await Promise.all([
@@ -190,6 +198,7 @@ export async function syncAppearance(): Promise<void> {
         effects: preset?.effects ?? {},
       },
     });
+    lastSyncAt = now;
   } catch {
     const cached = cachedAppearance();
     if (cached) applySnapshot(cached);

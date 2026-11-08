@@ -26,6 +26,10 @@ function check(name, cond, detail = "") {
   }
 }
 
+const LOGIN_RETRY_MAX = 6;
+const LOGIN_RETRY_DELAY_MS = 15_000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function call(path, { method = "GET", token, body } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -40,6 +44,21 @@ async function call(path, { method = "GET", token, body } = {}) {
     json = await res.json();
   } catch {
     /* empty body */
+  }
+  // Login is intentionally strict (10/min); the suite makes many logins —
+  // retry on 429 with backoff instead of failing the whole run.
+  if (res.status === 429 && path === "/auth/login") {
+    for (let i = 1; i <= LOGIN_RETRY_MAX; i++) {
+      await sleep(LOGIN_RETRY_DELAY_MS);
+      const retry = await fetch(`${BASE}${path}`, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      let retryJson = null;
+      try { retryJson = await retry.json(); } catch { /* empty */ }
+      if (retry.status !== 429) return { status: retry.status, body: retryJson };
+    }
   }
   return { status: res.status, body: json };
 }
@@ -203,6 +222,62 @@ async function call(path, { method = "GET", token, body } = {}) {
 
   const resetPrefs = await call("/appearance/me/reset", { method: "POST", token: custToken });
   check("customer resets appearance preferences", resetPrefs.status === 200 || resetPrefs.status === 201, `status=${resetPrefs.status}`);
+
+  // ── Support tickets ─────────────────────────────────────────────
+  const ticket = await call("/tickets", { method: "POST", token: custToken, body: { subject: "Smoke ticket " + suffix, body: "My server is on fire (test)", priority: "high" } });
+  check("customer creates support ticket", ticket.status === 201 && !!ticket.body?._id, `status=${ticket.status}`);
+  const ticketId = ticket.body?._id;
+
+  const ownList = await call("/tickets", { token: custToken });
+  check("customer lists own tickets", ownList.status === 200 && Array.isArray(ownList.body) && ownList.body.some((x) => x._id === ticketId));
+
+  const staffList = await call("/tickets", { token: ownerToken });
+  check("staff sees all tickets", staffList.status === 200 && Array.isArray(staffList.body) && staffList.body.some((x) => x._id === ticketId));
+
+  // second customer must NOT read the first customer's ticket
+  const c2 = await call("/users", { method: "POST", token: ownerToken, body: { email: `smoke2-${suffix}@example.com`, username: `smoke2${suffix}`, password: "smokepass123", role: "customer" } });
+  const c2login = await call("/auth/login", { method: "POST", body: { identifier: `smoke2${suffix}`, password: "smokepass123" } });
+  const c2ticket = await call(`/tickets/${ticketId}`, { token: c2login.body?.token });
+  check("customer cannot read another customer's ticket", c2ticket.status === 403, `status=${c2ticket.status}`);
+
+  const reply = await call(`/tickets/${ticketId}/reply`, { method: "POST", token: custToken, body: { body: "Additional info from customer" } });
+  check("customer replies to own ticket", reply.status === 200 || reply.status === 201);
+
+  const custStatus = await call(`/tickets/${ticketId}/status`, { method: "POST", token: custToken, body: { status: "closed" } });
+  check("customer cannot change ticket status (staff only)", custStatus.status === 403, `status=${custStatus.status}`);
+
+  const staffStatus = await call(`/tickets/${ticketId}/status`, { method: "POST", token: ownerToken, body: { status: "in_progress" } });
+  check("staff changes ticket status", (staffStatus.status === 200 || staffStatus.status === 201) && staffStatus.body?.status === "in_progress", `status=${staffStatus.status}`);
+
+  // ── Role management ────────────────────────────────────────────
+  const c1user = await call("/auth/me", { token: custToken });
+  const rbacRole = await call(`/users/${c1user.body?.id}/role`, { method: "PATCH", token: custToken, body: { role: "admin" } });
+  check("customer cannot change roles", rbacRole.status === 403 || rbacRole.status === 400, `status=${rbacRole.status}`);
+
+  const promo = await call(`/users/${c2.body?._id}/role`, { method: "PATCH", token: ownerToken, body: { role: "staff" } });
+  check("owner changes user role", promo.status === 200 && promo.body?.role === "staff");
+
+  const c2after = await call("/auth/me", { token: c2login.body?.token });
+  check("role change revokes old sessions (tokenVersion)", c2after.status === 401, `status=${c2after.status}`);
+
+  const adminMe = await call("/auth/me", { token: ownerToken });
+  const selfDemote = await call(`/users/${adminMe.body?.id}/role`, { method: "PATCH", token: ownerToken, body: { role: "customer" } });
+  check("last active owner cannot be demoted", selfDemote.status === 400, `status=${selfDemote.status}`);
+
+  // ── Ban + delete ───────────────────────────────────────────────
+  const c3 = await call("/users", { method: "POST", token: ownerToken, body: { email: `smoke3-${suffix}@example.com`, username: `smoke3${suffix}`, password: "smokepass123", role: "customer" } });
+  const c3login = await call("/auth/login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
+  const ban = await call(`/users/${c3.body?._id}/suspended`, { method: "PATCH", token: ownerToken, body: { suspended: true } });
+  check("owner bans user", ban.status === 200);
+  const bannedSession = await call("/auth/me", { token: c3login.body?.token });
+  check("ban revokes active sessions immediately", bannedSession.status === 401, `status=${bannedSession.status}`);
+  const bannedLogin = await call("/auth/login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
+  check("banned user cannot log in", bannedLogin.status === 401, `status=${bannedLogin.status}`);
+
+  const del = await call(`/users/${c3.body?._id}`, { method: "DELETE", token: ownerToken });
+  check("owner soft-deletes user", del.status === 200, `status=${del.status}`);
+  const delLogin = await call("/auth/login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
+  check("deleted user cannot log in", delLogin.status === 401, `status=${delLogin.status}`);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

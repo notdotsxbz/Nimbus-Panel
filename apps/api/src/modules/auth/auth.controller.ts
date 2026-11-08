@@ -90,13 +90,14 @@ export class AuthController {
     return this.publicUser(full);
   }
 
-  private async signSession(user: { _id: unknown; email: string; username: string; role: string; mustChangePassword?: boolean }) {
+  private async signSession(user: { _id: unknown; email: string; username: string; role: string; mustChangePassword?: boolean; tokenVersion?: number }) {
     return this.jwt.signAsync({
       sub: user._id!.toString(),
       email: user.email,
       username: user.username,
       role: user.role,
       mustChangePassword: user.mustChangePassword ?? false,
+      tokenVersion: user.tokenVersion ?? 0,
     });
   }
 

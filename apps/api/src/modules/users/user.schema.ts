@@ -16,6 +16,11 @@ export class User {
   @Prop({ type: [{ at: Date, ip: String, userAgent: String, ok: Boolean }] })
   loginHistory!: { at: Date; ip?: string; userAgent?: string; ok: boolean }[];
   @Prop({ type: Map, of: String, default: {} }) twoFactor?: Map<string, string>;
+  // Bumped on ban/credential reset — JWTs carrying an older version are
+  // rejected by the auth guard, revoking active sessions immediately.
+  @Prop({ default: 0, select: false }) tokenVersion!: number;
+  // Soft deletion: suspended + flagged; audit/financial records are kept.
+  @Prop() deletedAt?: Date;
   @Prop() createdAt!: Date;
   @Prop() updatedAt!: Date;
 }

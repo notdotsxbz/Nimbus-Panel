@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { applySnapshot } from "@/lib/theme";
+import { applySnapshot, syncAppearance } from "@/lib/theme";
 import { GlassCard, Modal, Toast, useToast } from "@/components/glass";
 import {
   THEME_TOKENS,
@@ -105,6 +105,7 @@ export default function AppearanceStudio() {
       setEditing(null);
       show("Theme saved", "ok");
       void reload();
+      void syncAppearance(true);
     } catch (err) {
       show(err instanceof Error ? err.message : "Save failed", "err");
     }
@@ -114,6 +115,7 @@ export default function AppearanceStudio() {
     try {
       await api.post(`/appearance/themes/${key}/${action}`, body);
       void reload();
+      void syncAppearance(true);
     } catch (err) {
       show(err instanceof Error ? err.message : "Action failed", "err");
     }
@@ -134,6 +136,7 @@ export default function AppearanceStudio() {
       const updated = await api.patch<Settings>("/appearance/settings", patch);
       setSettings(updated);
       show("Settings updated", "ok");
+      void syncAppearance(true);
     } catch (err) {
       show(err instanceof Error ? err.message : "Update failed", "err");
     }

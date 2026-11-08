@@ -19,6 +19,9 @@ export default function AdminUsers() {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
+  const [roleTarget, setRoleTarget] = useState<UserRow | null>(null);
+  const [roleValue, setRoleValue] = useState<string>("customer");
+  const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const { show, node } = useToast();
 
   const load = async (q = "") => {
@@ -55,6 +58,30 @@ export default function AdminUsers() {
   const toggleSuspend = async (u: UserRow) => {
     await api.patch(`/users/${u._id}/suspended`, { suspended: !u.suspended });
     void load();
+  };
+
+  const changeRole = async () => {
+    if (!roleTarget) return;
+    try {
+      await api.patch(`/users/${roleTarget._id}/role`, { role: roleValue });
+      show(`Role updated to ${roleValue}`, "ok");
+      setRoleTarget(null);
+      void load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Role change failed", "err");
+    }
+  };
+
+  const deleteUser = async () => {
+    if (!deleteTarget) return;
+    try {
+      await api.del(`/users/${deleteTarget._id}`);
+      show("User deleted (archived — audit records preserved)", "ok");
+      setDeleteTarget(null);
+      void load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Delete failed", "err");
+    }
   };
 
   const resetAuth = async () => {
@@ -120,11 +147,17 @@ export default function AdminUsers() {
                 </td>
                 <td className="px-5 py-3 text-right">
                   <div className="flex justify-end gap-2">
+                    <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => { setRoleTarget(u); setRoleValue(u.role); }}>
+                      Edit role
+                    </button>
                     <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => setResetTarget(u)}>
                       Reset auth
                     </button>
                     <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => void toggleSuspend(u)}>
-                      {u.suspended ? "Reactivate" : "Suspend"}
+                      {u.suspended ? "Unban" : "Ban"}
+                    </button>
+                    <button className="btn-danger !px-2.5 !py-1 text-xs" onClick={() => setDeleteTarget(u)}>
+                      Delete
                     </button>
                   </div>
                 </td>
@@ -175,6 +208,39 @@ export default function AdminUsers() {
         <div className="mt-5 flex gap-2">
           <button className="btn-danger flex-1" onClick={() => void resetAuth()}>Generate</button>
           <button className="btn-ghost flex-1" onClick={() => setResetTarget(null)}>Cancel</button>
+        </div>
+      </Modal>
+
+      <Modal open={roleTarget !== null} title="Edit role" onClose={() => setRoleTarget(null)}>
+        <p className="text-sm text-muted">
+          Change the role for <strong>{roleTarget?.username}</strong>. Only the owner can grant or
+          revoke the owner role; the last active owner can never be demoted. Role changes revoke the
+          user's active sessions and are recorded in the audit log.
+        </p>
+        <div className="mt-4">
+          <label className="label" htmlFor="role-select">Role</label>
+          <select id="role-select" className="input" value={roleValue} onChange={(e) => setRoleValue(e.target.value)}>
+            <option value="customer">Customer</option>
+            <option value="staff">Staff</option>
+            <option value="admin">Admin</option>
+            <option value="owner">Owner (owner only)</option>
+          </select>
+        </div>
+        <div className="mt-5 flex gap-2">
+          <button className="btn-primary flex-1" onClick={() => void changeRole()}>Apply role</button>
+          <button className="btn-ghost flex-1" onClick={() => setRoleTarget(null)}>Cancel</button>
+        </div>
+      </Modal>
+
+      <Modal open={deleteTarget !== null} title="Delete user" onClose={() => setDeleteTarget(null)}>
+        <p className="text-sm text-muted">
+          Archive <strong>{deleteTarget?.username}</strong>? Their sessions are revoked immediately and
+          the account is soft-deleted — audit records are preserved and the username/email are released.
+          Owner accounts cannot be deleted.
+        </p>
+        <div className="mt-5 flex gap-2">
+          <button className="btn-danger flex-1" onClick={() => void deleteUser()}>Delete user</button>
+          <button className="btn-ghost flex-1" onClick={() => setDeleteTarget(null)}>Cancel</button>
         </div>
       </Modal>
 

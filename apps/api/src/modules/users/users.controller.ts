@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { UsersService } from "./users.service";
 
@@ -40,7 +40,21 @@ export class UsersController {
   @Patch(":id/suspended")
   @Roles("owner", "admin")
   setSuspended(@Param("id") id: string, @Body() dto: { suspended: boolean }, @CurrentUser() actor: AuthUser) {
-    return this.users.setSuspended(id, dto.suspended, actor.id);
+    return this.users.setSuspendedWithRevocation(id, dto.suspended, actor.id);
+  }
+
+  /** Role change: owner may grant/revoke any role; admins manage customer/staff. */
+  @Patch(":id/role")
+  @Roles("owner", "admin")
+  changeRole(@Param("id") id: string, @Body() dto: { role: string }, @CurrentUser() actor: AuthUser) {
+    return this.users.changeRole(id, dto.role, actor);
+  }
+
+  /** Soft deletion — audit and billing records preserved, sessions revoked. */
+  @Delete(":id")
+  @Roles("owner", "admin")
+  delete(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
+    return this.users.deleteUser(id, actor);
   }
 
   @Patch("me/username")

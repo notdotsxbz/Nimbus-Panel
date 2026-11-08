@@ -15,6 +15,7 @@ const SECTIONS: NavSection[] = [
     title: "Manage",
     items: [
       { href: "/dashboard/domains", label: "My Domains", icon: "◉" },
+      { href: "/dashboard/support", label: "Support", icon: "✉" },
       { href: "/dashboard/backups", label: "Backups", icon: "⇩" },
     ],
   },

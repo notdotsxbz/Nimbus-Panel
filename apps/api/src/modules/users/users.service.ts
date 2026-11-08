@@ -42,11 +42,18 @@ export class UsersService implements OnModuleInit {
   async verifyCredentials(identifier: string, password: string): Promise<UserDocument | null> {
     if (!identifier || !password) return null;
     const user = await this.users
-      .findOne({ $or: [{ email: identifier }, { username: identifier }] })
-      .select("+passwordHash");
+      .findOne({ $or: [{ email: identifier }, { username: identifier }], deletedAt: { $exists: false } })
+      .select("+passwordHash +tokenVersion");
     if (!user?.passwordHash) return null;
     const ok = await bcrypt.compare(password, user.passwordHash);
     return ok ? user : null;
+  }
+
+  /** Current tokenVersion for session-revocation checks (banned/bumped users). */
+  async getTokenVersion(userId: string): Promise<number> {
+    const user = await this.users.findById(userId).select("+tokenVersion deletedAt suspended");
+    if (!user || user.deletedAt) return -1; // deleted accounts fail all sessions
+    return user.tokenVersion ?? 0;
   }
 
   async findByEmail(email: string) {
@@ -170,9 +177,89 @@ export class UsersService implements OnModuleInit {
     return user;
   }
 
+  private async ownerCount(): Promise<number> {
+    return this.users.countDocuments({ role: "owner", suspended: { $ne: true }, deletedAt: { $exists: false } });
+  }
+
+  /**
+   * Role changes: only the owner may grant/revoke the owner role; admins can
+   * manage customer/staff roles. The last active owner can never be demoted.
+   * All changes are audited and revoke the target's active sessions.
+   */
+  async changeRole(targetId: string, newRole: string, actor: { id: string; role: string }) {
+    const allowed = ["customer", "staff", "admin", "owner"];
+    if (!allowed.includes(newRole)) throw new BadRequestException("Invalid role");
+    const target = await this.users.findById(targetId);
+    if (!target || target.deletedAt) throw new NotFoundException("User not found");
+
+    if (actor.role !== "owner") {
+      if (newRole === "owner" || target.role === "owner") {
+        throw new ForbiddenException("Only the owner can change owner roles");
+      }
+      if (newRole === "admin" && actor.role !== "admin") {
+        throw new ForbiddenException("Insufficient authority for this role change");
+      }
+    }
+    if (target.role === "owner" && newRole !== "owner" && (await this.ownerCount()) <= 1) {
+      throw new BadRequestException("Cannot demote the last active owner");
+    }
+    if (targetId === actor.id && target.role === "owner" && newRole !== "owner" && (await this.ownerCount()) <= 1) {
+      throw new BadRequestException("Cannot demote the last active owner");
+    }
+
+    target.role = newRole as UserDocument["role"];
+    target.tokenVersion = (target.tokenVersion ?? 0) + 1; // revoke sessions so new role applies everywhere
+    await target.save();
+    await this.audit.log({
+      actorId: actor.id,
+      action: "users.role.change",
+      targetType: "user",
+      targetId,
+      detail: `→ ${newRole}`,
+      sensitive: true,
+    });
+    return target;
+  }
+
+  /**
+   * Soft deletion: account is suspended, flagged with deletedAt and its
+   * sessions revoked. Audit and billing records are preserved; the owner
+   * account and the acting user can never be deleted here.
+   */
+  async deleteUser(targetId: string, actor: { id: string; role: string }) {
+    const target = await this.users.findById(targetId);
+    if (!target || target.deletedAt) throw new NotFoundException("User not found");
+    if (target.role === "owner") throw new BadRequestException("Owner accounts cannot be deleted — demote first");
+    if (targetId === actor.id) throw new BadRequestException("You cannot delete your own account here");
+    target.deletedAt = new Date();
+    target.suspended = true;
+    target.tokenVersion = (target.tokenVersion ?? 0) + 1;
+    target.email = `deleted+${targetId}@nimbus.invalid`; // release the email for reuse
+    target.username = `deleted-${targetId.slice(-8)}`;   // release the username
+    await target.save();
+    await this.audit.log({
+      actorId: actor.id,
+      action: "users.delete",
+      targetType: "user",
+      targetId,
+      sensitive: true,
+      detail: "soft deletion — audit records preserved",
+    });
+    return { ok: true };
+  }
+
+  /** Ban additionally revokes all active sessions (tokenVersion bump). */
+  async setSuspendedWithRevocation(userId: string, suspended: boolean, actorId: string) {
+    const user = await this.setSuspended(userId, suspended, actorId);
+    if (user && suspended) {
+      await this.users.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
+    }
+    return user;
+  }
+
   async list(filter: Record<string, unknown> = {}, limit = 25, skip = 0) {
     const [items, total] = await Promise.all([
-      this.users.find(filter).sort({ createdAt: -1 }).limit(limit).skip(skip),
+      this.users.find({ deletedAt: { $exists: false }, ...filter }).sort({ createdAt: -1 }).limit(limit).skip(skip),
       this.users.countDocuments(filter),
     ]);
     return { items, total };

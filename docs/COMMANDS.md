@@ -163,3 +163,30 @@ see [API_GUIDE.md](API_GUIDE.md).
 | `DEFAULT_PORT_RANGE_START/END` | Service port allocation pool (default 4001–4050) |
 
 Full template: [`.env.example`](../.env.example).
+
+## 11. Server rebuild (after code updates on an existing install)
+
+The installer does this automatically on install/re-run. To rebuild manually on
+a live server:
+
+```bash
+cd /opt/nimbus
+sudo -u nimbus npm run build --workspace @nimbus/shared
+sudo env NEXT_PUBLIC_API_URL=https://YOUR-PANEL-DOMAIN npm run build --workspace @nimbus/web
+# standalone output needs static assets copied next to server.js:
+sudo mkdir -p apps/web/.next/standalone/apps/web/.next/static apps/web/.next/standalone/apps/web/public
+sudo cp -a apps/web/.next/static/. apps/web/.next/standalone/apps/web/.next/static/
+sudo cp -a apps/web/public/. apps/web/.next/standalone/apps/web/public/
+sudo chown -R nimbus:nimbus apps/web/.next
+sudo systemctl restart nimbus-web
+```
+
+Or simply re-run the installer — it detects the existing installation, preserves
+.env and data, and performs the same steps including the standalone asset copy.
+
+## 12. Support & user management (panel)
+
+- Customers: Dashboard → Support (create tickets, reply, track status)
+- Staff/Owner: Admin → Support Tickets (filter, reply, set status)
+- Admin → Users: Edit role (owner grants owner role; last-owner protection),
+  Ban/Unban (revokes sessions instantly), Delete (soft archive)

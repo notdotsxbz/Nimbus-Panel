@@ -418,10 +418,19 @@ BOOTSTRAP_ADMIN_EMAIL=${ADMIN_EMAIL}
 BOOTSTRAP_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 API_PORT=4000
 WEB_URL=https://${PANEL_DOMAIN}
+# Public API URL baked into the browser bundle at build time —
+# without this the frontend would call http://localhost:4000.
+NEXT_PUBLIC_API_URL=https://${PANEL_DOMAIN}
 EOF
   chmod 600 "${INSTALL_DIR}/.env"
   log "Environment file created."
 else
+  # Ensure NEXT_PUBLIC_API_URL exists even in upgraded .env files — the web
+  # build bakes it in; a missing value makes the frontend call localhost.
+  if ! grep -q '^NEXT_PUBLIC_API_URL=' "${INSTALL_DIR}/.env"; then
+    printf '\n# Added by installer: public API URL for the browser bundle\nNEXT_PUBLIC_API_URL=https://%s\n' "${PANEL_DOMAIN}" >> "${INSTALL_DIR}/.env"
+    log "Added NEXT_PUBLIC_API_URL to existing .env."
+  fi
   log "Existing .env preserved (secrets and configuration untouched)."
 fi
 
@@ -429,7 +438,19 @@ fi
 step "Building API and web frontend (this takes a few minutes)"
 cd "${INSTALL_DIR}"
 npm install --no-audit --no-fund >/dev/null
-npm run build >/dev/null
+# NEXT_PUBLIC_* variables are baked into the browser bundle AT BUILD TIME.
+NEXT_PUBLIC_API_URL="https://${PANEL_DOMAIN}" npm run build >/dev/null
+
+# Next.js standalone output does NOT include static assets or public files —
+# they must be copied next to the standalone server.js (otherwise the UI
+# loads with 404 CSS/JS). The Docker build does this; plain installs too.
+WEB_DIR="${INSTALL_DIR}/apps/web"
+STANDALONE="${WEB_DIR}/.next/standalone/apps/web"
+mkdir -p "${STANDALONE}/.next/static" "${STANDALONE}/public"
+cp -a "${WEB_DIR}/.next/static/." "${STANDALONE}/.next/static/"
+cp -a "${WEB_DIR}/public/." "${STANDALONE}/public/"
+[ -s "${STANDALONE}/server.js" ] || die "Next.js standalone server.js missing after build — web service would not start. Check the build log above."
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "${WEB_DIR}/.next"
 
 id -u "${SERVICE_USER}" >/dev/null 2>&1 || useradd --system --home "${INSTALL_DIR}" --shell /usr/sbin/nologin "${SERVICE_USER}"
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"

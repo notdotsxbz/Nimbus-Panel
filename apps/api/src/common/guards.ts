@@ -13,6 +13,7 @@ import type { AuthUser } from "./auth.decorators";
 import { ROLES_KEY } from "./auth.decorators";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import { JWT_COOKIE } from "./constants";
+import { UsersService } from "../modules/users/users.service";
 import type { Role } from "@nimbus/shared";
 import { isStaff } from "@nimbus/shared";
 
@@ -20,12 +21,15 @@ export interface RequestWithUser extends Request {
   user: AuthUser;
 }
 
-/** Verifies the session JWT from the httpOnly cookie or Authorization header. */
+/** Verifies the session JWT from the httpOnly cookie or Authorization header,
+ *  then checks the account against the database: banned (suspended), softly
+ *  deleted or token-version-mismatched sessions are revoked immediately. */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
+    private readonly users: UsersService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -41,19 +45,29 @@ export class JwtAuthGuard implements CanActivate {
     const token = bearer ?? (cookieMatch ? decodeURIComponent(cookieMatch[1]) : undefined);
     if (!token) throw new UnauthorizedException("Missing session token");
 
+    let payload: { sub?: string; tokenVersion?: number; email?: string; username?: string; role?: Role; mustChangePassword?: boolean };
     try {
-      const payload = await this.jwt.verifyAsync(token, { secret: env.jwtSecret });
-      req.user = {
-        id: payload.sub,
-        email: payload.email,
-        username: payload.username,
-        role: payload.role,
-        mustChangePassword: payload.mustChangePassword,
-      };
-      return true;
+      payload = await this.jwt.verifyAsync(token, { secret: env.jwtSecret });
     } catch {
       throw new UnauthorizedException("Invalid or expired session");
     }
+    if (!payload.sub) throw new UnauthorizedException("Invalid session");
+
+    // DB-backed revocation: bans, soft deletion and role changes bump
+    // tokenVersion — old sessions die instantly instead of expiring.
+    const tokenVersion = await this.users.getTokenVersion(payload.sub).catch(() => -1);
+    if (tokenVersion < 0 || tokenVersion !== (payload.tokenVersion ?? 0)) {
+      throw new UnauthorizedException("Session revoked");
+    }
+
+    req.user = {
+      id: payload.sub,
+      email: payload.email ?? "",
+      username: payload.username ?? "",
+      role: payload.role ?? "customer",
+      mustChangePassword: payload.mustChangePassword,
+    };
+    return true;
   }
 }
 
