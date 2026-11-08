@@ -72,15 +72,16 @@ jobs:
       # so vet/test stay deterministic regardless of runner image changes.
       - name: Vet node agent
         run: go vet ./...
+        working-directory: apps/node-agent
         env:
           GOOS: linux
           CGO_ENABLED: 0
       - name: Test node agent (path-traversal protection)
         run: go test ./...
+        working-directory: apps/node-agent
         env:
           GOOS: linux
           CGO_ENABLED: 0
-        working-directory: apps/node-agent
       - name: Build node agent (linux amd64 + arm64)
         run: |
           GOOS=linux GOARCH=amd64 go build -o /tmp/nimbus-agent-amd64 .
