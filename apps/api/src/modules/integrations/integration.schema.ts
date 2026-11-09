@@ -7,6 +7,7 @@ export class IntegrationSetting {
   @Prop({ required: true }) encryptedValue!: string;
   @Prop() projectId?: string;
   @Prop() connectedAt?: Date;
+  @Prop() updatedBy?: string;
 }
 export type IntegrationSettingDocument = HydratedDocument<IntegrationSetting>;
 export const IntegrationSettingSchema = SchemaFactory.createForClass(IntegrationSetting);
