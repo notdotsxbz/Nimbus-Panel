@@ -150,6 +150,17 @@ export class UsersService implements OnModuleInit {
     return user;
   }
 
+  async markFirebaseAccount(userId: string, uid: string, actorId: string) {
+    const user = await this.users.findById(userId).select("+passwordHash");
+    if (!user) throw new NotFoundException("User not found");
+    user.firebaseUid = uid;
+    user.passwordHash = undefined;
+    user.mustChangePassword = false;
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    await user.save();
+    await this.audit.log({ actorId, action: "users.firebase.passwordReset", targetType: "user", targetId: userId, sensitive: true });
+  }
+
   /** Safe username changes — uniqueness checked case-insensitively. */
   async changeUsername(userId: string, username: string) {
     const clean = username.toLowerCase().trim();
