@@ -120,6 +120,38 @@ export class IntegrationsService implements OnModuleInit {
     return { connected: true, projectId: account.project_id };
   }
 
+  async cloudflareStatus() {
+    const saved = await this.settings.findOne({ key: "cloudflare" }).select("projectId connectedAt").lean();
+    return { connected: Boolean(saved), zoneId: saved?.projectId ?? null, connectedAt: saved?.connectedAt ?? null };
+  }
+
+  async connectCloudflare(token: string, zoneId: string, actorId: string) {
+    if (!token || !zoneId || token.length > 4096 || zoneId.length > 128) throw new BadRequestException("Cloudflare API token and Zone ID are required");
+    const response = await fetch("https://api.cloudflare.com/client/v4/zones/" + encodeURIComponent(zoneId), {
+      headers: { authorization: "Bearer " + token },
+    });
+    const result = await response.json() as { success?: boolean; result?: { id?: string; name?: string }; errors?: Array<{ message?: string }> };
+    if (!response.ok || !result.success || result.result?.id !== zoneId) throw new BadRequestException(result.errors?.[0]?.message ?? "Cloudflare token could not access this Zone");
+    await this.settings.findOneAndUpdate(
+      { key: "cloudflare" },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ token, zoneId })), projectId: zoneId, connectedAt: new Date(), updatedBy: actorId } },
+      { upsert: true, new: true },
+    );
+    return { connected: true, zoneId, zoneName: result.result.name ?? null };
+  }
+
+  async cloudflareCredentials(): Promise<{ token: string; zoneId: string } | null> {
+    const saved = await this.settings.findOne({ key: "cloudflare" });
+    if (!saved) return null;
+    return JSON.parse(this.decrypt(saved.encryptedValue)) as { token: string; zoneId: string };
+  }
+
+  async disconnectCloudflare(actorId: string) {
+    await this.settings.deleteOne({ key: "cloudflare" });
+    this.logger.warn("Cloudflare integration disconnected by " + actorId);
+    return { connected: false };
+  }
+
   async disconnectFirebase(actorId: string) {
     if (this.firebaseApp) {
       const appSdk = await import("firebase-admin/app");
