@@ -92,17 +92,31 @@ export async function login(identifier: string, password: string): Promise<{ tok
 
 export async function firebaseLogin(email: string, password: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
   const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
-  const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(config.apiKey), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password, returnSecureToken: true }),
-  });
-  const result = await response.json() as { idToken?: string; error?: { message?: string } };
-  if (!response.ok || !result.idToken) {
-    const reason = result.error?.message ?? "Firebase sign-in failed";
-    throw new ApiError(response.status, reason.replaceAll("_", " ").toLowerCase());
+  const signIn = async () => {
+    const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(config.apiKey), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    });
+    const result = await response.json() as { idToken?: string; error?: { message?: string } };
+    return { response, result };
+  };
+  let attempt = await signIn();
+  if (!attempt.response.ok || !attempt.result.idToken) {
+    // The installer seeds one local owner. This guarded, rate-limited endpoint
+    // migrates only that owner once, using the same existing credentials.
+    try {
+      await api.post("/auth/owner-bootstrap", { email, password });
+      attempt = await signIn();
+    } catch {
+      // Keep the original Firebase error for ordinary users.
+    }
   }
-  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/firebase", { idToken: result.idToken });
+  if (!attempt.response.ok || !attempt.result.idToken) {
+    const reason = attempt.result.error?.message ?? "Firebase sign-in failed";
+    throw new ApiError(attempt.response.status, reason.replaceAll("_", " ").toLowerCase());
+  }
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/firebase", { idToken: attempt.result.idToken });
   localStorage.setItem("nimbus.token", session.token);
   localStorage.setItem("nimbus.user", JSON.stringify(session.user));
   return session;
