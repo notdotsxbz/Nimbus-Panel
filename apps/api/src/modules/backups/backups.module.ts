@@ -3,6 +3,7 @@ import { MongooseModule } from "@nestjs/mongoose";
 import { AuditModule } from "../audit/audit.module";
 import { NodesModule } from "../nodes/nodes.module";
 import { ServicesModule } from "../services/services.module";
+import { IntegrationsModule } from "../integrations/integrations.module";
 import { Backup, BackupSchema } from "./backup.schema";
 import { BackupsController } from "./backups.controller";
 import { BackupsService } from "./backups.service";
@@ -12,6 +13,7 @@ import { BackupsService } from "./backups.service";
     MongooseModule.forFeature([{ name: Backup.name, schema: BackupSchema }]),
     NodesModule,
     ServicesModule,
+    IntegrationsModule,
     AuditModule,
   ],
   controllers: [BackupsController],
