@@ -318,7 +318,7 @@ export class NodesService {
       method,
       url: `${node.agentUrl}${path}`,
       data: body,
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "x-nimbus-node": node._id!.toString() },
       timeout: 15_000,
       // Agents use self-signed certificates scoped to their own IP
       httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
