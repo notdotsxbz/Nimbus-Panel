@@ -7,7 +7,7 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Post()
-  @Roles("owner", "admin")
+  @Roles("owner")
   create(@Body() dto: { email: string; username: string; password: string; role?: string; displayName?: string }) {
     return this.users.createCustomer(dto);
   }
