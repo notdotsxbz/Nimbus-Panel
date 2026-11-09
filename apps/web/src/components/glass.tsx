@@ -80,14 +80,14 @@ export function Modal({
       aria-label={title}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <GlassCard raised className="animate-rise w-full max-w-lg p-6">
-        <div className="mb-4 flex items-center justify-between">
+      <GlassCard raised className="animate-rise flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden p-6">
+        <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button onClick={onClose} className="btn-ghost !px-2.5 !py-1" aria-label="Close dialog">
             ✕
           </button>
         </div>
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">{children}</div>
       </GlassCard>
     </div>
   );
