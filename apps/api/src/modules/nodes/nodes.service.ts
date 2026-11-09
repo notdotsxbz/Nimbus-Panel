@@ -333,7 +333,7 @@ export class NodesService {
       method: "POST",
       url: `${node.agentUrl}/backups/download`,
       data: { serviceId, backupId },
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "x-nimbus-node": node._id!.toString() },
       timeout: 10 * 60 * 1000,
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
