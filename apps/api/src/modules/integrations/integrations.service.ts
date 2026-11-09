@@ -6,6 +6,7 @@ import { env } from "../../config/env";
 import { IntegrationSetting, IntegrationSettingDocument } from "./integration.schema";
 
 type ServiceAccount = { type?: string; project_id?: string; client_email?: string; private_key?: string };
+type FirebaseWebConfig = { apiKey: string; authDomain: string; projectId: string; appId: string; storageBucket?: string; messagingSenderId?: string };
 
 @Injectable()
 export class IntegrationsService implements OnModuleInit {
@@ -61,16 +62,56 @@ export class IntegrationsService implements OnModuleInit {
 
   async firebaseStatus() {
     const saved = await this.settings.findOne({ key: "firebase-service-account" }).select("projectId connectedAt").lean();
-    return { connected: Boolean(this.firebaseApp && saved), projectId: saved?.projectId ?? null, connectedAt: saved?.connectedAt ?? null };
+    const web = await this.settings.findOne({ key: "firebase-web-config" }).select("projectId").lean();
+    return { connected: Boolean(this.firebaseApp && saved), projectId: saved?.projectId ?? null, webConfigured: Boolean(web), connectedAt: saved?.connectedAt ?? null };
   }
 
-  async connectFirebase(raw: string, actorId: string) {
+  async publicFirebaseConfig(): Promise<FirebaseWebConfig> {
+    const saved = await this.settings.findOne({ key: "firebase-web-config" });
+    if (!saved) throw new BadRequestException("Firebase web configuration is not connected");
+    return JSON.parse(this.decrypt(saved.encryptedValue)) as FirebaseWebConfig;
+  }
+
+  async verifyIdToken(idToken: string): Promise<{ uid: string; email?: string; name?: string }> {
+    if (!this.firebaseApp) throw new BadRequestException("Firebase Admin is not configured");
+    const auth = await import("firebase-admin/auth");
+    const decoded = await auth.getAuth(this.firebaseApp).verifyIdToken(idToken, true);
+    return { uid: decoded.uid, email: decoded.email, name: decoded.name };
+  }
+
+  async createFirebaseAuthUser(email: string, password: string, displayName?: string) {
+    if (!this.firebaseApp) throw new BadRequestException("Connect Firebase in Settings first");
+    if (!email || !/^\\S+@\\S+\\.\\S+$/.test(email) || password.length < 8) {
+      throw new BadRequestException("A valid email and password of at least 8 characters are required");
+    }
+    const auth = await import("firebase-admin/auth");
+    const user = await auth.getAuth(this.firebaseApp).createUser({ email: email.toLowerCase().trim(), password, displayName, emailVerified: false, disabled: false });
+    return { uid: user.uid, email: user.email };
+  }
+
+  async deleteFirebaseAuthUser(uid: string) {
+    if (!this.firebaseApp) return;
+    const auth = await import("firebase-admin/auth");
+    await auth.getAuth(this.firebaseApp).deleteUser(uid).catch(() => undefined);
+  }
+
+  async connectFirebase(raw: string, actorId: string, webConfig?: FirebaseWebConfig) {
     if (typeof raw !== "string" || raw.length > 64_000) throw new BadRequestException("Service account JSON is required (maximum 64 KB).");
     let account: ServiceAccount;
     try { account = JSON.parse(raw) as ServiceAccount; }
     catch { throw new BadRequestException("The supplied credentials are not valid JSON."); }
     await this.initialize(account);
     const encryptedValue = this.encrypt(JSON.stringify(account));
+    if (webConfig) {
+      if (!webConfig.apiKey || !webConfig.authDomain || !webConfig.projectId || !webConfig.appId || webConfig.projectId !== account.project_id) {
+        throw new BadRequestException("Firebase Web App settings must be complete and match the service-account project");
+      }
+      await this.settings.findOneAndUpdate(
+        { key: "firebase-web-config" },
+        { $set: { encryptedValue: this.encrypt(JSON.stringify(webConfig)), projectId: webConfig.projectId, connectedAt: new Date(), updatedBy: actorId } },
+        { upsert: true, new: true },
+      );
+    }
     await this.settings.findOneAndUpdate(
       { key: "firebase-service-account" },
       { $set: { encryptedValue, projectId: account.project_id, connectedAt: new Date(), updatedBy: actorId } },
@@ -85,7 +126,7 @@ export class IntegrationsService implements OnModuleInit {
       await appSdk.deleteApp(this.firebaseApp).catch(() => undefined);
       this.firebaseApp = null;
     }
-    await this.settings.deleteOne({ key: "firebase-service-account" });
+    await this.settings.deleteMany({ key: { $in: ["firebase-service-account", "firebase-web-config"] } });
     this.logger.warn(`Firebase integration disconnected by admin ${actorId}`);
     return { connected: false };
   }
