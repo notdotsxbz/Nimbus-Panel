@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -169,6 +170,26 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]any{"checksum": sum, "sizeBytes": size})
+	case "download":
+		if req.BackupID == "" || strings.ContainsAny(req.BackupID, "/\\\\") || strings.Contains(req.BackupID, "..") {
+			http.Error(w, "invalid backup id", http.StatusBadRequest)
+			return
+		}
+		in, err := os.Open(target)
+		if err != nil {
+			http.Error(w, "backup archive not found", http.StatusNotFound)
+			return
+		}
+		defer in.Close()
+		info, err := in.Stat()
+		if err != nil {
+			http.Error(w, "could not read backup metadata", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+		w.Header().Set("Content-Disposition", "attachment; filename="+req.BackupID+".tar.zst")
+		_, _ = io.Copy(w, in)
 	case "restore":
 		// Stage into a sibling directory; the control plane flips the symlink
 		// only after checksum verification — never silently overwrites data.
