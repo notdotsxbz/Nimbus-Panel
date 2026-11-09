@@ -65,29 +65,32 @@ export function Modal({
   title,
   onClose,
   children,
+  footer,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  footer?: React.ReactNode;
 }) {
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={title}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <GlassCard raised className="animate-rise flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden p-6">
-        <div className="mb-4 flex shrink-0 items-center justify-between">
+      <GlassCard raised className="animate-rise grid h-[min(90dvh,48rem)] max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-lg grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-6">
+        <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button onClick={onClose} className="btn-ghost !px-2.5 !py-1" aria-label="Close dialog">
             ✕
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">{children}</div>
+        <div className="min-h-0 overflow-y-auto overscroll-contain pr-2">{children}</div>
+        {footer ? <div className="mt-4 border-t border-white/10 pt-3">{footer}</div> : null}
       </GlassCard>
     </div>
   );
