@@ -146,6 +146,101 @@ export class IntegrationsService implements OnModuleInit {
     return JSON.parse(this.decrypt(saved.encryptedValue)) as { token: string; zoneId: string };
   }
 
+  async googleDriveStatus() {
+    const saved = await this.settings.findOne({ key: "google-drive" }).select("connectedAt").lean();
+    return { connected: Boolean(saved), connectedAt: saved?.connectedAt ?? null };
+  }
+
+  async beginGoogleDriveConnect(clientId: string, clientSecret: string, actorId: string) {
+    if (!clientId || !clientSecret || clientId.length > 512 || clientSecret.length > 1024) {
+      throw new BadRequestException("Google OAuth Client ID and Client Secret are required");
+    }
+    const redirectUri = env.webUrl.replace(/\\/$/, "") + "/admin/settings";
+    await this.settings.findOneAndUpdate(
+      { key: "google-oauth-config" },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret, redirectUri })), connectedAt: new Date(), updatedBy: actorId } },
+      { upsert: true, new: true },
+    );
+    const state = randomBytes(24).toString("hex");
+    await this.settings.create({ key: "google-oauth-state:" + state, encryptedValue: this.encrypt(JSON.stringify({ actorId })), connectedAt: new Date() });
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "https://www.googleapis.com/auth/drive.file",
+      access_type: "offline",
+      prompt: "consent",
+      state,
+    });
+    return { url: "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString() };
+  }
+
+  async exchangeGoogleDriveCode(code: string, state: string) {
+    if (!code || !state || !/^[a-f0-9]{48}$/.test(state)) throw new BadRequestException("Invalid Google OAuth callback");
+    const pendingKey = "google-oauth-state:" + state;
+    const pending = await this.settings.findOne({ key: pendingKey });
+    if (!pending || !pending.connectedAt || Date.now() - pending.connectedAt.getTime() > 10 * 60 * 1000) {
+      throw new BadRequestException("Google connection request expired. Start again from Settings.");
+    }
+    await this.settings.deleteOne({ key: pendingKey });
+    const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
+    if (!configDoc) throw new BadRequestException("Google OAuth settings are missing");
+    const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string; redirectUri: string };
+    const body = new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: config.redirectUri,
+    });
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const tokens = await response.json() as { refresh_token?: string; access_token?: string; error_description?: string };
+    if (!response.ok || !tokens.refresh_token) {
+      throw new BadRequestException(tokens.error_description ?? "Google did not return a refresh token. Reconnect and approve access.");
+    }
+    await this.settings.findOneAndUpdate(
+      { key: "google-drive" },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken: tokens.refresh_token })), connectedAt: new Date(), updatedBy: "google-oauth" } },
+      { upsert: true, new: true },
+    );
+    return { connected: true };
+  }
+
+  async googleDriveAccessToken(): Promise<string> {
+    const [tokenDoc, configDoc] = await Promise.all([
+      this.settings.findOne({ key: "google-drive" }),
+      this.settings.findOne({ key: "google-oauth-config" }),
+    ]);
+    if (!tokenDoc || !configDoc) throw new BadRequestException("Connect Google Drive in Settings first");
+    const token = JSON.parse(this.decrypt(tokenDoc.encryptedValue)) as { refreshToken: string };
+    const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
+    const body = new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: token.refreshToken,
+      grant_type: "refresh_token",
+    });
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const result = await response.json() as { access_token?: string; error_description?: string };
+    if (!response.ok || !result.access_token) throw new BadRequestException(result.error_description ?? "Could not refresh Google Drive access");
+    return result.access_token;
+  }
+
+  async disconnectGoogleDrive(actorId: string) {
+    await this.settings.deleteMany({ key: { $in: ["google-drive", "google-oauth-config"] } });
+    await this.settings.deleteMany({ key: { $regex: "^google-oauth-state:" } });
+    this.logger.warn("Google Drive disconnected by " + actorId);
+    return { connected: false };
+  }
+
   async disconnectCloudflare(actorId: string) {
     await this.settings.deleteOne({ key: "cloudflare" });
     this.logger.warn("Cloudflare integration disconnected by " + actorId);
