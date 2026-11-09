@@ -19,6 +19,7 @@ export const env = {
   hostingDomain: process.env.HOSTING_DOMAIN ?? "nimbushost.com",
   mongoUri: process.env.MONGODB_URI ?? "mongodb://localhost:27017/nimbus",
   jwtSecret: required("JWT_SECRET", "dev-insecure-jwt-secret"),
+  integrationEncryptionKey: required("INTEGRATION_ENCRYPTION_KEY", process.env.JWT_SECRET ?? "dev-insecure-integration-key"),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
   bootstrapAdminEmail: process.env.BOOTSTRAP_ADMIN_EMAIL ?? "admin@gmail.com",
   bootstrapAdminPassword: process.env.BOOTSTRAP_ADMIN_PASSWORD ?? "admin",
