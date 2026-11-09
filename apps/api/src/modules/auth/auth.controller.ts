@@ -28,32 +28,6 @@ export class AuthController {
     private readonly audit: AuditService,
   ) {}
 
-  /** ONE common login page — role routing happens server-side. */
-  @Public()
-  @Post("login")
-  @HttpCode(200)
-  @Throttle({ default: { ttl: 60000, limit: 10 } })
-  async login(
-    @Body() body: { identifier?: string; email?: string; password: string },
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const identifier = (body.identifier ?? body.email ?? "").toLowerCase().trim();
-    const user = await this.users.verifyCredentials(identifier, body.password);
-    if (!user) {
-      await this.audit.log({ action: "auth.login.failed", detail: identifier, sensitive: true });
-      throw new UnauthorizedException("Invalid credentials");
-    }
-    if (user.suspended) throw new UnauthorizedException("Account suspended");
-    await this.users.recordLogin(user._id.toString(), true);
-    const token = await this.signSession(user);
-    this.setCookie(res, token);
-    return {
-      token,
-      user: this.publicUser(user),
-      redirect: this.routeForRole(user.role),
-    };
-  }
-
   @Public()
   @Post("owner-bootstrap")
   @HttpCode(200)
