@@ -16,7 +16,7 @@ export class IntegrationsService implements OnModuleInit {
   constructor(@InjectModel(IntegrationSetting.name) private readonly settings: Model<IntegrationSettingDocument>) {}
 
   private key(): Buffer {
-    return createHash("sha256").update(env.jwtSecret).digest();
+    return createHash("sha256").update(env.integrationEncryptionKey).digest();
   }
 
   private encrypt(value: string): string {
