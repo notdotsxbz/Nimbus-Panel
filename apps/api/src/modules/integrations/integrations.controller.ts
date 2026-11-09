@@ -13,8 +13,14 @@ export class IntegrationsController {
   }
 
   @Post("firebase")
-  connect(@Body() dto: { serviceAccountJson: string }, @CurrentUser() user: AuthUser) {
-    return this.integrations.connectFirebase(dto.serviceAccountJson, user.id);
+  connect(@Body() dto: { serviceAccountJson: string; webConfig?: { apiKey: string; authDomain: string; projectId: string; appId: string; storageBucket?: string; messagingSenderId?: string } }, @CurrentUser() user: AuthUser) {
+    return this.integrations.connectFirebase(dto.serviceAccountJson, user.id, dto.webConfig);
+  }
+
+  @Post("firebase/users")
+  @Roles("owner")
+  createFirebaseUser(@Body() dto: { email: string; password: string; displayName?: string }) {
+    return this.integrations.createFirebaseAuthUser(dto.email, dto.password, dto.displayName);
   }
 
   @Delete("firebase")
