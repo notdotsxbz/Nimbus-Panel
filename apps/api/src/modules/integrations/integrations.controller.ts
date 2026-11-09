@@ -13,6 +13,7 @@ export class IntegrationsController {
   }
 
   @Post("firebase")
+  @Roles("owner")
   connect(@Body() dto: { serviceAccountJson: string; webConfig?: { apiKey: string; authDomain: string; projectId: string; appId: string; storageBucket?: string; messagingSenderId?: string } }, @CurrentUser() user: AuthUser) {
     return this.integrations.connectFirebase(dto.serviceAccountJson, user.id, dto.webConfig);
   }
@@ -64,6 +65,7 @@ export class IntegrationsController {
   }
 
   @Delete("firebase")
+  @Roles("owner")
   disconnect(@CurrentUser() user: AuthUser) {
     return this.integrations.disconnectFirebase(user.id);
   }
