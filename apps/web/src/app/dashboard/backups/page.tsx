@@ -41,14 +41,7 @@ export default function CustomerBackups() {
     }
   };
 
-  const connectDrive = async () => {
-    try {
-      const res = await api.get<{ url: string }>("/backups/gdrive/auth-url");
-      window.location.href = res.url;
-    } catch (err) {
-      show(err instanceof Error ? err.message : "Google Drive is not configured yet", "err");
-    }
-  };
+
 
   return (
     <div className="space-y-6">
@@ -57,7 +50,7 @@ export default function CustomerBackups() {
           <h1 className="text-2xl font-semibold">Backups</h1>
           <p className="mt-1 text-sm text-muted">Snapshots with integrity verification and staged restores.</p>
         </div>
-        <button className="btn-ghost" onClick={() => void connectDrive()}>Connect Google Drive</button>
+        <span className="text-xs text-muted">Backups are stored in the Drive configured by your panel owner.</span>
       </header>
 
       <GlassCard className="overflow-x-auto">
