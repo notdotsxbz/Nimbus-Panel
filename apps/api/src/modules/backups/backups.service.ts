@@ -46,7 +46,7 @@ export class BackupsService {
       const result = await this.nodes.agentCall(node, "/backups/create", {
         serviceId,
         backupId: backup._id!.toString(),
-      });
+      }, "POST", 10 * 60 * 1000);
       backup.sizeBytes = result.sizeBytes;
       backup.checksum = result.checksum;
       if (destination === "gdrive") {
