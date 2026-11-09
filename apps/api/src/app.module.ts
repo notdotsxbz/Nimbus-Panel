@@ -18,7 +18,6 @@ import { TicketsModule } from "./modules/tickets/tickets.module";
 import { MigrationsModule } from "./modules/migrations/migrations.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { ConsoleFilesModule } from "./modules/console-files/console-files.module";
-import { FirebaseAdminService } from "./firebase/firebase-admin.service";
 import { IntegrationsModule } from "./modules/integrations/integrations.module";
 
 @Module({
@@ -47,7 +46,6 @@ import { IntegrationsModule } from "./modules/integrations/integrations.module";
     IntegrationsModule,
   ],
   providers: [
-    FirebaseAdminService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
