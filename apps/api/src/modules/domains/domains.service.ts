@@ -108,7 +108,7 @@ export class DomainsService {
     if (domain.ownerId?.toString() !== user.id && !isStaff(user.role as never)) {
       throw new ForbiddenException("Not your domain");
     }
-    if (domain.source === "cloudflare" && env.cloudflareApiToken) {
+    if (domain.source === "cloudflare") {
       await this.cloudflareDeleteRecord(domain.hostname).catch(() => undefined);
     }
     await domain.deleteOne();
