@@ -2,13 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { login } from "@/lib/api";
+import { firebaseLogin } from "@/lib/api";
 
 /** ONE common login page — no separate admin/customer entry points.
  *  Role routing happens server-side (redirect field). */
 export default function LoginPage() {
   const router = useRouter();
-  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -18,7 +18,7 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await login(identifier.trim(), password);
+      const res = await firebaseLogin(email.trim(), password);
       router.replace(res.redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -39,16 +39,17 @@ export default function LoginPage() {
 
         <form onSubmit={onSubmit} className="mt-8 space-y-4" aria-describedby={error ? "login-error" : undefined}>
           <div>
-            <label className="label" htmlFor="identifier">
-              Email or username
+            <label className="label" htmlFor="email">
+              Email address
             </label>
             <input
-              id="identifier"
+              id="email"
               className="input"
-              autoComplete="username"
+              type="email"
+              autoComplete="email"
               required
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
           </div>
           <div>
@@ -80,7 +81,7 @@ export default function LoginPage() {
         <p className="mt-6 text-center text-[11px] leading-relaxed text-muted">
           Protected by rate limiting and audit logging.
           <br />
-          Forgot your password? Contact your administrator.
+          Accounts are created by the Nimbus owner. Self-registration is disabled. For password help, contact your administrator.
         </p>
       </div>
     </main>
