@@ -18,11 +18,6 @@ export class IntegrationsController {
     return this.integrations.connectFirebase(dto.serviceAccountJson, user.id, dto.webConfig);
   }
 
-  @Post("firebase/users")
-  @Roles("owner")
-  createFirebaseUser(@Body() dto: { email: string; password: string; displayName?: string }) {
-    return this.integrations.createFirebaseAuthUser(dto.email, dto.password, dto.displayName);
-  }
 
   @Get("cloudflare")
   cloudflareStatus() {
