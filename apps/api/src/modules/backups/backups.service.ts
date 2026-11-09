@@ -1,9 +1,8 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import axios from "axios";
-import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
 import { Backup, BackupDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
@@ -87,52 +86,6 @@ export class BackupsService {
     });
     await this.audit.log({ actorId: user.id, action: "backups.restore", targetId: backupId, sensitive: true });
     return { ok: true };
-  }
-
-  // ── Google Drive OAuth (refresh tokens encrypted at rest) ─────────────────
-
-  encryptToken(plain: string): string {
-    const key = createHash("sha256").update(env.jwtSecret).digest();
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", key, iv);
-    const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
-    return `${iv.toString("hex")}:${cipher.getAuthTag().toString("hex")}:${enc.toString("hex")}`;
-  }
-
-  decryptToken(payload: string): string {
-    const key = createHash("sha256").update(env.jwtSecret).digest();
-    const [ivHex, tagHex, dataHex] = payload.split(":");
-    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
-    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-    return Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]).toString("utf8");
-  }
-
-  googleAuthUrl(state: string): string {
-    const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI ?? `${env.webUrl}/settings/backups/callback`,
-      response_type: "code",
-      scope: "https://www.googleapis.com/auth/drive.file",
-      access_type: "offline",
-      prompt: "consent",
-      state,
-    });
-    return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-  }
-
-  async googleExchangeCode(code: string) {
-    const res = await axios.post("https://oauth2.googleapis.com/token", {
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI ?? `${env.webUrl}/settings/backups/callback`,
-    });
-    return {
-      accessToken: res.data.access_token as string,
-      // Encrypted at rest — never returned or logged in plaintext.
-      refreshTokenEncrypted: this.encryptToken(res.data.refresh_token ?? ""),
-    };
   }
 
   private async uploadGoogleDriveArchive(archive: Buffer, filename: string): Promise<string> {
