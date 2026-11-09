@@ -49,6 +49,23 @@ export class UsersService implements OnModuleInit {
     return ok ? user : null;
   }
 
+  /** One-time bootstrap: move the seeded owner into Firebase without exposing signup. */
+  async verifyBootstrapOwner(email: string, password: string): Promise<UserDocument> {
+    const user = await this.verifyCredentials(email.toLowerCase().trim(), password);
+    if (!user || user.role !== "owner" || user.firebaseUid || user.deletedAt || user.suspended) {
+      throw new ForbiddenException("Owner bootstrap is not available for this account");
+    }
+    return user;
+  }
+
+  async linkFirebaseUid(user: UserDocument, uid: string) {
+    user.firebaseUid = uid;
+    user.passwordHash = undefined;
+    user.mustChangePassword = false;
+    await user.save();
+    await this.audit.log({ actorId: user._id!.toString(), action: "auth.firebase.ownerBootstrap", sensitive: true });
+  }
+
   /** Current tokenVersion for session-revocation checks (banned/bumped users). */
   async getTokenVersion(userId: string): Promise<number> {
     const user = await this.users.findById(userId).select("+tokenVersion deletedAt suspended");
