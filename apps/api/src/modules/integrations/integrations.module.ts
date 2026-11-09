@@ -8,5 +8,6 @@ import { IntegrationsService } from "./integrations.service";
   imports: [MongooseModule.forFeature([{ name: IntegrationSetting.name, schema: IntegrationSettingSchema }])],
   controllers: [IntegrationsController],
   providers: [IntegrationsService],
+  exports: [IntegrationsService],
 })
 export class IntegrationsModule {}
