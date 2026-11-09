@@ -23,6 +23,23 @@ export class IntegrationsController {
     return this.integrations.createFirebaseAuthUser(dto.email, dto.password, dto.displayName);
   }
 
+  @Get("cloudflare")
+  cloudflareStatus() {
+    return this.integrations.cloudflareStatus();
+  }
+
+  @Post("cloudflare")
+  @Roles("owner")
+  connectCloudflare(@Body() dto: { apiToken: string; zoneId: string }, @CurrentUser() user: AuthUser) {
+    return this.integrations.connectCloudflare(dto.apiToken, dto.zoneId, user.id);
+  }
+
+  @Delete("cloudflare")
+  @Roles("owner")
+  disconnectCloudflare(@CurrentUser() user: AuthUser) {
+    return this.integrations.disconnectCloudflare(user.id);
+  }
+
   @Delete("firebase")
   disconnect(@CurrentUser() user: AuthUser) {
     return this.integrations.disconnectFirebase(user.id);
