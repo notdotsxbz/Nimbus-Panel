@@ -40,6 +40,29 @@ export class IntegrationsController {
     return this.integrations.disconnectCloudflare(user.id);
   }
 
+  @Get("google-drive")
+  googleDriveStatus() {
+    return this.integrations.googleDriveStatus();
+  }
+
+  @Post("google-drive/connect")
+  @Roles("owner")
+  beginGoogleDriveConnect(@Body() dto: { clientId: string; clientSecret: string }, @CurrentUser() user: AuthUser) {
+    return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user.id);
+  }
+
+  @Post("google-drive/exchange")
+  @Roles("owner")
+  exchangeGoogleDriveCode(@Body() dto: { code: string; state: string }) {
+    return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state);
+  }
+
+  @Delete("google-drive")
+  @Roles("owner")
+  disconnectGoogleDrive(@CurrentUser() user: AuthUser) {
+    return this.integrations.disconnectGoogleDrive(user.id);
+  }
+
   @Delete("firebase")
   disconnect(@CurrentUser() user: AuthUser) {
     return this.integrations.disconnectFirebase(user.id);
