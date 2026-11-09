@@ -55,6 +55,17 @@ export class AuthController {
   }
 
   @Public()
+  @Post("owner-bootstrap")
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
+  async bootstrapOwner(@Body() body: { email: string; password: string }) {
+    const owner = await this.users.verifyBootstrapOwner(body.email, body.password);
+    const firebaseUser = await this.integrations.createFirebaseAuthUser(owner.email, body.password);
+    await this.users.linkFirebaseUid(owner, firebaseUser.uid);
+    return { ok: true };
+  }
+
+  @Public()
   @Get("firebase-config")
   firebaseConfig() {
     return this.integrations.publicFirebaseConfig();
