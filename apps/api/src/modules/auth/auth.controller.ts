@@ -12,7 +12,7 @@ import { JwtService } from "@nestjs/jwt";
 import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
 import { env } from "../../config/env";
-import { FirebaseAdminService } from "../../firebase/firebase-admin.service";
+import { IntegrationsService } from "../integrations/integrations.service";
 import { AuditService } from "../audit/audit.service";
 import { UsersService } from "../users/users.service";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
@@ -24,7 +24,7 @@ export class AuthController {
   constructor(
     private readonly users: UsersService,
     private readonly jwt: JwtService,
-    private readonly firebase: FirebaseAdminService,
+    private readonly integrations: IntegrationsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -54,7 +54,13 @@ export class AuthController {
     };
   }
 
-  /** Firebase ID token login (email/password, Google, passkeys …). */
+  @Public()
+  @Get("firebase-config")
+  firebaseConfig() {
+    return this.integrations.publicFirebaseConfig();
+  }
+
+  /** Firebase ID token login (email/password). */
   @Public()
   @Post("firebase")
   @HttpCode(200)
@@ -63,7 +69,7 @@ export class AuthController {
     @Body() body: { idToken: string },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const decoded = await this.firebase.verifyIdToken(body.idToken);
+    const decoded = await this.integrations.verifyIdToken(body.idToken);
     let user = await this.users.findByFirebaseUid(decoded.uid);
     if (!user && decoded.email) user = await this.users.findByEmail(decoded.email);
     // Firebase sign-in must never provision a Nimbus account. An owner must
