@@ -168,7 +168,7 @@ export default function AdminSettings() {
           <label className="label">Firebase Admin service-account JSON</label>
           <textarea value={firebaseJson} onChange={e => setFirebaseJson(e.target.value)} rows={7} spellCheck={false} autoComplete="off" className="input w-full resize-y font-mono text-xs" placeholder={'{ "type": "service_account", ... }'} />
           <p className="text-xs text-muted">The service-account private key is sent over HTTPS and encrypted in the Nimbus database. Never share it in chat or public repositories.</p>
-          <div className="flex justify-end gap-2"><button className="btn-ghost" disabled={busy} onClick={() => setFirebaseOpen(false)}>Cancel</button><button className="btn-primary" disabled={busy || !firebaseJson.trim() || !firebaseWeb.apiKey || !firebaseWeb.authDomain || !firebaseWeb.projectId || !firebaseWeb.appId} onClick={() => void connectFirebase()}>{busy ? "Connecting…" : "Validate & connect"}</button></div>
+          <div className="sticky bottom-0 z-10 -mx-1 flex justify-end gap-2 border-t border-white/10 bg-neutral-950/95 px-1 pb-1 pt-3 backdrop-blur">{/* Keep the primary action visible while the configuration fields scroll. */}<button className="btn-ghost" disabled={busy} onClick={() => setFirebaseOpen(false)}>Cancel</button><button className="btn-primary" disabled={busy || !firebaseJson.trim() || !firebaseWeb.apiKey || !firebaseWeb.authDomain || !firebaseWeb.projectId || !firebaseWeb.appId} onClick={() => void connectFirebase()}>{busy ? "Connecting…" : "Validate & connect"}</button></div>
         </div>
       </Modal>
 
