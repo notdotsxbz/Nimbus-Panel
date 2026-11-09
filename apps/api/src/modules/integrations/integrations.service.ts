@@ -89,6 +89,13 @@ export class IntegrationsService implements OnModuleInit {
     return { uid: user.uid, email: user.email };
   }
 
+  async updateFirebaseAuthUserPassword(uid: string, password: string) {
+    if (!this.firebaseApp) throw new BadRequestException("Connect Firebase in Settings first");
+    if (password.length < 8) throw new BadRequestException("Password must be at least 8 characters");
+    const auth = await import("firebase-admin/auth");
+    await auth.getAuth(this.firebaseApp).updateUser(uid, { password });
+  }
+
   async deleteFirebaseAuthUser(uid: string) {
     if (!this.firebaseApp) return;
     const auth = await import("firebase-admin/auth");
