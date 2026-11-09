@@ -1,13 +1,13 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import axios from "axios";
-import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
 import { Backup, BackupDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
+import { IntegrationsService } from "../integrations/integrations.service";
 
 /**
  * Backup orchestration. Heavy lifting (tar + integrity) happens on the node
@@ -22,6 +22,7 @@ export class BackupsService {
     private readonly nodes: NodesService,
     private readonly services: ServicesService,
     private readonly audit: AuditService,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   async list(user: { id: string; role: string }, serviceId?: string) {
@@ -45,10 +46,18 @@ export class BackupsService {
       const result = await this.nodes.agentCall(node, "/backups/create", {
         serviceId,
         backupId: backup._id!.toString(),
-      });
-      backup.status = "completed";
+      }, "POST", 10 * 60 * 1000);
       backup.sizeBytes = result.sizeBytes;
       backup.checksum = result.checksum;
+      if (destination === "gdrive") {
+        const archive = await this.nodes.downloadBackupArchive(node, serviceId, backup._id!.toString());
+        if (!this.verifyChecksum(archive, result.checksum)) throw new BadRequestException("Downloaded archive failed checksum verification");
+        backup.remoteFileId = await this.uploadGoogleDriveArchive(
+          archive,
+          `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
+        );
+      }
+      backup.status = "completed";
       backup.completedAt = new Date();
     } catch (err) {
       backup.status = "failed";
@@ -79,54 +88,42 @@ export class BackupsService {
     return { ok: true };
   }
 
-  // ── Google Drive OAuth (refresh tokens encrypted at rest) ─────────────────
-
-  encryptToken(plain: string): string {
-    const key = createHash("sha256").update(env.jwtSecret).digest();
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", key, iv);
-    const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
-    return `${iv.toString("hex")}:${cipher.getAuthTag().toString("hex")}:${enc.toString("hex")}`;
-  }
-
-  decryptToken(payload: string): string {
-    const key = createHash("sha256").update(env.jwtSecret).digest();
-    const [ivHex, tagHex, dataHex] = payload.split(":");
-    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
-    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-    return Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]).toString("utf8");
-  }
-
-  googleAuthUrl(state: string): string {
-    const params = new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI ?? `${env.webUrl}/settings/backups/callback`,
-      response_type: "code",
-      scope: "https://www.googleapis.com/auth/drive.file",
-      access_type: "offline",
-      prompt: "consent",
-      state,
-    });
-    return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-  }
-
-  async googleExchangeCode(code: string) {
-    const res = await axios.post("https://oauth2.googleapis.com/token", {
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI ?? `${env.webUrl}/settings/backups/callback`,
-    });
-    return {
-      accessToken: res.data.access_token as string,
-      // Encrypted at rest — never returned or logged in plaintext.
-      refreshTokenEncrypted: this.encryptToken(res.data.refresh_token ?? ""),
-    };
+  private async uploadGoogleDriveArchive(archive: Buffer, filename: string): Promise<string> {
+    const accessToken = await this.integrations.googleDriveAccessToken();
+    const metadata = await axios.post(
+      "https://www.googleapis.com/drive/v3/files?fields=id,name",
+      { name: filename, mimeType: "application/octet-stream" },
+      { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
+    );
+    const fileId = metadata.data?.id as string | undefined;
+    if (!fileId) throw new BadRequestException("Google Drive did not create a backup file");
+    try {
+      await axios.patch(
+        `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`,
+        archive,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/octet-stream",
+            "content-length": String(archive.length),
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          timeout: 10 * 60 * 1000,
+        },
+      );
+      return fileId;
+    } catch (error) {
+      await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+      }).catch(() => undefined);
+      throw error;
+    }
   }
 
   /** Integrity verification helper (sha256) usable by scheduled verification jobs. */
   verifyChecksum(buffer: Buffer, expected: string): boolean {
-    return createHash("sha256").update(buffer).digest("hex") === expected;
+    const digest = createHash("sha256").update(buffer).digest();
+    return digest.toString("base64") === expected || digest.toString("hex") === expected;
   }
 }

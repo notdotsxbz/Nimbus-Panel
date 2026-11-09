@@ -49,6 +49,23 @@ export class UsersService implements OnModuleInit {
     return ok ? user : null;
   }
 
+  /** One-time bootstrap: move the seeded owner into Firebase without exposing signup. */
+  async verifyBootstrapOwner(email: string, password: string): Promise<UserDocument> {
+    const user = await this.verifyCredentials(email.toLowerCase().trim(), password);
+    if (!user || user.role !== "owner" || user.firebaseUid || user.deletedAt || user.suspended) {
+      throw new ForbiddenException("Owner bootstrap is not available for this account");
+    }
+    return user;
+  }
+
+  async linkFirebaseUid(user: UserDocument, uid: string) {
+    user.firebaseUid = uid;
+    user.passwordHash = undefined;
+    user.mustChangePassword = false;
+    await user.save();
+    await this.audit.log({ actorId: user._id!.toString(), action: "auth.firebase.ownerBootstrap", sensitive: true });
+  }
+
   /** Current tokenVersion for session-revocation checks (banned/bumped users). */
   async getTokenVersion(userId: string): Promise<number> {
     const user = await this.users.findById(userId).select("+tokenVersion deletedAt suspended");
@@ -78,6 +95,22 @@ export class UsersService implements OnModuleInit {
       displayName,
       role: "customer",
     });
+  }
+
+  /** Owner-created Firebase account; passwords are managed only by Firebase Auth. */
+  async createFirebaseCustomer(dto: { email: string; username: string; firebaseUid: string; role?: string; displayName?: string }) {
+    const email = dto.email.toLowerCase().trim();
+    const username = dto.username.toLowerCase().trim();
+    if (!USERNAME_RE.test(username)) throw new BadRequestException("Invalid username");
+    if (!["customer", "staff", "admin"].includes(dto.role ?? "customer")) throw new BadRequestException("Invalid role");
+    if (await this.users.findOne({ $or: [{ email }, { username }] })) throw new ConflictException("Email or username already taken");
+    const user = await this.users.create({
+      email, username, firebaseUid: dto.firebaseUid,
+      role: (dto.role as UserDocument["role"]) ?? "customer",
+      displayName: dto.displayName,
+    });
+    await this.audit.log({ action: "users.create", targetType: "user", targetId: user._id!.toString(), sensitive: true, detail: "Firebase Authentication account" });
+    return user;
   }
 
   /** Admin creates a customer with local credentials. */
@@ -115,6 +148,17 @@ export class UsersService implements OnModuleInit {
       sensitive: true,
     });
     return user;
+  }
+
+  async markFirebaseAccount(userId: string, uid: string, actorId: string) {
+    const user = await this.users.findById(userId).select("+passwordHash");
+    if (!user) throw new NotFoundException("User not found");
+    user.firebaseUid = uid;
+    user.passwordHash = undefined;
+    user.mustChangePassword = false;
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    await user.save();
+    await this.audit.log({ actorId, action: "users.firebase.passwordReset", targetType: "user", targetId: userId, sensitive: true });
   }
 
   /** Safe username changes — uniqueness checked case-insensitively. */

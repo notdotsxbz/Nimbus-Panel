@@ -96,7 +96,7 @@ export default function AdminUsers() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Users</h1>
-          <p className="mt-1 text-sm text-muted">Create, search and manage customer accounts.</p>
+          <p className="mt-1 text-sm text-muted">Only the owner can create panel accounts. Passwords are managed by Firebase Authentication.</p>
         </div>
         <button className="btn-primary" onClick={() => setOpen(true)}>
           Add Customer
@@ -174,7 +174,7 @@ export default function AdminUsers() {
         </table>
       </GlassCard>
 
-      <Modal open={open} title="Add Customer" onClose={() => setOpen(false)}>
+      <Modal open={open} title="Create panel user" onClose={() => setOpen(false)}>
         <form onSubmit={create} className="space-y-4">
           <div>
             <label className="label" htmlFor="u-email">Email</label>
@@ -196,7 +196,7 @@ export default function AdminUsers() {
               <option value="admin">Admin</option>
             </select>
           </div>
-          <button className="btn-primary w-full">Create customer</button>
+          <button className="btn-primary w-full">Create user</button>
         </form>
       </Modal>
 

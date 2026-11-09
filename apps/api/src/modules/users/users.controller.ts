@@ -1,15 +1,26 @@
+import { randomBytes } from "node:crypto";
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { UsersService } from "./users.service";
+import { IntegrationsService } from "../integrations/integrations.service";
 
 @Controller("users")
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(private readonly users: UsersService, private readonly integrations: IntegrationsService) {}
 
   @Post()
-  @Roles("owner", "admin")
-  create(@Body() dto: { email: string; username: string; password: string; role?: string; displayName?: string }) {
-    return this.users.createCustomer(dto);
+  @Roles("owner")
+  async create(@Body() dto: { email: string; username: string; password: string; role?: string; displayName?: string }) {
+    const firebaseUser = await this.integrations.createFirebaseAuthUser(dto.email, dto.password, dto.displayName);
+    try {
+      return await this.users.createFirebaseCustomer({
+        email: dto.email, username: dto.username, role: dto.role,
+        displayName: dto.displayName, firebaseUid: firebaseUser.uid,
+      });
+    } catch (error) {
+      await this.integrations.deleteFirebaseAuthUser(firebaseUser.uid);
+      throw error;
+    }
   }
 
   @Get()
@@ -28,12 +39,17 @@ export class UsersController {
   }
 
   @Post(":id/password")
-  @Roles("owner", "admin")
-  async resetAuth(@Param("id") id: string, @Body() dto: { password: string }, @CurrentUser() actor: AuthUser) {
-    const temp = dto.password ?? `nb-${Math.random().toString(36).slice(2, 14)}`;
+  @Roles("owner")
+  async resetAuth(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
+    const temp = "Nb-" + randomBytes(18).toString("base64url");
     const user = await this.users.findById(id);
     if (!user) return null;
-    await this.users.changePasswordForAdmin(id, temp, actor.id);
+    if (user.firebaseUid) {
+      await this.integrations.updateFirebaseAuthUserPassword(user.firebaseUid, temp);
+    } else {
+      const firebaseUser = await this.integrations.createFirebaseAuthUser(user.email, temp);
+      await this.users.markFirebaseAccount(id, firebaseUser.uid, actor.id);
+    }
     return { temporaryPassword: temp };
   }
 
@@ -53,8 +69,11 @@ export class UsersController {
   /** Soft deletion — audit and billing records preserved, sessions revoked. */
   @Delete(":id")
   @Roles("owner", "admin")
-  delete(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
-    return this.users.deleteUser(id, actor);
+  async delete(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
+    const target = await this.users.findById(id);
+    const result = await this.users.deleteUser(id, actor);
+    if (target?.firebaseUid) await this.integrations.deleteFirebaseAuthUser(target.firebaseUid);
+    return result;
   }
 
   @Patch("me/username")
@@ -62,8 +81,4 @@ export class UsersController {
     return this.users.changeUsername(actor.id, dto.username);
   }
 
-  @Post("me/password")
-  changePassword(@CurrentUser() actor: AuthUser, @Body() dto: { current: string; next: string }) {
-    return this.users.changePassword(actor.id, dto.current, dto.next);
-  }
 }

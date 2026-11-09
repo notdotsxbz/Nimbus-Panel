@@ -7,12 +7,14 @@ import { buildSubdomain, isStaff } from "@nimbus/shared";
 import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
 import { Domain, DomainDocument } from "./domain.schema";
+import { IntegrationsService } from "../integrations/integrations.service";
 
 @Injectable()
 export class DomainsService {
   constructor(
     @InjectModel(Domain.name) private readonly domains: Model<DomainDocument>,
     private readonly audit: AuditService,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   async listFor(user: { id: string; role: string }) {
@@ -106,7 +108,7 @@ export class DomainsService {
     if (domain.ownerId?.toString() !== user.id && !isStaff(user.role as never)) {
       throw new ForbiddenException("Not your domain");
     }
-    if (domain.source === "cloudflare" && env.cloudflareApiToken) {
+    if (domain.source === "cloudflare") {
       await this.cloudflareDeleteRecord(domain.hostname).catch(() => undefined);
     }
     await domain.deleteOne();
@@ -123,11 +125,13 @@ export class DomainsService {
 
   /** Scoped Cloudflare API adapter (token must be DNS-edit scoped — never global). */
   private async cfCall(path: string, init: Record<string, unknown> = {}) {
-    if (!env.cloudflareApiToken) throw new BadRequestException("Cloudflare is not configured");
+    const configured = await this.integrations.cloudflareCredentials();
+    const token = configured?.token ?? env.cloudflareApiToken;
+    if (!token) throw new BadRequestException("Cloudflare is not configured");
     const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
       ...init,
       headers: {
-        authorization: `Bearer ${env.cloudflareApiToken}`,
+        authorization: `Bearer ${token}`,
         "content-type": "application/json",
         ...(init.headers as Record<string, string> | undefined),
       },
@@ -138,19 +142,25 @@ export class DomainsService {
   }
 
   async cloudflareCreateRecord(type: string, name: string, content: string, proxied = false) {
-    return this.cfCall(`/zones/${env.cloudflareZoneId}/dns_records`, {
+    const configured = await this.integrations.cloudflareCredentials();
+    const zoneId = configured?.zoneId ?? env.cloudflareZoneId;
+    if (!zoneId) throw new BadRequestException("Cloudflare Zone ID is not configured");
+    return this.cfCall(`/zones/${zoneId}/dns_records`, {
       method: "POST",
       body: JSON.stringify({ type, name, content, proxied, ttl: 3600 }),
     });
   }
 
   private async cloudflareDeleteRecord(name: string) {
+    const configured = await this.integrations.cloudflareCredentials();
+    const zoneId = configured?.zoneId ?? env.cloudflareZoneId;
+    if (!zoneId) return;
     const records = (await this.cfCall(
-      `/zones/${env.cloudflareZoneId}/dns_records?name=${encodeURIComponent(name)}`,
+      `/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`,
       { method: "GET" },
     )) as { id: string }[];
     for (const rec of records ?? []) {
-      await this.cfCall(`/zones/${env.cloudflareZoneId}/dns_records/${rec.id}`, { method: "DELETE" });
+      await this.cfCall(`/zones/${zoneId}/dns_records/${rec.id}`, { method: "DELETE" });
     }
   }
 }

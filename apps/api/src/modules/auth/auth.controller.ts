@@ -12,7 +12,7 @@ import { JwtService } from "@nestjs/jwt";
 import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
 import { env } from "../../config/env";
-import { FirebaseAdminService } from "../../firebase/firebase-admin.service";
+import { IntegrationsService } from "../integrations/integrations.service";
 import { AuditService } from "../audit/audit.service";
 import { UsersService } from "../users/users.service";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
@@ -24,37 +24,28 @@ export class AuthController {
   constructor(
     private readonly users: UsersService,
     private readonly jwt: JwtService,
-    private readonly firebase: FirebaseAdminService,
+    private readonly integrations: IntegrationsService,
     private readonly audit: AuditService,
   ) {}
 
-  /** ONE common login page — role routing happens server-side. */
   @Public()
-  @Post("login")
+  @Post("owner-bootstrap")
   @HttpCode(200)
-  @Throttle({ default: { ttl: 60000, limit: 10 } })
-  async login(
-    @Body() body: { identifier?: string; email?: string; password: string },
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const identifier = (body.identifier ?? body.email ?? "").toLowerCase().trim();
-    const user = await this.users.verifyCredentials(identifier, body.password);
-    if (!user) {
-      await this.audit.log({ action: "auth.login.failed", detail: identifier, sensitive: true });
-      throw new UnauthorizedException("Invalid credentials");
-    }
-    if (user.suspended) throw new UnauthorizedException("Account suspended");
-    await this.users.recordLogin(user._id.toString(), true);
-    const token = await this.signSession(user);
-    this.setCookie(res, token);
-    return {
-      token,
-      user: this.publicUser(user),
-      redirect: this.routeForRole(user.role),
-    };
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
+  async bootstrapOwner(@Body() body: { email: string; password: string }) {
+    const owner = await this.users.verifyBootstrapOwner(body.email, body.password);
+    const firebaseUser = await this.integrations.createFirebaseAuthUser(owner.email, body.password);
+    await this.users.linkFirebaseUid(owner, firebaseUser.uid);
+    return { ok: true };
   }
 
-  /** Firebase ID token login (email/password, Google, passkeys …). */
+  @Public()
+  @Get("firebase-config")
+  firebaseConfig() {
+    return this.integrations.publicFirebaseConfig();
+  }
+
+  /** Firebase ID token login (email/password). */
   @Public()
   @Post("firebase")
   @HttpCode(200)
@@ -63,11 +54,20 @@ export class AuthController {
     @Body() body: { idToken: string },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const decoded = await this.firebase.verifyIdToken(body.idToken);
+    const decoded = await this.integrations.verifyIdToken(body.idToken);
     let user = await this.users.findByFirebaseUid(decoded.uid);
     if (!user && decoded.email) user = await this.users.findByEmail(decoded.email);
-    if (!user) {
-      user = await this.users.createFirebaseUser(decoded.uid, decoded.email ?? decoded.uid, decoded.name);
+    // Firebase sign-in must never provision a Nimbus account. An owner must
+    // create the account in the panel first; only then can its email be linked.
+    if (!user || user.deletedAt) {
+      throw new UnauthorizedException("This account has not been created by the Nimbus owner");
+    }
+    if (user.firebaseUid && user.firebaseUid !== decoded.uid) {
+      throw new UnauthorizedException("This Nimbus account is already linked to another Firebase user");
+    }
+    if (!user.firebaseUid) {
+      user.firebaseUid = decoded.uid;
+      await user.save();
     }
     if (user.suspended) throw new UnauthorizedException("Account suspended");
     await this.users.recordLogin(user._id.toString(), true);

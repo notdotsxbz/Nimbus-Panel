@@ -16,7 +16,7 @@ export class BackupsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: { serviceId: string; trigger?: string; destination?: string },
   ) {
-    return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "local");
+    return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
   }
 
   @Post(":id/restore")
@@ -24,14 +24,5 @@ export class BackupsController {
     return this.backups.restore(id, user);
   }
 
-  /** Returns the Google consent screen URL (OAuth happens on Google's domain). */
-  @Get("gdrive/auth-url")
-  gdriveAuthUrl(@CurrentUser() user: AuthUser) {
-    return { url: this.backups.googleAuthUrl(user.id) };
-  }
 
-  @Post("gdrive/exchange")
-  gdriveExchange(@Body() dto: { code: string }) {
-    return this.backups.googleExchangeCode(dto.code);
-  }
 }
