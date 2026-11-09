@@ -90,6 +90,24 @@ export async function login(identifier: string, password: string): Promise<{ tok
   return res;
 }
 
+export async function firebaseLogin(email: string, password: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
+  const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
+  const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(config.apiKey), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password, returnSecureToken: true }),
+  });
+  const result = await response.json() as { idToken?: string; error?: { message?: string } };
+  if (!response.ok || !result.idToken) {
+    const reason = result.error?.message ?? "Firebase sign-in failed";
+    throw new ApiError(response.status, reason.replaceAll("_", " ").toLowerCase());
+  }
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/firebase", { idToken: result.idToken });
+  localStorage.setItem("nimbus.token", session.token);
+  localStorage.setItem("nimbus.user", JSON.stringify(session.user));
+  return session;
+}
+
 export function logout() {
   localStorage.removeItem("nimbus.token");
   localStorage.removeItem("nimbus.user");
