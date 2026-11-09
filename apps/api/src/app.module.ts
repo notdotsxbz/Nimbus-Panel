@@ -19,6 +19,7 @@ import { MigrationsModule } from "./modules/migrations/migrations.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { ConsoleFilesModule } from "./modules/console-files/console-files.module";
 import { FirebaseAdminService } from "./firebase/firebase-admin.service";
+import { IntegrationsModule } from "./modules/integrations/integrations.module";
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { FirebaseAdminService } from "./firebase/firebase-admin.service";
     ConsoleFilesModule,
     MigrationsModule,
     NotificationsModule,
+    IntegrationsModule,
   ],
   providers: [
     FirebaseAdminService,
