@@ -80,6 +80,22 @@ export class UsersService implements OnModuleInit {
     });
   }
 
+  /** Owner-created Firebase account; passwords are managed only by Firebase Auth. */
+  async createFirebaseCustomer(dto: { email: string; username: string; firebaseUid: string; role?: string; displayName?: string }) {
+    const email = dto.email.toLowerCase().trim();
+    const username = dto.username.toLowerCase().trim();
+    if (!USERNAME_RE.test(username)) throw new BadRequestException("Invalid username");
+    if (!["customer", "staff", "admin"].includes(dto.role ?? "customer")) throw new BadRequestException("Invalid role");
+    if (await this.users.findOne({ $or: [{ email }, { username }] })) throw new ConflictException("Email or username already taken");
+    const user = await this.users.create({
+      email, username, firebaseUid: dto.firebaseUid,
+      role: (dto.role as UserDocument["role"]) ?? "customer",
+      displayName: dto.displayName,
+    });
+    await this.audit.log({ action: "users.create", targetType: "user", targetId: user._id!.toString(), sensitive: true, detail: "Firebase Authentication account" });
+    return user;
+  }
+
   /** Admin creates a customer with local credentials. */
   async createCustomer(dto: {
     email: string;
