@@ -326,6 +326,23 @@ export class NodesService {
     return res.data;
   }
 
+  /** Download a completed archive from the authenticated node agent. */
+  async downloadBackupArchive(node: NodeDocument, serviceId: string, backupId: string): Promise<Buffer> {
+    const token = this.jwt.sign({ nid: node._id!.toString() }, { secret: env.agentSharedSecret, expiresIn: "2m" });
+    const response = await axios({
+      method: "POST",
+      url: `${node.agentUrl}/backups/download`,
+      data: { serviceId, backupId },
+      headers: { authorization: `Bearer ${token}` },
+      timeout: 10 * 60 * 1000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      responseType: "arraybuffer",
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
+    });
+    return Buffer.from(response.data);
+  }
+
   async markOffline(id: string) {
     await this.nodes.updateOne({ _id: id }, { online: false });
   }
