@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { UsersService } from "./users.service";
@@ -38,12 +39,17 @@ export class UsersController {
   }
 
   @Post(":id/password")
-  @Roles("owner", "admin")
-  async resetAuth(@Param("id") id: string, @Body() dto: { password: string }, @CurrentUser() actor: AuthUser) {
-    const temp = dto.password ?? `nb-${Math.random().toString(36).slice(2, 14)}`;
+  @Roles("owner")
+  async resetAuth(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
+    const temp = "Nb-" + randomBytes(18).toString("base64url");
     const user = await this.users.findById(id);
     if (!user) return null;
-    await this.users.changePasswordForAdmin(id, temp, actor.id);
+    if (user.firebaseUid) {
+      await this.integrations.updateFirebaseAuthUserPassword(user.firebaseUid, temp);
+    } else {
+      const firebaseUser = await this.integrations.createFirebaseAuthUser(user.email, temp);
+      await this.users.markFirebaseAccount(id, firebaseUser.uid, actor.id);
+    }
     return { temporaryPassword: temp };
   }
 
