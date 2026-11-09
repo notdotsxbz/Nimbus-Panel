@@ -69,8 +69,11 @@ export class UsersController {
   /** Soft deletion — audit and billing records preserved, sessions revoked. */
   @Delete(":id")
   @Roles("owner", "admin")
-  delete(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
-    return this.users.deleteUser(id, actor);
+  async delete(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
+    const target = await this.users.findById(id);
+    const result = await this.users.deleteUser(id, actor);
+    if (target?.firebaseUid) await this.integrations.deleteFirebaseAuthUser(target.firebaseUid);
+    return result;
   }
 
   @Patch("me/username")
@@ -78,8 +81,4 @@ export class UsersController {
     return this.users.changeUsername(actor.id, dto.username);
   }
 
-  @Post("me/password")
-  changePassword(@CurrentUser() actor: AuthUser, @Body() dto: { current: string; next: string }) {
-    return this.users.changePassword(actor.id, dto.current, dto.next);
-  }
 }
