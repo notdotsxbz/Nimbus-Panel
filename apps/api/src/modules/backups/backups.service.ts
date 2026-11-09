@@ -170,6 +170,7 @@ export class BackupsService {
 
   /** Integrity verification helper (sha256) usable by scheduled verification jobs. */
   verifyChecksum(buffer: Buffer, expected: string): boolean {
-    return createHash("sha256").update(buffer).digest("hex") === expected;
+    const digest = createHash("sha256").update(buffer).digest();
+    return digest.toString("base64") === expected || digest.toString("hex") === expected;
   }
 }
