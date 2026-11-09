@@ -1,15 +1,25 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { UsersService } from "./users.service";
+import { IntegrationsService } from "../integrations/integrations.service";
 
 @Controller("users")
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(private readonly users: UsersService, private readonly integrations: IntegrationsService) {}
 
   @Post()
   @Roles("owner")
-  create(@Body() dto: { email: string; username: string; password: string; role?: string; displayName?: string }) {
-    return this.users.createCustomer(dto);
+  async create(@Body() dto: { email: string; username: string; password: string; role?: string; displayName?: string }) {
+    const firebaseUser = await this.integrations.createFirebaseAuthUser(dto.email, dto.password, dto.displayName);
+    try {
+      return await this.users.createFirebaseCustomer({
+        email: dto.email, username: dto.username, role: dto.role,
+        displayName: dto.displayName, firebaseUid: firebaseUser.uid,
+      });
+    } catch (error) {
+      await this.integrations.deleteFirebaseAuthUser(firebaseUser.uid);
+      throw error;
+    }
   }
 
   @Get()
