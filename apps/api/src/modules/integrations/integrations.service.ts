@@ -81,7 +81,7 @@ export class IntegrationsService implements OnModuleInit {
 
   async createFirebaseAuthUser(email: string, password: string, displayName?: string) {
     if (!this.firebaseApp) throw new BadRequestException("Connect Firebase in Settings first");
-    if (!email || !/^\\S+@\\S+\\.\\S+$/.test(email) || password.length < 8) {
+    if (!email || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) {
       throw new BadRequestException("A valid email and password of at least 8 characters are required");
     }
     const auth = await import("firebase-admin/auth");
@@ -162,7 +162,7 @@ export class IntegrationsService implements OnModuleInit {
     if (!clientId || !clientSecret || clientId.length > 512 || clientSecret.length > 1024) {
       throw new BadRequestException("Google OAuth Client ID and Client Secret are required");
     }
-    const redirectUri = env.webUrl.replace(/\\/$/, "") + "/admin/settings";
+    const redirectUri = env.webUrl.replace(/\/$/, "") + "/admin/settings";
     await this.settings.findOneAndUpdate(
       { key: "google-oauth-config" },
       { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret, redirectUri })), connectedAt: new Date(), updatedBy: actorId } },
