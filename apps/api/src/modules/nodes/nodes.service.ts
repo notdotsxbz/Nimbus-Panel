@@ -312,14 +312,14 @@ export class NodesService {
   }
 
   /** Authenticated command to a node agent (never the control plane shell). */
-  async agentCall(node: NodeDocument, path: string, body?: unknown, method: "GET" | "POST" = "POST") {
+  async agentCall(node: NodeDocument, path: string, body?: unknown, method: "GET" | "POST" = "POST", timeoutMs = 15_000) {
     const token = this.jwt.sign({ nid: node._id!.toString() }, { secret: env.agentSharedSecret, expiresIn: "2m" });
     const res = await axios({
       method,
       url: `${node.agentUrl}${path}`,
       data: body,
       headers: { authorization: `Bearer ${token}`, "x-nimbus-node": node._id!.toString() },
-      timeout: 15_000,
+      timeout: timeoutMs,
       // Agents use self-signed certificates scoped to their own IP
       httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
     });
