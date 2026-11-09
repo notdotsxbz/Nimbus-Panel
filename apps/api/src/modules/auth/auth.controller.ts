@@ -66,8 +66,17 @@ export class AuthController {
     const decoded = await this.firebase.verifyIdToken(body.idToken);
     let user = await this.users.findByFirebaseUid(decoded.uid);
     if (!user && decoded.email) user = await this.users.findByEmail(decoded.email);
-    if (!user) {
-      user = await this.users.createFirebaseUser(decoded.uid, decoded.email ?? decoded.uid, decoded.name);
+    // Firebase sign-in must never provision a Nimbus account. An owner must
+    // create the account in the panel first; only then can its email be linked.
+    if (!user || user.deletedAt) {
+      throw new UnauthorizedException("This account has not been created by the Nimbus owner");
+    }
+    if (user.firebaseUid && user.firebaseUid !== decoded.uid) {
+      throw new UnauthorizedException("This Nimbus account is already linked to another Firebase user");
+    }
+    if (!user.firebaseUid) {
+      user.firebaseUid = decoded.uid;
+      await user.save();
     }
     if (user.suspended) throw new UnauthorizedException("Account suspended");
     await this.users.recordLogin(user._id.toString(), true);
