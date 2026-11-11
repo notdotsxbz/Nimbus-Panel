@@ -12,47 +12,51 @@ and a powerful admin panel for **you**.
 
 ## 🚀 Installation
 
-Install NIMBUS on a **fresh Ubuntu or Debian VPS** using the interactive installer.
-You do not need to manually install Node.js, MongoDB, Redis, nginx, or build the
-web application — the installer handles these steps.
+Install NIMBUS on a **supported Ubuntu or Debian VPS** with the interactive installer.
+The installer prepares the control plane, including Node.js, MongoDB, Redis, the API,
+the Next.js web app, systemd services and nginx.
 
-### 1. Prepare your VPS
+### 1. VPS requirements
 
-| Requirement | Minimum | Recommended |
-| --- | --- | --- |
-| OS | Ubuntu 20.04/22.04/24.04/26.04 LTS or Debian 11/12 | Ubuntu 24.04 or 26.04 LTS |
-| Architecture | amd64 or arm64 | amd64 |
-| CPU | 1 vCPU | 2+ vCPU |
-| RAM | 4 GB | 8 GB+ when running workers |
-| Free disk | 10 GB | 20 GB+ |
-| Access | SSH with sudo/root privileges | Root SSH access |
+| Requirement | Minimum / supported |
+| --- | --- |
+| Operating system | Ubuntu 20.04, 22.04, 24.04 or 26.04; Debian 11 or 12 |
+| Architecture | amd64 (x86_64) or arm64 (aarch64) |
+| RAM | 4 GB recommended minimum; 8 GB recommended when running workers |
+| Free disk | At least 10 GB |
+| Access | SSH account with sudo/root privileges |
+| Network | Internet access; TCP 22, 80 and 443 for SSH and the panel |
 
-Before installation:
+The installer checks the OS/MongoDB compatibility matrix and stops on unsupported
+OS/codename combinations. It selects the MongoDB series automatically; do not force
+a different series unless you understand the compatibility risk.
+
+Before installing:
 
 - Create a DNS **A record** for your panel hostname pointing to the VPS public IPv4
   address (for example, `panel.example.com` → `YOUR_SERVER_IP`).
-- If you use Cloudflare DNS, set the panel record to **DNS only** while requesting
-  the initial Let's Encrypt certificate.
-- Allow inbound **TCP 22, 80 and 443** in your VPS/cloud firewall. Keep SSH
-  restricted to your own IP where possible.
-- Do not expose MongoDB (27017) or Redis (6379) to the public internet.
-- If your provider has a separate network firewall/security group, allow the same
-  required ports there too.
+- If the DNS record is proxied through Cloudflare, temporarily set it to **DNS only**
+  while requesting the initial Let's Encrypt certificate.
+- Allow inbound **TCP 22, 80 and 443** in your cloud firewall/security group. Keep
+  SSH restricted to your own IP where possible.
+- Do not expose MongoDB (27017), Redis (6379), or the Docker API to the public internet.
+- Compute nodes also need the service ports configured for the services you host
+  (default TCP/UDP 4001–4050); see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-> **Existing server?** The installer is designed to preserve an existing NIMBUS
-> `.env` and MongoDB data when re-run. It is not a general-purpose installer for
-> a server already hosting unrelated applications. Review the script before
-> running it on a production machine.
+> **Existing VPS:** The installer is designed for NIMBUS and preserves an existing
+> `/opt/nimbus/.env` and MongoDB data when re-run. It is not intended as a general
+> installer on a server running unrelated applications. Review the script first.
+> The installer updates the NIMBUS Git checkout to the selected repository branch.
 
-### 2. Run the installer
+### 2. Download and run the installer
 
-Connect to your VPS over SSH as a user with sudo privileges, then run:
+Connect to the VPS over SSH, then run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install.sh | sudo bash
 ```
 
-If you prefer to inspect the script before executing it:
+To inspect the installer before running it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install.sh -o nimbus-install.sh
@@ -60,83 +64,89 @@ less nimbus-install.sh
 sudo bash nimbus-install.sh
 ```
 
-The installer downloads and verifies its required helper files, checks the OS,
-architecture, disk space and network, then opens the interactive setup wizard.
-When launched through `curl | sudo bash`, it re-launches itself with the terminal
-attached so that the prompts work correctly.
+The one-line command downloads a verified installer bundle and re-launches it with
+your terminal attached so the interactive prompts work correctly.
 
 ### 3. Complete the setup wizard
 
-| Prompt | What to enter | Example |
-| --- | --- | --- |
-| Panel domain or IP | The hostname or public IP used to open the panel | `panel.example.com` |
-| Hosting domain | The base domain used for customer subdomains | `example.com` |
-| Administrator email | Your owner/admin login email | `admin@example.com` |
-| Administrator password | Use a password with at least 8 characters | Enter a strong unique password |
-| SSL via Let's Encrypt now? | Choose `Y` only when DNS points to this VPS and ports 80/443 are reachable | `Y` |
-| Proceed? | Review the plan and type `y` to begin | `y` |
+| Prompt | What to enter |
+| --- | --- |
+| Panel domain or IP | Hostname or public IP used to open the panel |
+| Hosting domain | Base domain used for customer subdomains |
+| Administrator email | Owner/admin login email |
+| Administrator password | Enter a unique password of at least 8 characters |
+| SSL via Let's Encrypt now? | Answer `Y` only after DNS points to this VPS and TCP 80/443 are reachable |
+| Proceed? | Review the installation plan and type `y` |
 
-The installer does **not** need your Firebase, Google, or Cloudflare tokens during
-this wizard. Those integrations are configured later from the panel's
-**Admin → Settings** page.
+You can leave the administrator password blank only if you explicitly type
+`CONFIRM` when asked. This accepts the temporary bootstrap password `admin`,
+which the panel requires you to change at first login. **Use a unique password
+instead whenever possible.**
 
-### 4. What the installer configures
+Firebase, Cloudflare and Google Drive credentials are not needed during installation.
+Configure optional integrations after signing in.
 
-The installer performs the following tasks:
+### 4. What the installer does
 
-1. Detects the operating system and checks that its MongoDB package combination
-   is supported.
-2. Audits stale MongoDB APT repository entries before installing packages.
-3. Installs required system packages, Node.js 22+, MongoDB and Redis (existing
-   MongoDB installations are not automatically upgraded or downgraded).
-4. Downloads the NIMBUS source code and creates or preserves the environment
-   configuration in `/opt/nimbus/.env`.
-5. Installs workspace dependencies and builds the API and web application.
-6. Copies Next.js standalone **static CSS/JavaScript assets and public files**
-   into the standalone runtime directory so the deployed UI is styled correctly.
-7. Creates and enables the `nimbus-api` and `nimbus-web` systemd services.
-8. Configures nginx as the reverse proxy and optionally requests a Let's Encrypt
-   certificate.
-9. Runs service health checks and prints an installation report.
+The current `installer/install.sh` workflow:
 
-The full installer log is saved at `/var/log/nimbus-install.log`.
+1. Checks the OS, architecture, available disk space and network connectivity.
+2. Selects the MongoDB package series for the supported OS/codename and audits
+   conflicting MongoDB APT repository entries.
+3. Installs required base packages, Node.js 22+, MongoDB and Redis.
+   An existing MongoDB installation is not automatically upgraded or downgraded.
+4. Clones or updates the NIMBUS source in `/opt/nimbus`.
+5. Creates `/opt/nimbus/.env` with generated secrets on a new installation.
+   On a re-run, an existing `.env` is preserved.
+6. Installs workspace dependencies and builds the API and web application.
+7. Copies Next.js standalone static assets and public files into the runtime
+   directory so the deployed UI can load its CSS and JavaScript.
+8. Creates and enables the `nimbus-api` and `nimbus-web` systemd services.
+9. Configures nginx and optionally requests a Let's Encrypt certificate.
+10. Prints service status and the panel URL.
 
-### 5. Open NIMBUS
+Full installation log: `/var/log/nimbus-install.log`.
 
-When the installer completes, open:
+### 5. Open the panel
+
+When installation completes, open your configured URL, for example:
 
 ```text
 https://panel.example.com
 ```
 
-Sign in using the administrator email and password you entered in the wizard.
-Keep your credentials private. If the installer reports that SSL issuance failed,
-check DNS and firewall access for TCP 80/443, then follow the
-[SSL troubleshooting guide](docs/TROUBLESHOOTING.md#ssl-error).
+Sign in with the administrator email and password from the wizard. If you used
+the temporary bootstrap password, change it immediately. If the panel does not
+load or SSL issuance fails, check the service logs and the
+[troubleshooting guide](docs/TROUBLESHOOTING.md).
 
-### 6. Configure integrations from the website
+### 6. Configure optional integrations
 
-After signing in with the owner account, open **Admin → Settings**.
+After signing in with an owner/admin account, open **Admin → Settings**. These
+integrations are configured in the website; they are not part of the VPS installer.
 
-- **Firebase Authentication:** configure the Firebase service-account JSON and
-  Firebase Web App configuration. In Firebase Console, enable the
-  **Email/Password** sign-in provider. Keep the service-account private key
-  secret; never paste it into a public issue, chat, or source-control commit.
-- **Cloudflare:** enter a scoped API token and the Zone ID for the domain you
-  want NIMBUS to manage. Do not use your Global API Key.
-- **Google Drive:** enter the Google OAuth Client ID and Client Secret, then
-  complete the Google authorization flow. Add the redirect URI displayed by
-  NIMBUS to the OAuth client in Google Cloud Console.
+- **Firebase Authentication:** create/select a Firebase project, enable the
+  **Email/Password** provider, add your panel hostname to Firebase Authentication's
+  authorized domains, and provide the Firebase Web App configuration plus the
+  Firebase Admin service-account JSON in the Firebase settings. Treat the JSON
+  private key as a secret; never commit it to GitHub or paste it into public chats.
+  If Google Cloud blocks service-account key creation through an organization
+  policy, the project administrator must review that policy, or use a project
+  where key creation is permitted. Do not try to bypass an organization policy.
+- **Cloudflare:** provide a narrowly scoped API token and the Zone ID for the
+  domain NIMBUS should manage. Do **not** use your Global API Key.
+- **Google Drive:** provide the Google OAuth Client ID and Client Secret, then
+  complete the authorization flow. Add the exact redirect URI shown by NIMBUS
+  to the OAuth client in Google Cloud Console.
 
-These are optional integrations and are **not** required just to install or open
-the panel. See the [Admin Guide](docs/ADMIN_GUIDE.md) and
-[Backup Guide](docs/BACKUP_GUIDE.md) for configuration details.
+For configuration details, see the
+[Admin Guide](docs/ADMIN_GUIDE.md) and [Backup Guide](docs/BACKUP_GUIDE.md).
 
 ### 7. Add a compute node
 
-Customer services run on compute nodes. In the panel, go to **Admin → Nodes →
-Add Node**, enter the node details, and create an enrollment token. Then run the
-command shown by the panel on the node itself. The general command format is:
+Customer workloads run on compute nodes. In the panel, open **Admin → Nodes →
+Add Node**, create the node and generate its enrollment token. On the compute
+node itself, run the command shown by the panel. The general command format is:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install-node.sh | sudo bash -s -- \\
@@ -144,43 +154,49 @@ curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/instal
   --token YOUR_ENROLLMENT_TOKEN
 ```
 
-Use the actual API URL and enrollment token generated by your panel. Treat the
-token as a secret; it is single-use and expires after 30 minutes.
+Use the actual panel URL and token generated by NIMBUS. Treat the token as a
+secret; the enrollment token is single-use and expires after 30 minutes.
+The node installer supports Ubuntu and Debian, installs Docker and the NIMBUS
+agent, and registers `nimbus-agent` as a systemd service. Check **Admin → Nodes**
+to verify the node comes online.
 
-### 8. Upgrade, diagnose and manage
+### 8. Upgrade, back up and diagnose
 
-**Upgrade an existing installation** (backs up the database before updating):
+**Upgrade an existing NIMBUS installation** (the upgrade script backs up the
+MongoDB database and `.env` before updating code):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/upgrade.sh | sudo bash
 ```
 
-**Run diagnostics:**
+**Run a diagnostic report:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash
 ```
 
-**Apply safe automatic repairs where possible:**
+**Run diagnostics and attempt safe service-restart repairs:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/doctor.sh | sudo bash -s -- --repair
 ```
 
-**Useful service commands:**
+**Create a control-plane backup:**
 
 ```bash
-sudo systemctl status nimbus-api nimbus-web
-sudo journalctl -u nimbus-api -n 100 --no-pager
-sudo journalctl -u nimbus-web -n 100 --no-pager
 sudo bash /opt/nimbus/installer/backup.sh
 ```
 
-For all installer options and maintenance commands, see
-[docs/COMMANDS.md](docs/COMMANDS.md). For common issues, see
-[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+**Useful service commands:**
 
+```bash
+sudo systemctl status nimbus-api nimbus-web mongod redis-server
+sudo journalctl -u nimbus-api -n 100 --no-pager
+sudo journalctl -u nimbus-web -n 100 --no-pager
+```
 
+See [docs/COMMANDS.md](docs/COMMANDS.md) for the complete command reference and
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues.
 ---
 
 ## 🎨 What's inside the panel
