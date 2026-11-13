@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { firebaseLogin } from "@/lib/api";
+import { api, firebaseGoogleRegister, firebaseLogin } from "@/lib/api";
 
 /** ONE common login page — no separate admin/customer entry points.
  *  Role routing happens server-side (redirect field). */
@@ -12,6 +12,31 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState("");
+  const [googleReady, setGoogleReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api.get<{ googleClientId?: string }>("/auth/firebase-config").then(config => {
+      if (!active || !config.googleClientId) return;
+      setGoogleClientId(config.googleClientId);
+      const render = () => {
+        const g = (window as unknown as { google?: { accounts: { id: { initialize: (o: { client_id: string; callback: (r: { credential: string }) => void }) => void; renderButton: (el: HTMLElement, options: Record<string, unknown>) => void } } }).google;
+        const target = document.getElementById("google-signin");
+        if (!g || !target) return;
+        g.accounts.id.initialize({ client_id: config.googleClientId!, callback: async result => {
+          setBusy(true); setError(null);
+          try { const session = await firebaseGoogleRegister(result.credential); router.replace(session.redirect); }
+          catch (err) { setError(err instanceof Error ? err.message : "Google sign-in failed"); setBusy(false); }
+        } });
+        g.accounts.id.renderButton(target, { theme: "filled_black", size: "large", shape: "rectangular", text: "continue_with", width: 300 });
+        setGoogleReady(true);
+      };
+      if ((window as unknown as { google?: unknown }).google) render();
+      else { const script = document.createElement("script"); script.src = "https://accounts.google.com/gsi/client"; script.async = true; script.onload = render; document.head.appendChild(script); }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [router]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -81,7 +106,7 @@ export default function LoginPage() {
         <p className="mt-6 text-center text-[11px] leading-relaxed text-muted">
           Protected by rate limiting and audit logging.
           <br />
-          Accounts are created by the Nimbus owner. Self-registration is disabled. For password help, contact your administrator.
+          New customers start with no service access. The owner assigns services after registration.
         </p>
       </div>
     </main>
