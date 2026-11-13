@@ -150,10 +150,6 @@ export default function AdminSettings() {
           </div>
         </GlassCard>
 
-        <GlassCard className="p-6">
-          <h2 className="font-semibold">Appearance</h2>
-          <p className="mt-2 text-sm text-muted">The Liquid Glass system ships with the black-and-white NIMBUS brand. Glass intensity, animation level and Low Bandwidth Mode follow system preferences and per-user toggles.</p>
-        </GlassCard>
       </div>
 
       <Modal open={firebaseOpen} title="Connect Firebase Authentication" onClose={() => !busy && setFirebaseOpen(false)} footer={<div className="flex justify-end gap-2"><button className="btn-ghost" disabled={busy} onClick={() => setFirebaseOpen(false)}>Cancel</button><button className="btn-primary" disabled={busy || !firebaseJson.trim() || !firebaseWeb.apiKey || !firebaseWeb.authDomain || !firebaseWeb.projectId || !firebaseWeb.appId} onClick={() => void connectFirebase()}>{busy ? "Connecting…" : "Validate & connect"}</button></div>}>
