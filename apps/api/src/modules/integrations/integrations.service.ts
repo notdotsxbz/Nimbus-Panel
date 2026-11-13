@@ -154,22 +154,40 @@ export class IntegrationsService implements OnModuleInit {
   }
 
   async googleDriveStatus() {
-    const saved = await this.settings.findOne({ key: "google-drive" }).select("connectedAt").lean();
-    return { connected: Boolean(saved), connectedAt: saved?.connectedAt ?? null };
+    const [saved, config] = await Promise.all([
+      this.settings.findOne({ key: "google-drive" }).select("connectedAt").lean(),
+      this.settings.findOne({ key: "google-oauth-config" }).select("_id").lean(),
+    ]);
+    if (!saved || !config) return { connected: false, connectedAt: null };
+    try {
+      await this.googleDriveAccessToken();
+      return { connected: true, connectedAt: saved.connectedAt ?? null };
+    } catch {
+      return { connected: false, connectedAt: saved.connectedAt ?? null, reconnectRequired: true };
+    }
   }
 
-  async beginGoogleDriveConnect(clientId: string, clientSecret: string, actorId: string) {
+  async beginGoogleDriveConnect(clientId: string, clientSecret: string, actorId: string, origin?: string) {
     if (!clientId || !clientSecret || clientId.length > 512 || clientSecret.length > 1024) {
       throw new BadRequestException("Google OAuth Client ID and Client Secret are required");
     }
-    const redirectUri = env.webUrl.replace(/\/$/, "") + "/admin/settings";
+    let panelOrigin: URL;
+    try { panelOrigin = new URL(origin || env.webUrl); }
+    catch { throw new BadRequestException("Could not determine the panel URL for Google OAuth"); }
+    if (panelOrigin.protocol !== "https:" && !(panelOrigin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(panelOrigin.hostname))) {
+      throw new BadRequestException("Google Drive OAuth must use the HTTPS panel domain");
+    }
+    if (panelOrigin.pathname !== "/" || panelOrigin.search || panelOrigin.hash || panelOrigin.username || panelOrigin.password) {
+      throw new BadRequestException("Invalid panel origin for Google OAuth");
+    }
+    const redirectUri = panelOrigin.origin + "/admin/settings";
     await this.settings.findOneAndUpdate(
       { key: "google-oauth-config" },
-      { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret, redirectUri })), connectedAt: new Date(), updatedBy: actorId } },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret })), connectedAt: new Date(), updatedBy: actorId } },
       { upsert: true, new: true },
     );
     const state = randomBytes(24).toString("hex");
-    await this.settings.create({ key: "google-oauth-state:" + state, encryptedValue: this.encrypt(JSON.stringify({ actorId })), connectedAt: new Date() });
+    await this.settings.create({ key: "google-oauth-state:" + state, encryptedValue: this.encrypt(JSON.stringify({ actorId, redirectUri })), connectedAt: new Date() });
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -192,26 +210,33 @@ export class IntegrationsService implements OnModuleInit {
     await this.settings.deleteOne({ key: pendingKey });
     const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
     if (!configDoc) throw new BadRequestException("Google OAuth settings are missing");
-    const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string; redirectUri: string };
+    const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
+    const pendingData = JSON.parse(this.decrypt(pending.encryptedValue)) as { actorId: string; redirectUri: string };
     const body = new URLSearchParams({
       client_id: config.clientId,
       client_secret: config.clientSecret,
       code,
       grant_type: "authorization_code",
-      redirect_uri: config.redirectUri,
+      redirect_uri: pendingData.redirectUri,
     });
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
     });
-    const tokens = await response.json() as { refresh_token?: string; access_token?: string; error_description?: string };
-    if (!response.ok || !tokens.refresh_token) {
-      throw new BadRequestException(tokens.error_description ?? "Google did not return a refresh token. Reconnect and approve access.");
+    const tokens = await response.json() as { refresh_token?: string; access_token?: string; error_description?: string; error?: string };
+    if (!response.ok) {
+      throw new BadRequestException(tokens.error_description ?? tokens.error ?? "Google rejected the OAuth authorization code");
+    }
+    const previous = await this.settings.findOne({ key: "google-drive" });
+    const previousToken = previous ? (JSON.parse(this.decrypt(previous.encryptedValue)) as { refreshToken?: string }).refreshToken : undefined;
+    const refreshToken = tokens.refresh_token ?? previousToken;
+    if (!refreshToken) {
+      throw new BadRequestException("Google did not provide a refresh token. Remove Nimbus from your Google Account connections, then reconnect and approve Drive access.");
     }
     await this.settings.findOneAndUpdate(
       { key: "google-drive" },
-      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken: tokens.refresh_token })), connectedAt: new Date(), updatedBy: "google-oauth" } },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken })), connectedAt: new Date(), updatedBy: "google-oauth" } },
       { upsert: true, new: true },
     );
     return { connected: true };
@@ -236,8 +261,8 @@ export class IntegrationsService implements OnModuleInit {
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
     });
-    const result = await response.json() as { access_token?: string; error_description?: string };
-    if (!response.ok || !result.access_token) throw new BadRequestException(result.error_description ?? "Could not refresh Google Drive access");
+    const result = await response.json() as { access_token?: string; error_description?: string; error?: string };
+    if (!response.ok || !result.access_token) throw new BadRequestException(result.error_description ?? result.error ?? "Could not refresh Google Drive access. Reconnect Google Drive in Settings.");
     return result.access_token;
   }
 
