@@ -9,6 +9,8 @@ import { JWT_COOKIE } from "./common/constants";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  // Allow small, validated image data URLs for the global panel background upload.
+  app.useBodyParser("json", { limit: "2mb" });
   app.useLogger(new Logger("Nimbus"));
   app.setGlobalPrefix("api/v1");
   app.enableCors({
