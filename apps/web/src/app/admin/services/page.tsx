@@ -53,7 +53,7 @@ export default function AdminServices() {
     setOpen(true);
     try {
       const [u, n] = await Promise.all([
-        api.get<{ items: { _id: string; username: string }[] }>("/users"),
+        api.get<{ items: { _id: string; username: string; role?: string }[] }>("/users"),
         api.get<NodeOption[]>("/nodes/capacity"),
       ]);
       setUsers((u.items ?? []).filter(user => user.role === "customer"));
