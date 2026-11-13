@@ -141,6 +141,17 @@ export class ServicesService {
     return service;
   }
 
+  /** Owner-only reassignment controls which customer can access this service. */
+  async assignOwner(id: string, ownerId: string, actor: AuthUser) {
+    if (!Types.ObjectId.isValid(ownerId)) throw new BadRequestException("Invalid customer ID");
+    const service = await this.services.findById(id);
+    if (!service) throw new NotFoundException("Service not found");
+    service.ownerId = new Types.ObjectId(ownerId);
+    await service.save();
+    await this.audit.log({ actorId: actor.id, action: "services.assignOwner", targetType: "service", targetId: id, detail: `Access assigned to user ${ownerId}`, sensitive: true });
+    return service;
+  }
+
   async suspend(id: string, actor: AuthUser) {
     const service = await this.services.findByIdAndUpdate(
       id,
