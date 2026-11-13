@@ -109,7 +109,11 @@ export class AuthController {
     const decoded = await this.integrations.verifyIdToken(body.idToken);
     if (!decoded.email) throw new UnauthorizedException("A verified email address is required");
     let user = await this.users.findByFirebaseUid(decoded.uid);
-    if (!user) user = await this.users.createFirebaseUser(decoded.uid, decoded.email, decoded.name);
+    if (!user) {
+      const existingEmail = await this.users.findByEmail(decoded.email);
+      if (existingEmail) throw new UnauthorizedException("An account with this email already exists. Sign in instead.");
+      user = await this.users.createFirebaseUser(decoded.uid, decoded.email, decoded.name);
+    }
     if (user.role !== "customer" || user.deletedAt || user.suspended) throw new UnauthorizedException("This account cannot self-register");
     await this.users.recordLogin(user._id.toString(), true);
     await this.audit.log({ actorId: user._id.toString(), action: "auth.register", sensitive: true });
