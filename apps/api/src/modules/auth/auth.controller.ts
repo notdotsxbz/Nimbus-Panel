@@ -39,6 +39,25 @@ export class AuthController {
     return { ok: true };
   }
 
+  /** Local-password auth exists only for isolated CI integration tests. */
+  @Public()
+  @Post("test-login")
+  @HttpCode(200)
+  async testLogin(
+    @Body() body: { identifier: string; password: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (env.nodeEnv !== "test") throw new NotFoundException();
+    const user = await this.users.verifyCredentials(body.identifier, body.password);
+    if (!user || user.suspended || user.deletedAt) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
+    await this.users.recordLogin(user._id.toString(), true);
+    const token = await this.signSession(user);
+    this.setCookie(res, token);
+    return { token, user: this.publicUser(user), redirect: this.routeForRole(user.role) };
+  }
+
   @Public()
   @Get("firebase-config")
   firebaseConfig() {
