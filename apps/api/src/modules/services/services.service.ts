@@ -8,6 +8,7 @@ import { NodesService } from "../nodes/nodes.service";
 import type { AuthUser } from "../../common/auth.decorators";
 import { isStaffRole } from "../../common/auth.decorators";
 import { Service, ServiceDocument } from "./service.schema";
+import { User, UserDocument } from "../users/user.schema";
 
 export interface CreateServiceDto {
   name: string;
@@ -29,6 +30,7 @@ export interface CreateServiceDto {
 export class ServicesService {
   constructor(
     @InjectModel(Service.name) private readonly services: Model<ServiceDocument>,
+    @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly nodes: NodesService,
     private readonly audit: AuditService,
   ) {}
@@ -52,6 +54,8 @@ export class ServicesService {
 
   async create(dto: CreateServiceDto, actor: AuthUser) {
     if (dto.ramMb <= 0 || dto.diskGb <= 0) throw new BadRequestException("Invalid resource limits");
+    const customer = await this.users.findById(dto.ownerId);
+    if (!customer || customer.role !== "customer" || customer.suspended || customer.deletedAt) throw new BadRequestException("Choose an active customer account");
     const node = await this.nodes.get(dto.nodeId);
     if (!node.online || node.maintenanceMode) {
       throw new BadRequestException("Node is offline or in maintenance mode");
@@ -144,8 +148,9 @@ export class ServicesService {
   /** Owner-only reassignment controls which customer can access this service. */
   async assignOwner(id: string, ownerId: string, actor: AuthUser) {
     if (!Types.ObjectId.isValid(ownerId)) throw new BadRequestException("Invalid customer ID");
-    const service = await this.services.findById(id);
+    const [service, customer] = await Promise.all([this.services.findById(id), this.users.findById(ownerId)]);
     if (!service) throw new NotFoundException("Service not found");
+    if (!customer || customer.role !== "customer" || customer.suspended || customer.deletedAt) throw new BadRequestException("Choose an active customer account");
     service.ownerId = new Types.ObjectId(ownerId);
     await service.save();
     await this.audit.log({ actorId: actor.id, action: "services.assignOwner", targetType: "service", targetId: id, detail: `Access assigned to user ${ownerId}`, sensitive: true });
