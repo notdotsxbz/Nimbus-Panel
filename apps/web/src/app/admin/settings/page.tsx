@@ -13,6 +13,7 @@ export default function AdminSettings() {
   const [firebase, setFirebase] = useState<FirebaseStatus>({ connected: false, projectId: null, webConfigured: false, connectedAt: null });
   const [cloudflare, setCloudflare] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
   const [drive, setDrive] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
+  const [backgroundVideoUrl, setBackgroundVideoUrl] = useState("");
   const [firebaseJson, setFirebaseJson] = useState("");
   const [firebaseWeb, setFirebaseWeb] = useState({ apiKey: "", authDomain: "", projectId: "", appId: "", storageBucket: "", messagingSenderId: "" });
   const [cfToken, setCfToken] = useState("");
@@ -30,10 +31,12 @@ export default function AdminSettings() {
       api.get<FirebaseStatus>("/integrations/firebase"),
       api.get<ConnectionStatus>("/integrations/cloudflare"),
       api.get<ConnectionStatus>("/integrations/google-drive"),
+      api.get<{ backgroundVideoUrl?: string }>("/appearance/settings"),
     ]);
     if (results[0].status === "fulfilled") setFirebase(results[0].value);
     if (results[1].status === "fulfilled") setCloudflare(results[1].value);
     if (results[2].status === "fulfilled") setDrive(results[2].value);
+    if (results[3].status === "fulfilled") setBackgroundVideoUrl(results[3].value.backgroundVideoUrl ?? "");
   };
 
   useEffect(() => { void load(); }, []);
@@ -117,7 +120,7 @@ export default function AdminSettings() {
               {firebase.connected && firebase.webConfigured ? "Connected" : "Setup required"}
             </span>
           </div>
-          <p className="mt-2 text-sm text-muted">Panel email/password sign-in and owner-managed user accounts. Public registration is disabled. Passwords are managed by Firebase Authentication.</p>
+          <p className="mt-2 text-sm text-muted">Panel email/password sign-in and owner-managed user accounts. Customer registration and Google sign-in use Firebase Authentication. New customers receive no service access until the owner assigns a service.</p>
           {firebase.projectId ? <p className="mt-3 text-xs text-muted">Project: <span className="font-mono">{firebase.projectId}</span></p> : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setFirebaseOpen(true)}>{firebase.connected ? "Update Firebase" : "Connect Firebase"}</button>
