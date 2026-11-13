@@ -100,6 +100,7 @@ jobs:
           --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
           --health-interval 10s --health-timeout 5s --health-retries 5
     env:
+      NODE_ENV: test
       MONGODB_URI: mongodb://127.0.0.1:27017/nimbus-ci
       JWT_SECRET: ci-only-secret-not-used-in-production-0123456789
       AGENT_SHARED_SECRET: ci-only-agent-secret
