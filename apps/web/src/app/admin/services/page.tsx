@@ -27,7 +27,7 @@ export default function AdminServices() {
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(1);
-  const [users, setUsers] = useState<{ _id: string; username: string }[]>([]);
+  const [users, setUsers] = useState<{ _id: string; username: string; role?: string }[]>([]);
   const [nodes, setNodes] = useState<NodeOption[]>([]);
   const { show, node } = useToast();
 
@@ -35,10 +35,10 @@ export default function AdminServices() {
     try {
       const [res, userRes] = await Promise.all([
         api.get<{ items?: ServiceRow[] } | ServiceRow[]>("/services"),
-        api.get<{ items: { _id: string; username: string }[] }>("/users"),
+        api.get<{ items: { _id: string; username: string; role?: string }[] }>("/users"),
       ]);
       setServices(Array.isArray(res) ? res : res.items ?? []);
-      setUsers(userRes.items ?? []);
+      setUsers((userRes.items ?? []).filter(u => u.role === "customer"));
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load services", "err");
     }
@@ -56,7 +56,7 @@ export default function AdminServices() {
         api.get<{ items: { _id: string; username: string }[] }>("/users"),
         api.get<NodeOption[]>("/nodes/capacity"),
       ]);
-      setUsers(u.items);
+      setUsers((u.items ?? []).filter(user => user.role === "customer"));
       setNodes(n);
     } catch {
       show("Could not load users or node capacity", "err");
