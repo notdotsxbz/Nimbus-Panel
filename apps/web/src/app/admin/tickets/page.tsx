@@ -69,6 +69,18 @@ export default function AdminTickets() {
     }
   };
 
+  const deleteTicket = async (ticket: TicketRow) => {
+    if (!window.confirm(`Permanently delete ticket "${ticket.subject}"? This cannot be undone.`)) return;
+    try {
+      await api.del(`/tickets/${ticket._id}`);
+      if (detail?._id === ticket._id) setDetail(null);
+      show("Ticket deleted", "ok");
+      void load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Ticket deletion failed", "err");
+    }
+  };
+
   const setStatus = async (status: string) => {
     if (!detail) return;
     try {
@@ -110,6 +122,7 @@ export default function AdminTickets() {
               <div className="flex items-center gap-3">
                 <span className="glass-soft rounded-lg px-2.5 py-1 text-xs">{STATUS_LABELS[t.status]}</span>
                 <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => void openDetail(t._id)}>Open</button>
+                <button className="btn-danger !px-3 !py-1.5 text-xs" onClick={() => void deleteTicket(t)}>Delete</button>
               </div>
             </GlassCard>
           ))}
