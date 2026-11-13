@@ -13,7 +13,7 @@ export default function AdminSettings() {
   const [firebase, setFirebase] = useState<FirebaseStatus>({ connected: false, projectId: null, webConfigured: false, connectedAt: null });
   const [cloudflare, setCloudflare] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
   const [drive, setDrive] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
-  const [backgroundVideoUrl, setBackgroundVideoUrl] = useState("");
+  const [backgroundImageData, setBackgroundImageData] = useState("");
   const [firebaseJson, setFirebaseJson] = useState("");
   const [firebaseWeb, setFirebaseWeb] = useState({ apiKey: "", authDomain: "", projectId: "", appId: "", storageBucket: "", messagingSenderId: "", googleClientId: "" });
   const [cfToken, setCfToken] = useState("");
@@ -31,12 +31,12 @@ export default function AdminSettings() {
       api.get<FirebaseStatus>("/integrations/firebase"),
       api.get<ConnectionStatus>("/integrations/cloudflare"),
       api.get<ConnectionStatus>("/integrations/google-drive"),
-      api.get<{ backgroundVideoUrl?: string }>("/appearance/settings"),
+      api.get<{ backgroundImageData?: string }>("/appearance/settings"),
     ]);
     if (results[0].status === "fulfilled") setFirebase(results[0].value);
     if (results[1].status === "fulfilled") setCloudflare(results[1].value);
     if (results[2].status === "fulfilled") setDrive(results[2].value);
-    if (results[3].status === "fulfilled") setBackgroundVideoUrl(results[3].value.backgroundVideoUrl ?? "");
+    if (results[3].status === "fulfilled") setBackgroundImageData(results[3].value.backgroundImageData ?? "");
   };
 
   useEffect(() => { void load(); }, []);
@@ -154,12 +154,22 @@ export default function AdminSettings() {
         </GlassCard>
 
         <GlassCard className="p-6 md:col-span-2">
-          <h2 className="font-semibold">Animated background video</h2>
-          <p className="mt-2 text-sm text-muted">Paste a direct HTTPS MP4 or WebM link. It plays muted and loops behind the panel with a blur and dark overlay. Leave blank to disable.</p>
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-            <input className="input min-w-0 flex-1" type="url" placeholder="https://example.com/background.mp4" value={backgroundVideoUrl} onChange={e => setBackgroundVideoUrl(e.target.value)} />
-            <button className="btn-primary" disabled={busy} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundVideoUrl }); show("Background video setting saved", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save video URL", "err"); } finally { setBusy(false); } }}>Save video</button>
+          <h2 className="font-semibold">Panel background image</h2>
+          <p className="mt-2 text-sm text-muted">Upload a PNG, JPEG, WebP or GIF image up to 1 MB. It will appear softly blurred behind the panel for every user. Leave empty and save to remove it.</p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <input className="input min-w-0 flex-1" type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={busy} onChange={e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              if (file.size > 1_000_000) { show("Choose an image smaller than 1 MB", "err"); e.target.value = ""; return; }
+              const reader = new FileReader();
+              reader.onload = () => setBackgroundImageData(typeof reader.result === "string" ? reader.result : "");
+              reader.onerror = () => show("Could not read that image file", "err");
+              reader.readAsDataURL(file);
+            }} />
+            <button className="btn-primary" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData }); show("Background image saved for all users", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save background image", "err"); } finally { setBusy(false); } }}>Save image</button>
+            <button className="btn-ghost" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData: "" }); setBackgroundImageData(""); show("Background image removed", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not remove image", "err"); } finally { setBusy(false); } }}>Remove</button>
           </div>
+          {backgroundImageData ? <img src={backgroundImageData} alt="Selected panel background preview" className="mt-4 max-h-40 max-w-xs rounded-xl object-cover" /> : null}
         </GlassCard>
       </div>
 
