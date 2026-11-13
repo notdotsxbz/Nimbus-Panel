@@ -13,6 +13,7 @@ export class Theme {
   @Prop({ default: false, index: true }) isPublished!: boolean;
   @Prop({ type: Types.ObjectId, ref: "User" }) createdBy?: Types.ObjectId;
   @Prop() createdAt!: Date;
+  @Prop({ maxlength: 2048 }) backgroundVideoUrl?: string;
   @Prop() updatedAt!: Date;
 }
 
