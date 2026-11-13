@@ -90,11 +90,17 @@ export class BackupsService {
 
   private async uploadGoogleDriveArchive(archive: Buffer, filename: string): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken();
-    const metadata = await axios.post(
-      "https://www.googleapis.com/drive/v3/files?fields=id,name",
-      { name: filename, mimeType: "application/octet-stream" },
-      { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
-    );
+    let metadata;
+    try {
+      metadata = await axios.post(
+        "https://www.googleapis.com/drive/v3/files?fields=id,name",
+        { name: filename, mimeType: "application/octet-stream" },
+        { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
+      );
+    } catch (error) {
+      const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
+      throw new BadRequestException(details ?? "Google Drive could not create the backup file. Check the connected Google account and Drive permissions.");
+    }
     const fileId = metadata.data?.id as string | undefined;
     if (!fileId) throw new BadRequestException("Google Drive did not create a backup file");
     try {
@@ -117,7 +123,8 @@ export class BackupsService {
       await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
         headers: { authorization: `Bearer ${accessToken}` },
       }).catch(() => undefined);
-      throw error;
+      const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
+      throw new BadRequestException(details ?? "Google Drive upload failed. Reconnect the shared Drive account and try again.");
     }
   }
 
