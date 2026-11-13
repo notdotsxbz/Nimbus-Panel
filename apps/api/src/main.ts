@@ -2,15 +2,17 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import { WsAdapter } from "@nestjs/platform-ws";
+import { json, urlencoded } from "express";
 import type { NextFunction, Request, Response } from "express";
 import { AppModule } from "./app.module";
 import { env, isProduction } from "./config/env";
 import { JWT_COOKIE } from "./common/constants";
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   // Allow small, validated image data URLs for the global panel background upload.
-  app.useBodyParser("json", { limit: "2mb" });
+  app.use(json({ limit: "2mb" }));
+  app.use(urlencoded({ extended: true, limit: "2mb" }));
   app.useLogger(new Logger("Nimbus"));
   app.setGlobalPrefix("api/v1");
   app.enableCors({
