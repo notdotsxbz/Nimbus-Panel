@@ -91,7 +91,27 @@ export async function login(identifier: string, password: string): Promise<{ tok
 }
 
 export async function firebaseLogin(email: string, password: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
-  const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
+  const localOwnerLogin = async () => {
+    const session = await api.post<{ token: string; user: SessionUser; redirect: string }>(
+      "/auth/owner-local-bootstrap-login",
+      { email, password },
+    );
+    localStorage.setItem("nimbus.token", session.token);
+    localStorage.setItem("nimbus.user", JSON.stringify(session.user));
+    return session;
+  };
+
+  let config: { apiKey: string };
+  try {
+    config = await api.get<{ apiKey: string }>("/auth/firebase-config");
+  } catch (err) {
+    // A fresh installation has no Firebase Web config yet. Let only the
+    // existing owner use the installer credentials to enter Settings once.
+    if (err instanceof ApiError && err.status === 400 && err.message === "Firebase web configuration is not connected") {
+      return localOwnerLogin();
+    }
+    throw err;
+  }
   const signIn = async () => {
     const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(config.apiKey), {
       method: "POST",
