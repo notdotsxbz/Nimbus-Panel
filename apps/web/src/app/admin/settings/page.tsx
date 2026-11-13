@@ -153,6 +153,14 @@ export default function AdminSettings() {
           </div>
         </GlassCard>
 
+        <GlassCard className="p-6 md:col-span-2">
+          <h2 className="font-semibold">Animated background video</h2>
+          <p className="mt-2 text-sm text-muted">Paste a direct HTTPS MP4 or WebM link. It plays muted and loops behind the panel with a blur and dark overlay. Leave blank to disable.</p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <input className="input min-w-0 flex-1" type="url" placeholder="https://example.com/background.mp4" value={backgroundVideoUrl} onChange={e => setBackgroundVideoUrl(e.target.value)} />
+            <button className="btn-primary" disabled={busy} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundVideoUrl }); show("Background video setting saved", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save video URL", "err"); } finally { setBusy(false); } }}>Save video</button>
+          </div>
+        </GlassCard>
       </div>
 
       <Modal open={firebaseOpen} title="Connect Firebase Authentication" onClose={() => !busy && setFirebaseOpen(false)} footer={<div className="flex justify-end gap-2"><button className="btn-ghost" disabled={busy} onClick={() => setFirebaseOpen(false)}>Cancel</button><button className="btn-primary" disabled={busy || !firebaseJson.trim() || !firebaseWeb.apiKey || !firebaseWeb.authDomain || !firebaseWeb.projectId || !firebaseWeb.appId} onClick={() => void connectFirebase()}>{busy ? "Connecting…" : "Validate & connect"}</button></div>}>
