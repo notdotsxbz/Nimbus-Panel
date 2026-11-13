@@ -6,7 +6,7 @@ import { env } from "../../config/env";
 import { IntegrationSetting, IntegrationSettingDocument } from "./integration.schema";
 
 type ServiceAccount = { type?: string; project_id?: string; client_email?: string; private_key?: string };
-type FirebaseWebConfig = { apiKey: string; authDomain: string; projectId: string; appId: string; storageBucket?: string; messagingSenderId?: string };
+type FirebaseWebConfig = { apiKey: string; authDomain: string; projectId: string; appId: string; storageBucket?: string; messagingSenderId?: string; googleClientId?: string };
 
 @Injectable()
 export class IntegrationsService implements OnModuleInit {
