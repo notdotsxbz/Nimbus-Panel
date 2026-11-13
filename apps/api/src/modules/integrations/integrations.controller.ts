@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Headers, Post } from "@nestjs/common";
 import { Roles, CurrentUser, type AuthUser } from "../../common/auth.decorators";
 import { IntegrationsService } from "./integrations.service";
 
@@ -43,8 +43,8 @@ export class IntegrationsController {
 
   @Post("google-drive/connect")
   @Roles("owner")
-  beginGoogleDriveConnect(@Body() dto: { clientId: string; clientSecret: string }, @CurrentUser() user: AuthUser) {
-    return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user.id);
+  beginGoogleDriveConnect(@Body() dto: { clientId: string; clientSecret: string }, @CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
+    return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user.id, origin);
   }
 
   @Post("google-drive/exchange")
