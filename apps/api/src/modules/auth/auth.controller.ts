@@ -39,6 +39,41 @@ export class AuthController {
     return { ok: true };
   }
 
+  /**
+   * First-install recovery path. Only the existing owner account can use its
+   * installer password, and only until both Firebase Admin and Web config are
+   * connected. This creates no account and is rate-limited.
+   */
+  @Public()
+  @Post("owner-local-bootstrap-login")
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  async ownerLocalBootstrapLogin(
+    @Body() body: { email?: string; password?: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const status = await this.integrations.firebaseStatus();
+    if (status.connected && status.webConfigured) throw new NotFoundException();
+
+    const user = await this.users.verifyCredentials(
+      (body?.email ?? "").trim().toLowerCase(),
+      body?.password ?? "",
+    );
+    if (!user || user.role !== "owner" || user.suspended || user.deletedAt) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
+
+    await this.users.recordLogin(user._id.toString(), true);
+    await this.audit.log({
+      actorId: user._id.toString(),
+      action: "auth.owner.localBootstrapLogin",
+      sensitive: true,
+    });
+    const token = await this.signSession(user);
+    this.setCookie(res, token);
+    return { token, user: this.publicUser(user), redirect: this.routeForRole(user.role) };
+  }
+
   /** Local-password auth exists only for isolated CI integration tests. */
   @Public()
   @Post("test-login")

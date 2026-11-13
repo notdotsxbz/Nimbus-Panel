@@ -115,9 +115,13 @@ When installation completes, open your configured URL, for example:
 https://panel.example.com
 ```
 
-Sign in with the administrator email and password from the wizard. If you used
-the temporary bootstrap password, change it immediately. If the panel does not
-load or SSL issuance fails, check the service logs and the
+Sign in with the administrator email and password from the wizard. On a fresh
+installation before Firebase is connected, the existing owner can use those
+installer credentials for the initial sign-in. This limited local sign-in is
+disabled automatically once both Firebase Admin and Firebase Web configuration
+are connected. Then open **Admin → Settings** to finish Firebase setup. If you
+used the temporary bootstrap password, change it immediately. If the panel does
+not load or SSL issuance fails, check the service logs and the
 [troubleshooting guide](docs/TROUBLESHOOTING.md).
 
 ### 6. Configure optional integrations

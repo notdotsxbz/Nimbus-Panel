@@ -3,6 +3,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestj
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { UsersService } from "./users.service";
 import { IntegrationsService } from "../integrations/integrations.service";
+import { env } from "../../config/env";
 
 @Controller("users")
 export class UsersController {
@@ -11,6 +12,12 @@ export class UsersController {
   @Post()
   @Roles("owner")
   async create(@Body() dto: { email: string; username: string; password: string; role?: string; displayName?: string }) {
+    // The integration smoke suite runs without external Firebase credentials.
+    // Keep its local-password account path strictly confined to NODE_ENV=test.
+    if (env.nodeEnv === "test") {
+      return this.users.createCustomer(dto);
+    }
+
     const firebaseUser = await this.integrations.createFirebaseAuthUser(dto.email, dto.password, dto.displayName);
     try {
       return await this.users.createFirebaseCustomer({
