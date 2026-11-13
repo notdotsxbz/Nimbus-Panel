@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { ServicesService } from "./services.service";
 
@@ -26,6 +26,12 @@ export class ServicesController {
   @Roles("owner", "admin")
   create(@Body() dto: Parameters<ServicesService["create"]>[0], @CurrentUser() actor: AuthUser) {
     return this.services.create(dto, actor);
+  }
+
+  @Patch(":id/owner")
+  @Roles("owner")
+  assignOwner(@Param("id") id: string, @Body() dto: { ownerId: string }, @CurrentUser() actor: AuthUser) {
+    return this.services.assignOwner(id, dto.ownerId, actor);
   }
 
   /** start | stop | restart | reinstall */
