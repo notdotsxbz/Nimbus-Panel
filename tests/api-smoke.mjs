@@ -296,7 +296,7 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("refresh health returns staleness info", (health.status === 200 || health.status === 201) && typeof health.body?.heartbeatAgeSeconds !== "undefined");
 
   // workload blocking: place a service on the node (agent unreachable — error state, still references the node)
-  const svc = await call("/services", { method: "POST", token: ownerToken, body: { name: "smoke-svc-" + suffix, type: "docker", ownerId: adminMe.body?.id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" } });
+  const svc = await call("/services", { method: "POST", token: ownerToken, body: { name: "smoke-svc-" + suffix, type: "docker", ownerId: c1user.body?.id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" } });
   check("workload created on node (agent offline, error state)", svc.status === 201, `status=${svc.status}`);
 
   const safeBlocked = await call(`/nodes/${n2id}`, { method: "DELETE", token: ownerToken, body: { mode: "safe" } });
