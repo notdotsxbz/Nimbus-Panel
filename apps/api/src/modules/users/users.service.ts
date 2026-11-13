@@ -73,12 +73,17 @@ export class UsersService implements OnModuleInit {
     return user.tokenVersion ?? 0;
   }
 
+  /** Auth lookups must explicitly select tokenVersion because the schema hides it
+   * by default. Without it, Firebase login issues version-0 JWTs for accounts
+   * whose sessions were previously revoked, causing immediate "Session revoked"
+   * responses on every protected route.
+   */
   async findByEmail(email: string) {
-    return this.users.findOne({ email: email.toLowerCase() });
+    return this.users.findOne({ email: email.toLowerCase() }).select("+tokenVersion");
   }
 
   async findByFirebaseUid(uid: string) {
-    return this.users.findOne({ firebaseUid: uid });
+    return this.users.findOne({ firebaseUid: uid }).select("+tokenVersion");
   }
 
   async findById(id: string) {
