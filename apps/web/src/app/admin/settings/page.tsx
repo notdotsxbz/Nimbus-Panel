@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { GlassCard, Modal, useToast } from "@/components/glass";
 
 type FirebaseStatus = { connected: boolean; projectId: string | null; webConfigured?: boolean; connectedAt: string | null };
-type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null };
+type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; reconnectRequired?: boolean };
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -117,10 +117,10 @@ export default function AdminSettings() {
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Firebase Authentication</h2>
             <span className={`rounded-full px-2.5 py-1 text-xs ${firebase.connected && firebase.webConfigured ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>
-              {firebase.connected && firebase.webConfigured ? "Connected" : "Setup required"}
+              {firebase.connected && firebase.webConfigured ? "Connected for all owners" : "Setup required"}
             </span>
           </div>
-          <p className="mt-2 text-sm text-muted">Panel email/password sign-in and owner-managed user accounts. Customer registration and Google sign-in use Firebase Authentication. New customers receive no service access until the owner assigns a service.</p>
+          <p className="mt-2 text-sm text-muted">Shared Firebase Authentication for every owner account on this Nimbus installation. One owner connects it once; all other owners can see the same connection status and use the same project. Customer registration and Google sign-in use this shared project.</p>
           {firebase.projectId ? <p className="mt-3 text-xs text-muted">Project: <span className="font-mono">{firebase.projectId}</span></p> : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setFirebaseOpen(true)}>{firebase.connected ? "Update Firebase" : "Connect Firebase"}</button>
@@ -144,9 +144,10 @@ export default function AdminSettings() {
         <GlassCard className="p-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Google Drive Backups</h2>
-            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected" : "Not connected"}</span>
+            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected for all owners" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
           </div>
-          <p className="mt-2 text-sm text-muted">Authorize Nimbus through Google OAuth. Completed node snapshots are checksum-verified and uploaded to your Drive.</p>
+          <p className="mt-2 text-sm text-muted">One shared Google Drive connection is used by backups for every owner account. Nimbus verifies backup checksums before upload.</p>
+          {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
           <div className="mt-4 flex gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
             {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
@@ -200,7 +201,7 @@ export default function AdminSettings() {
 
       <Modal open={driveOpen} title="Connect Google Drive" onClose={() => !busy && setDriveOpen(false)}>
         <div className="space-y-3">
-          <p className="text-sm text-muted">Create a Google OAuth Web application client. Add this authorized redirect URI: <span className="font-mono break-all">{typeof window !== "undefined" ? window.location.origin : ""}/admin/settings</span>. Nimbus stores the refresh token encrypted and only requests the Drive file scope.</p>
+          <p className="text-sm text-muted">Create a Google OAuth Web application client. Add this exact authorized redirect URI: <span className="font-mono break-all">{typeof window !== "undefined" ? window.location.origin : ""}/admin/settings</span>. Nimbus stores the refresh token encrypted and only requests the Drive file scope.</p>
           <label className="label">OAuth Client ID</label><input className="input w-full" value={googleClientId} onChange={e => setGoogleClientId(e.target.value)} />
           <label className="label">OAuth Client Secret</label><input type="password" autoComplete="off" className="input w-full" value={googleClientSecret} onChange={e => setGoogleClientSecret(e.target.value)} />
           <div className="flex justify-end gap-2"><button className="btn-ghost" disabled={busy} onClick={() => setDriveOpen(false)}>Cancel</button><button className="btn-primary" disabled={busy || !googleClientId || !googleClientSecret} onClick={() => void connectDrive()}>{busy ? "Opening Google…" : "Continue to Google"}</button></div>
