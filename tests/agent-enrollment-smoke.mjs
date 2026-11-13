@@ -22,7 +22,7 @@ const j = async (p, o = {}) => {
 
 (async () => {
   // login as owner
-  const login = await j("/auth/login", { method: "POST", body: { identifier: "admin@gmail.com", password: "admin" } });
+  const login = await j("/auth/test-login", { method: "POST", body: { identifier: "admin@gmail.com", password: "admin" } });
   const tok = login.body?.token;
   check("owner login", login.status === 200 && !!tok);
   const H = { authorization: "Bearer " + tok };
