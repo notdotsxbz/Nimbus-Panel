@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans">
         <BackgroundVideo />
         <AppearanceSync />
-        {children}
+        <div className="relative z-10 min-h-dvh">{children}</div>
       </body>
     </html>
   );
