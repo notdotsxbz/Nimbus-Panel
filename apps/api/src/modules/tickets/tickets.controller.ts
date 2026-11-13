@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
 import { Roles } from "../../common/auth.decorators";
 import { TicketsService } from "./tickets.service";
@@ -31,6 +31,12 @@ export class TicketsController {
   @Get(":id")
   get(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.tickets.get(id, user);
+  }
+
+  @Delete(":id")
+  @Roles("owner", "admin", "staff")
+  delete(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.tickets.delete(id, user);
   }
 
   @Post(":id/reply")

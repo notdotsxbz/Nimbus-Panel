@@ -27,14 +27,18 @@ export default function AdminServices() {
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(1);
-  const [users, setUsers] = useState<{ _id: string; username: string }[]>([]);
+  const [users, setUsers] = useState<{ _id: string; username: string; role?: string }[]>([]);
   const [nodes, setNodes] = useState<NodeOption[]>([]);
   const { show, node } = useToast();
 
   const load = async () => {
     try {
-      const res = await api.get<{ items?: ServiceRow[] } | ServiceRow[]>("/services");
+      const [res, userRes] = await Promise.all([
+        api.get<{ items?: ServiceRow[] } | ServiceRow[]>("/services"),
+        api.get<{ items: { _id: string; username: string; role?: string }[] }>("/users"),
+      ]);
       setServices(Array.isArray(res) ? res : res.items ?? []);
+      setUsers((userRes.items ?? []).filter(u => u.role === "customer"));
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load services", "err");
     }
@@ -49,13 +53,24 @@ export default function AdminServices() {
     setOpen(true);
     try {
       const [u, n] = await Promise.all([
-        api.get<{ items: { _id: string; username: string }[] }>("/users"),
+        api.get<{ items: { _id: string; username: string; role?: string }[] }>("/users"),
         api.get<NodeOption[]>("/nodes/capacity"),
       ]);
-      setUsers(u.items);
+      setUsers((u.items ?? []).filter(user => user.role === "customer"));
       setNodes(n);
     } catch {
       show("Could not load users or node capacity", "err");
+    }
+  };
+
+  const assignOwner = async (serviceId: string, ownerId: string) => {
+    try {
+      await api.patch(`/services/${serviceId}/owner`, { ownerId });
+      show("Service access updated", "ok");
+      void load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Could not update service access", "err");
+      void load();
     }
   };
 
@@ -112,7 +127,11 @@ export default function AdminServices() {
               <tr key={s._id} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03]">
                 <td className="px-5 py-3 font-medium">{s.name}</td>
                 <td className="px-5 py-3 text-xs uppercase tracking-wider text-muted">{s.type}</td>
-                <td className="px-5 py-3 text-muted">{ownerName(s.ownerId)}</td>
+                <td className="px-5 py-3 text-muted">
+                  <select className="input min-w-36 !py-1 text-xs" aria-label={`Assign ${s.name} to customer`} value={typeof s.ownerId === "object" ? s.ownerId?._id ?? "" : s.ownerId} onChange={(e) => void assignOwner(s._id, e.target.value)}>
+                    {users.map((u) => <option key={u._id} value={u._id}>{u.username}</option>)}
+                  </select>
+                </td>
                 <td className="px-5 py-3 text-muted">{nodeName(s.nodeId)}</td>
                 <td className="tnum px-5 py-3 text-xs text-muted">
                   {s.ramMb} MB · {s.diskGb} GB

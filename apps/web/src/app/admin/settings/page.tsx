@@ -13,8 +13,9 @@ export default function AdminSettings() {
   const [firebase, setFirebase] = useState<FirebaseStatus>({ connected: false, projectId: null, webConfigured: false, connectedAt: null });
   const [cloudflare, setCloudflare] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
   const [drive, setDrive] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
+  const [backgroundVideoUrl, setBackgroundVideoUrl] = useState("");
   const [firebaseJson, setFirebaseJson] = useState("");
-  const [firebaseWeb, setFirebaseWeb] = useState({ apiKey: "", authDomain: "", projectId: "", appId: "", storageBucket: "", messagingSenderId: "" });
+  const [firebaseWeb, setFirebaseWeb] = useState({ apiKey: "", authDomain: "", projectId: "", appId: "", storageBucket: "", messagingSenderId: "", googleClientId: "" });
   const [cfToken, setCfToken] = useState("");
   const [cfZone, setCfZone] = useState("");
   const [googleClientId, setGoogleClientId] = useState("");
@@ -30,10 +31,12 @@ export default function AdminSettings() {
       api.get<FirebaseStatus>("/integrations/firebase"),
       api.get<ConnectionStatus>("/integrations/cloudflare"),
       api.get<ConnectionStatus>("/integrations/google-drive"),
+      api.get<{ backgroundVideoUrl?: string }>("/appearance/settings"),
     ]);
     if (results[0].status === "fulfilled") setFirebase(results[0].value);
     if (results[1].status === "fulfilled") setCloudflare(results[1].value);
     if (results[2].status === "fulfilled") setDrive(results[2].value);
+    if (results[3].status === "fulfilled") setBackgroundVideoUrl(results[3].value.backgroundVideoUrl ?? "");
   };
 
   useEffect(() => { void load(); }, []);
@@ -117,7 +120,7 @@ export default function AdminSettings() {
               {firebase.connected && firebase.webConfigured ? "Connected" : "Setup required"}
             </span>
           </div>
-          <p className="mt-2 text-sm text-muted">Panel email/password sign-in and owner-managed user accounts. Public registration is disabled. Passwords are managed by Firebase Authentication.</p>
+          <p className="mt-2 text-sm text-muted">Panel email/password sign-in and owner-managed user accounts. Customer registration and Google sign-in use Firebase Authentication. New customers receive no service access until the owner assigns a service.</p>
           {firebase.projectId ? <p className="mt-3 text-xs text-muted">Project: <span className="font-mono">{firebase.projectId}</span></p> : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setFirebaseOpen(true)}>{firebase.connected ? "Update Firebase" : "Connect Firebase"}</button>
@@ -150,9 +153,13 @@ export default function AdminSettings() {
           </div>
         </GlassCard>
 
-        <GlassCard className="p-6">
-          <h2 className="font-semibold">Appearance</h2>
-          <p className="mt-2 text-sm text-muted">The Liquid Glass system ships with the black-and-white NIMBUS brand. Glass intensity, animation level and Low Bandwidth Mode follow system preferences and per-user toggles.</p>
+        <GlassCard className="p-6 md:col-span-2">
+          <h2 className="font-semibold">Animated background video</h2>
+          <p className="mt-2 text-sm text-muted">Paste a direct HTTPS MP4 or WebM link. It plays muted and loops behind the panel with a blur and dark overlay. Leave blank to disable.</p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <input className="input min-w-0 flex-1" type="url" placeholder="https://example.com/background.mp4" value={backgroundVideoUrl} onChange={e => setBackgroundVideoUrl(e.target.value)} />
+            <button className="btn-primary" disabled={busy} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundVideoUrl }); show("Background video setting saved", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save video URL", "err"); } finally { setBusy(false); } }}>Save video</button>
+          </div>
         </GlassCard>
       </div>
 
@@ -165,6 +172,7 @@ export default function AdminSettings() {
           <label className="label">App ID</label><input className="input w-full" value={firebaseWeb.appId} onChange={e => setFirebaseWeb(v => ({ ...v, appId: e.target.value }))} />
           <label className="label">Storage bucket (optional)</label><input className="input w-full" value={firebaseWeb.storageBucket} onChange={e => setFirebaseWeb(v => ({ ...v, storageBucket: e.target.value }))} />
           <label className="label">Messaging sender ID (optional)</label><input className="input w-full" value={firebaseWeb.messagingSenderId} onChange={e => setFirebaseWeb(v => ({ ...v, messagingSenderId: e.target.value }))} />
+          <label className="label">Google OAuth Web Client ID (required for Google sign-in)</label><input className="input w-full" placeholder="...apps.googleusercontent.com" value={firebaseWeb.googleClientId} onChange={e => setFirebaseWeb(v => ({ ...v, googleClientId: e.target.value }))} />
           <label className="label">Firebase Admin service-account JSON</label>
           <textarea value={firebaseJson} onChange={e => setFirebaseJson(e.target.value)} rows={7} spellCheck={false} autoComplete="off" className="input w-full resize-y font-mono text-xs" placeholder={'{ "type": "service_account", ... }'} />
           <p className="text-xs text-muted">The service-account private key is sent over HTTPS and encrypted in the Nimbus database. Never share it in chat or public repositories.</p>

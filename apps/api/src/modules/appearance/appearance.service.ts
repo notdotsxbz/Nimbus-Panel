@@ -232,6 +232,7 @@ export class AppearanceService implements OnModuleInit {
       defaultThemeKey: s.defaultThemeKey,
       defaultAnimationPreset: s.defaultAnimationPreset,
       animationsEnabled: s.animationsEnabled,
+      backgroundVideoUrl: s.backgroundVideoUrl ?? null,
     };
   }
 
@@ -240,6 +241,11 @@ export class AppearanceService implements OnModuleInit {
     const num = (v: unknown, min: number, max: number) =>
       typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined;
 
+    if (dto.backgroundVideoUrl !== undefined) {
+      const url = typeof dto.backgroundVideoUrl === "string" ? dto.backgroundVideoUrl.trim() : "";
+      if (url && (url.length > 2048 || !/^https:\/\//i.test(url))) throw new BadRequestException("Background video must be a valid HTTPS URL");
+      settings.backgroundVideoUrl = url || undefined;
+    }
     if (typeof dto.allowCustomerThemes === "boolean") settings.allowCustomerThemes = dto.allowCustomerThemes;
     if (typeof dto.allowCustomerAnimations === "boolean") settings.allowCustomerAnimations = dto.allowCustomerAnimations;
     if (typeof dto.allowCustomThemes === "boolean") settings.allowCustomThemes = dto.allowCustomThemes;

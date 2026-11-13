@@ -99,7 +99,30 @@ export class AuthController {
     return this.integrations.publicFirebaseConfig();
   }
 
-  /** Firebase ID token login (email/password). */
+  /** Public self-registration: every new account is a customer and receives no services. */
+  @Public()
+  @Post("register")
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  async register(@Body() body: { idToken?: string }, @Res({ passthrough: true }) res: Response) {
+    if (!body?.idToken) throw new UnauthorizedException("Firebase ID token is required");
+    const decoded = await this.integrations.verifyIdToken(body.idToken);
+    if (!decoded.email) throw new UnauthorizedException("A verified email address is required");
+    let user = await this.users.findByFirebaseUid(decoded.uid);
+    if (!user) {
+      const existingEmail = await this.users.findByEmail(decoded.email);
+      if (existingEmail) throw new UnauthorizedException("An account with this email already exists. Sign in instead.");
+      user = await this.users.createFirebaseUser(decoded.uid, decoded.email, decoded.name);
+    }
+    if (user.role !== "customer" || user.deletedAt || user.suspended) throw new UnauthorizedException("This account cannot self-register");
+    await this.users.recordLogin(user._id.toString(), true);
+    await this.audit.log({ actorId: user._id.toString(), action: "auth.register", sensitive: true });
+    const token = await this.signSession(user);
+    this.setCookie(res, token);
+    return { token, user: this.publicUser(user), redirect: this.routeForRole(user.role) };
+  }
+
+  /** Firebase ID token login (email/password or Google). */
   @Public()
   @Post("firebase")
   @HttpCode(200)

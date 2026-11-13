@@ -96,6 +96,18 @@ export class TicketsService {
     return ticket;
   }
 
+  /** Staff-only permanent deletion, recorded in the audit log. */
+  async delete(id: string, user: { id: string; role: string }) {
+    if (!["owner", "admin", "staff"].includes(user.role)) {
+      throw new ForbiddenException("Only staff can delete tickets");
+    }
+    const ticket = await this.tickets.findById(id);
+    if (!ticket) throw new NotFoundException("Ticket not found");
+    await this.tickets.deleteOne({ _id: ticket._id });
+    await this.audit.log({ actorId: user.id, action: "tickets.delete", targetType: "ticket", targetId: id, sensitive: true });
+    return { ok: true };
+  }
+
   async stats() {
     const [open, inProgress, waiting, closed] = await Promise.all([
       this.tickets.countDocuments({ status: "open" }),

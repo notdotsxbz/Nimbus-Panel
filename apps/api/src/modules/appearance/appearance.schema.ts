@@ -32,6 +32,7 @@ export class AppearanceSettings {
   @Prop({ type: Number, default: 1 }) animationSpeed!: number; // 0.5–1.5
   @Prop({ type: Number, default: 0.8 }) animationIntensity!: number; // 0–1.2
   @Prop({ default: false }) allowCustomThemes!: boolean;
+  @Prop({ maxlength: 2048 }) backgroundVideoUrl?: string;
   @Prop() updatedAt!: Date;
 }
 

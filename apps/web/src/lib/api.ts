@@ -142,6 +142,34 @@ export async function firebaseLogin(email: string, password: string): Promise<{ 
   return session;
 }
 
+export async function firebaseRegister(email: string, password: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
+  const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
+  const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + encodeURIComponent(config.apiKey), {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: email.trim(), password, returnSecureToken: true }),
+  });
+  const result = await response.json() as { idToken?: string; error?: { message?: string } };
+  if (!response.ok || !result.idToken) throw new ApiError(response.status, (result.error?.message ?? "Registration failed").replaceAll("_", " ").toLowerCase());
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/register", { idToken: result.idToken });
+  localStorage.setItem("nimbus.token", session.token);
+  localStorage.setItem("nimbus.user", JSON.stringify(session.user));
+  return session;
+}
+
+export async function firebaseGoogleRegister(googleIdToken: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
+  const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
+  const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=" + encodeURIComponent(config.apiKey), {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ postBody: "id_token=" + encodeURIComponent(googleIdToken) + "&providerId=google.com", requestUri: window.location.origin, returnSecureToken: true, returnIdpCredential: true }),
+  });
+  const result = await response.json() as { idToken?: string; error?: { message?: string } };
+  if (!response.ok || !result.idToken) throw new ApiError(response.status, (result.error?.message ?? "Google sign-in failed").replaceAll("_", " ").toLowerCase());
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/register", { idToken: result.idToken });
+  localStorage.setItem("nimbus.token", session.token);
+  localStorage.setItem("nimbus.user", JSON.stringify(session.user));
+  return session;
+}
+
 export function logout() {
   localStorage.removeItem("nimbus.token");
   localStorage.removeItem("nimbus.user");
