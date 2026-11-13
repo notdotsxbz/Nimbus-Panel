@@ -45,9 +45,9 @@ async function call(path, { method = "GET", token, body } = {}) {
   } catch {
     /* empty body */
   }
-  // Login is intentionally strict (10/min); the suite makes many logins —
+  // CI test login is intentionally isolated from production Firebase auth; the suite makes many logins —
   // retry on 429 with backoff instead of failing the whole run.
-  if (res.status === 429 && path === "/auth/login") {
+  if (res.status === 429 && path === "/auth/test-login") {
     for (let i = 1; i <= LOGIN_RETRY_MAX; i++) {
       await sleep(LOGIN_RETRY_DELAY_MS);
       const retry = await fetch(`${BASE}${path}`, {
@@ -70,12 +70,12 @@ async function call(path, { method = "GET", token, body } = {}) {
   const anon = await call("/auth/me");
   check("unauthenticated /auth/me rejected", anon.status === 401, `status=${anon.status}`);
 
-  const bad = await call("/auth/login", { method: "POST", body: { identifier: ADMIN_ID, password: "definitely-wrong" } });
+  const bad = await call("/auth/test-login", { method: "POST", body: { identifier: ADMIN_ID, password: "definitely-wrong" } });
   check("wrong password rejected", bad.status === 401, `status=${bad.status}`);
 
-  const login = await call("/auth/login", { method: "POST", body: { identifier: ADMIN_ID, password: ADMIN_PW } });
+  const login = await call("/auth/test-login", { method: "POST", body: { identifier: ADMIN_ID, password: ADMIN_PW } });
   check(
-    "bootstrap admin login",
+    "CI owner login",
     login.status === 200 && !!login.body?.token && login.body?.redirect === "/admin",
     login.body?.user ? `role=${login.body.user.role} mustChangePassword=${login.body.user.mustChangePassword}` : JSON.stringify(login.body).slice(0, 100),
   );
@@ -111,7 +111,7 @@ async function call(path, { method = "GET", token, body } = {}) {
   });
   check("weak password rejected", short.status === 400, `status=${short.status}`);
 
-  const custLogin = await call("/auth/login", {
+  const custLogin = await call("/auth/test-login", {
     method: "POST",
     body: { identifier: `smoke${suffix}`, password: "smokepass123" },
   });
@@ -149,7 +149,7 @@ async function call(path, { method = "GET", token, body } = {}) {
 
   // ── Appearance system ───────────────────────────────────────────
   // Re-login (previous token cleared server-side is cookie-only; bearer stays valid)
-  const relogin = await call("/auth/login", { method: "POST", body: { identifier: ADMIN_ID, password: ADMIN_PW } });
+  const relogin = await call("/auth/test-login", { method: "POST", body: { identifier: ADMIN_ID, password: ADMIN_PW } });
   const ownerToken = relogin.body?.token ?? owner;
   const custToken = cust;
 
@@ -236,7 +236,7 @@ async function call(path, { method = "GET", token, body } = {}) {
 
   // second customer must NOT read the first customer's ticket
   const c2 = await call("/users", { method: "POST", token: ownerToken, body: { email: `smoke2-${suffix}@example.com`, username: `smoke2${suffix}`, password: "smokepass123", role: "customer" } });
-  const c2login = await call("/auth/login", { method: "POST", body: { identifier: `smoke2${suffix}`, password: "smokepass123" } });
+  const c2login = await call("/auth/test-login", { method: "POST", body: { identifier: `smoke2${suffix}`, password: "smokepass123" } });
   const c2ticket = await call(`/tickets/${ticketId}`, { token: c2login.body?.token });
   check("customer cannot read another customer's ticket", c2ticket.status === 403, `status=${c2ticket.status}`);
 
@@ -266,17 +266,17 @@ async function call(path, { method = "GET", token, body } = {}) {
 
   // ── Ban + delete ───────────────────────────────────────────────
   const c3 = await call("/users", { method: "POST", token: ownerToken, body: { email: `smoke3-${suffix}@example.com`, username: `smoke3${suffix}`, password: "smokepass123", role: "customer" } });
-  const c3login = await call("/auth/login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
+  const c3login = await call("/auth/test-login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
   const ban = await call(`/users/${c3.body?._id}/suspended`, { method: "PATCH", token: ownerToken, body: { suspended: true } });
   check("owner bans user", ban.status === 200);
   const bannedSession = await call("/auth/me", { token: c3login.body?.token });
   check("ban revokes active sessions immediately", bannedSession.status === 401, `status=${bannedSession.status}`);
-  const bannedLogin = await call("/auth/login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
+  const bannedLogin = await call("/auth/test-login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
   check("banned user cannot log in", bannedLogin.status === 401, `status=${bannedLogin.status}`);
 
   const del = await call(`/users/${c3.body?._id}`, { method: "DELETE", token: ownerToken });
   check("owner soft-deletes user", del.status === 200, `status=${del.status}`);
-  const delLogin = await call("/auth/login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
+  const delLogin = await call("/auth/test-login", { method: "POST", body: { identifier: `smoke3${suffix}`, password: "smokepass123" } });
   check("deleted user cannot log in", delLogin.status === 401, `status=${delLogin.status}`);
 
   // ── Node management & deletion ─────────────────────────────────
