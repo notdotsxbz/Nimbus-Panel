@@ -15,7 +15,7 @@ export default function AdminSettings() {
   const [drive, setDrive] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
   const [backgroundVideoUrl, setBackgroundVideoUrl] = useState("");
   const [firebaseJson, setFirebaseJson] = useState("");
-  const [firebaseWeb, setFirebaseWeb] = useState({ apiKey: "", authDomain: "", projectId: "", appId: "", storageBucket: "", messagingSenderId: "" });
+  const [firebaseWeb, setFirebaseWeb] = useState({ apiKey: "", authDomain: "", projectId: "", appId: "", storageBucket: "", messagingSenderId: "", googleClientId: "" });
   const [cfToken, setCfToken] = useState("");
   const [cfZone, setCfZone] = useState("");
   const [googleClientId, setGoogleClientId] = useState("");
@@ -164,6 +164,7 @@ export default function AdminSettings() {
           <label className="label">App ID</label><input className="input w-full" value={firebaseWeb.appId} onChange={e => setFirebaseWeb(v => ({ ...v, appId: e.target.value }))} />
           <label className="label">Storage bucket (optional)</label><input className="input w-full" value={firebaseWeb.storageBucket} onChange={e => setFirebaseWeb(v => ({ ...v, storageBucket: e.target.value }))} />
           <label className="label">Messaging sender ID (optional)</label><input className="input w-full" value={firebaseWeb.messagingSenderId} onChange={e => setFirebaseWeb(v => ({ ...v, messagingSenderId: e.target.value }))} />
+          <label className="label">Google OAuth Web Client ID (required for Google sign-in)</label><input className="input w-full" placeholder="...apps.googleusercontent.com" value={firebaseWeb.googleClientId} onChange={e => setFirebaseWeb(v => ({ ...v, googleClientId: e.target.value }))} />
           <label className="label">Firebase Admin service-account JSON</label>
           <textarea value={firebaseJson} onChange={e => setFirebaseJson(e.target.value)} rows={7} spellCheck={false} autoComplete="off" className="input w-full resize-y font-mono text-xs" placeholder={'{ "type": "service_account", ... }'} />
           <p className="text-xs text-muted">The service-account private key is sent over HTTPS and encrypted in the Nimbus database. Never share it in chat or public repositories.</p>
