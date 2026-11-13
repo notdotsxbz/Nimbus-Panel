@@ -43,7 +43,7 @@ export class ServicesService {
 
   /** Ownership-enforced read — the base for every per-service operation. */
   async get(id: string, user: AuthUser): Promise<ServiceDocument> {
-    const service = await this.services.findById(id).populate("nodeId", "name ip agentUrl online");
+    const service = await this.services.findById(id);
     if (!service) throw new NotFoundException("Service not found");
     const owner = (service.ownerId as Types.ObjectId).toString();
     if (!isStaffRole(user.role) && owner !== user.id) {
