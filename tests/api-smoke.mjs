@@ -346,6 +346,12 @@ async function call(path, { method = "GET", token, body } = {}) {
   const configuredInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Configured Installer", identifier: "configured-installer-" + suffix, serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { NODE_ENV: "production" } } } });
   check("admin can configure validated image installer environment", configuredInstaller.status === 201 && configuredInstaller.body?.installationConfig?.environment?.NODE_ENV === "production", "status=" + configuredInstaller.status);
   if (configuredInstaller.body?._id) await call("/software/" + configuredInstaller.body._id, { method: "DELETE", token: ownerToken });
+  const minecraftInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Minecraft Env Installer", identifier: "minecraft-env-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "itzg/minecraft-server:java21", environment: { TYPE: "PAPER", VERSION: "{version}", EULA: "TRUE" } } } });
+  check("Minecraft installer supports version environment placeholders", minecraftInstaller.status === 201 && minecraftInstaller.body?.installationConfig?.environment?.VERSION === "{version}", "status=" + minecraftInstaller.status);
+  if (minecraftInstaller.body?._id) await call("/software/" + minecraftInstaller.body._id, { method: "DELETE", token: ownerToken });
+  const unsafeStaticInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Unsafe Static Installer", identifier: "unsafe-static-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "itzg/minecraft-server:java21", environment: { TYPE: "PAPER" } } } });
+  check("installer rejects static image without a version placeholder", unsafeStaticInstaller.status === 400, "status=" + unsafeStaticInstaller.status);
+
 
   const sourceCases = [
     { name: "Go source", identifier: "smoke-go-" + suffix, sourceType: "go-index", sourceConfig: {} },
