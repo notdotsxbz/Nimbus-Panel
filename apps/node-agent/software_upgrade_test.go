@@ -50,6 +50,7 @@ case "$1" in
       *"go version"*) echo "go version go1.23.4 linux/amd64" ;;
       *"java -version"*) echo 'openjdk version "21.0.5" 2025-01-21' ;;
       *"mongod --version"*) echo "db version v8.0.4" ;;
+      *"dotnet --version"*) echo "8.0.4" ;;
       *) echo "unsupported fake runtime" >&2; exit 1 ;;
     esac
     exit 0
@@ -239,6 +240,7 @@ func TestRuntimeVersionProbesUseFixedCommandsAndMatchExactVersion(t *testing.T) 
 		{"go-version", "1.23.4"},
 		{"java-version", "21.0.5"},
 		{"mongodb-version", "8.0.4"},
+		{"dotnet-version", "8.0.4"},
 	}
 	for _, test := range cases {
 		output, err := runContainerVersionProbe("nimbus-svc-test", test.probe)
