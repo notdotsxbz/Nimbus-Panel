@@ -17,6 +17,8 @@ export default function AdminSoftwarePage() {
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [manualVersion, setManualVersion] = useState("");
+  const [selectedVersionIds, setSelectedVersionIds] = useState<string[]>([]);
   const { show, node } = useToast();
 
   const load = async () => {
@@ -27,6 +29,7 @@ export default function AdminSoftwarePage() {
 
   const openSoftware = async (software: SoftwareRow) => {
     setSelected(software);
+    setSelectedVersionIds([]);
     try { setVersions(await api.get<VersionRow[]>(`/software/${software._id}/versions`)); }
     catch (e) { show(e instanceof Error ? e.message : "Could not load versions", "err"); }
   };
@@ -51,11 +54,12 @@ export default function AdminSoftwarePage() {
     const sourceConfig: Record<string, string> = {};
     if (sourceType === "github-releases") sourceConfig.repository = String(data.get("repository") ?? "").trim();
     if (sourceType === "modrinth") sourceConfig.projectId = String(data.get("projectId") ?? "").trim();
+    const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
     try {
       await api.post("/software", {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
-        enabled: true, customerAvailable: true, autoPublish: false,
+        enabled: true, customerAvailable: true, autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
         installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate } : {},
       });
@@ -63,6 +67,22 @@ export default function AdminSoftwarePage() {
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }
   };
 
+  const addManualVersion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || !manualVersion.trim()) return;
+    try {
+      await api.post("/software/" + selected._id + "/versions", { version: manualVersion.trim() });
+      setManualVersion(""); await openSoftware(selected); show("Version added as pending approval", "ok");
+    } catch (e) { show(e instanceof Error ? e.message : "Could not add version", "err"); }
+  };
+
+  const bulkAction = async (action: string) => {
+    if (!selected || !selectedVersionIds.length) return;
+    try {
+      const result = await api.post<{ matched: number; modified: number }>("/software/" + selected._id + "/versions/bulk", { versionIds: selectedVersionIds, action });
+      show("Updated " + result.modified + " version(s)", "ok"); setSelectedVersionIds([]); await openSoftware(selected);
+    } catch (e) { show(e instanceof Error ? e.message : "Bulk update failed", "err"); }
+  };
   const setVersionStatus = async (version: VersionRow, publicationStatus: string) => {
     if (!selected) return;
     try {
@@ -103,8 +123,19 @@ export default function AdminSoftwarePage() {
       <GlassCard className="p-5">
         {selected ? <>
           <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus}</p></div><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div>
+          <form onSubmit={addManualVersion} className="mt-4 flex gap-2">
+            <input className="input min-w-0 flex-1" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Add version manually" aria-label="Version number" />
+            <button className="btn-ghost" type="submit">Add version</button>
+          </form>
+          {selectedVersionIds.length > 0 && <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-white/10 p-3">
+            <span className="self-center text-xs text-muted">{selectedVersionIds.length} selected</span>
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("publish")}>Publish</button>
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("disable")}>Disable</button>
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("deprecate")}>Deprecate</button>
+          </div>}
           <div className="mt-4 space-y-2">
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
+              <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />
               <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}</p></div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}</div>
             </div>)}
