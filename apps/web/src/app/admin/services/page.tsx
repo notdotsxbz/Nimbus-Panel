@@ -132,7 +132,7 @@ export default function AdminServices() {
         show("Choose a published software version before assigning this service.", "err");
         return;
       }
-      const created = await api.post<ServiceRow>("/software/services/create", {
+      const created = await api.post<ServiceRow>("/software/provision", {
         name: f.get("name"),
         type: f.get("type"),
         ownerId: f.get("ownerId"),

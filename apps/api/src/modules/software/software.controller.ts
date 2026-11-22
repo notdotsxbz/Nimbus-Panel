@@ -42,7 +42,7 @@ export class SoftwareController {
     return this.software.update(id, body as never, actor);
   }
 
-  @Post("services/create")
+  @Post("provision")
   @Roles("owner", "admin")
   createServiceFromCatalog(@Body() body: Record<string, unknown>, @CurrentUser() actor: AuthUser) {
     return this.software.createServiceFromCatalog(body as never, actor);
