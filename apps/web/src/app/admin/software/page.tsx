@@ -165,7 +165,8 @@ export default function AdminSoftwarePage() {
   const addManualVersion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected) return;
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const version = String(data.get("version") ?? "").trim();
     if (!version) return;
     let runtimeRequirements: Record<string, unknown> = {};
@@ -195,7 +196,7 @@ export default function AdminSoftwarePage() {
         signature: String(data.get("signature") ?? "").trim(),
         runtimeRequirements,
       });
-      event.currentTarget.reset();
+      form.reset();
       await openSoftware(selected);
       show("Version added as pending approval", "ok");
     } catch (error) { show(error instanceof Error ? error.message : "Could not add version", "err"); }
