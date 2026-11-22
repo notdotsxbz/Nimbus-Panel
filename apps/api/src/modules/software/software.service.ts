@@ -150,7 +150,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   list() { return this.catalog.find().sort({ name: 1 }).lean(); }
 
   listOperations() {
-    return this.operations.find().sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("softwareId", "name identifier").lean();
+    return this.operations.find().sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("softwareId", "name identifier").populate("requestedBy", "username").lean();
   }
 
   async create(input: Partial<Software>, actor: AuthUser) {
