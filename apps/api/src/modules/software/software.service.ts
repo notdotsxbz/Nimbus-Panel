@@ -460,13 +460,13 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         versionProbe, expectedVersion: safeVersion,
       }, "POST", 10 * 60 * 1000);
       operation.status = "verifying"; operation.progress = 85; await operation.save();
-      if (agentUpgrade.status !== "online" || !agentUpgrade.running || agentUpgrade.installedImage !== dockerImage || !agentUpgrade.containerId || !agentUpgrade.previousContainerName || (versionProbe === "minecraft-log" && agentUpgrade.versionVerified !== true) || (Object.keys(resolvedEnvironment).length > 0 && agentUpgrade.environmentVerified !== true)) throw new BadRequestException("Node Agent did not verify the requested application version, replacement container, and rollback state");
+      if (agentUpgrade.status !== "online" || !agentUpgrade.running || agentUpgrade.installedImage !== dockerImage || !agentUpgrade.containerId || !agentUpgrade.previousContainerName || (versionProbe !== "" && agentUpgrade.versionVerified !== true) || (Object.keys(resolvedEnvironment).length > 0 && agentUpgrade.environmentVerified !== true)) throw new BadRequestException("Node Agent did not verify the requested application version, replacement container, and rollback state");
       service.dockerImage = dockerImage; service.software = software.identifier; service.softwareVersion = version.version;
       service.containerId = agentUpgrade.containerId; service.status = "online";
       service.activity.push({ at: new Date(), action: "software.upgrade", ok: true, detail: software.identifier + "@" + version.version });
       await service.save(); serviceStateSaved = true;
       operation.status = "completed"; operation.progress = 100;
-      operation.verification = { running: true, installedImage: agentUpgrade.installedImage, containerId: agentUpgrade.containerId, healthStatus: agentUpgrade.healthStatus ?? "unknown", environmentVerified: agentUpgrade.environmentVerified === true, versionVerified: versionProbe === "minecraft-log" ? agentUpgrade.versionVerified === true : undefined, previousContainerRemoved: false, previousContainerName: agentUpgrade.previousContainerName };
+      operation.verification = { running: true, installedImage: agentUpgrade.installedImage, containerId: agentUpgrade.containerId, healthStatus: agentUpgrade.healthStatus ?? "unknown", environmentVerified: agentUpgrade.environmentVerified === true, versionVerified: versionProbe ? agentUpgrade.versionVerified === true : undefined, previousContainerRemoved: false, previousContainerName: agentUpgrade.previousContainerName };
       operation.completedAt = new Date(); await operation.save();
       await this.audit.log({ actorId: actor.id, action: "software.service.upgraded", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
       // Finalize only after both the service record and operation record are safely saved.
@@ -594,7 +594,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     }
     const imageHasVersion = template.includes("{version}");
     const versionProbe = config.versionProbe;
-    if (versionProbe !== undefined && versionProbe !== "minecraft-log") throw new BadRequestException("Unsupported application version verification probe");
+    const supportedVersionProbes = ["minecraft-log", "nodejs-version", "python-version", "php-version", "go-version", "java-version", "mongodb-version"];
+    if (versionProbe !== undefined && versionProbe !== "" && !supportedVersionProbes.includes(versionProbe)) throw new BadRequestException("Unsupported application version verification probe");
     if (versionProbe === "minecraft-log" && !((environment as Record<string, unknown>).VERSION as string | undefined)?.includes("{version}")) throw new BadRequestException("Minecraft log verification requires VERSION={version} in the installer environment");
     if (method !== "docker-image-template" || !template || !/^[A-Za-z0-9._:/-]+$/.test(normalizedImage) || (!imageHasVersion && !environmentHasVersion)) {
       throw new BadRequestException("Installer must use a safe Docker image template or a version placeholder in its environment");
