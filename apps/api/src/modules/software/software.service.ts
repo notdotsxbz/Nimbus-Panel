@@ -540,8 +540,11 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   private validateSource(type: string, config: Record<string, string>) {
     if (type === "github-releases" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("GitHub source requires an owner/repository");
     if (type === "modrinth" && !/^[A-Za-z0-9_-]{1,64}$/.test(config.projectId ?? "")) throw new BadRequestException("Modrinth source requires a project ID");
+    if (["papermc-v3", "purpur-api"].includes(type) && !/^\d+\.\d+(?:\.\d+)?$/.test(config.minecraftVersion ?? "")) {
+      throw new BadRequestException("Minecraft build sources require a valid Minecraft version such as 1.21.11");
+    }
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
-    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "papermc-v3", "purpur-api", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -611,6 +614,54 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
               sha256: String(file.sha256 ?? ""), size: Number(file.size ?? 0),
             })),
           },
+        } as DiscoveredVersion;
+      });
+    }
+    if (software.sourceType === "papermc-v3") {
+      const minecraftVersion = software.sourceConfig.minecraftVersion;
+      const response = await axios.get(
+        "https://fill.papermc.io/v3/projects/paper/versions/" + encodeURIComponent(minecraftVersion) + "/builds",
+        { timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" } },
+      );
+      if (!Array.isArray(response.data)) throw new BadRequestException("PaperMC returned an invalid build list");
+      return (response.data as any[]).map(build => {
+        const buildId = String(build.id ?? "");
+        const download = build.downloads?.["server:default"];
+        if (!/^\d+$/.test(buildId)) return null;
+        return {
+          version: minecraftVersion + "-" + buildId,
+          releaseName: "Paper " + minecraftVersion + " build " + buildId,
+          releaseDate: build.time ?? build.createdAt,
+          prerelease: String(build.channel ?? "").toUpperCase() !== "STABLE",
+          sourceUrl: typeof download?.url === "string" ? download.url : "https://fill.papermc.io/",
+          sourceId: buildId,
+          compatibility: [minecraftVersion],
+          metadata: {
+            minecraftVersion, build: buildId, channel: String(build.channel ?? "UNKNOWN"),
+            checksums: download?.checksums ?? {},
+          },
+        } as DiscoveredVersion;
+      }).filter((item): item is DiscoveredVersion => item !== null);
+    }
+    if (software.sourceType === "purpur-api") {
+      const minecraftVersion = software.sourceConfig.minecraftVersion;
+      const response = await axios.get(
+        "https://api.purpurmc.org/v2/purpur/" + encodeURIComponent(minecraftVersion),
+        { timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" } },
+      );
+      const builds = response.data?.builds?.all;
+      if (!Array.isArray(builds)) throw new BadRequestException("Purpur returned an invalid build list");
+      const latest = String(response.data?.builds?.latest ?? "");
+      return builds.filter((value: unknown) => /^\d+$/.test(String(value))).map((value: unknown) => {
+        const buildId = String(value);
+        return {
+          version: minecraftVersion + "-" + buildId,
+          releaseName: "Purpur " + minecraftVersion + " build " + buildId,
+          prerelease: false,
+          sourceUrl: "https://api.purpurmc.org/v2/purpur/" + encodeURIComponent(minecraftVersion) + "/" + buildId + "/download",
+          sourceId: buildId,
+          compatibility: [minecraftVersion],
+          metadata: { minecraftVersion, build: buildId, latest: buildId === latest },
         } as DiscoveredVersion;
       });
     }
