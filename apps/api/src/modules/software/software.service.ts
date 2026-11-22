@@ -380,11 +380,39 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     await this.audit.log({ actorId: actor.id, action: "software.versions.bulk_updated", targetType: "software", targetId: id, detail: "action=" + action + " modified=" + result.modifiedCount, sensitive: true });
     return { matched: result.matchedCount, modified: result.modifiedCount };
   }
-  async setVersion(id: string, versionId: string, input: { publicationStatus?: string; deprecated?: boolean; recommended?: boolean }, actor: AuthUser) {
+  async setVersion(id: string, versionId: string, input: Partial<SoftwareVersion> & { publicationStatus?: string; deprecated?: boolean; recommended?: boolean }, actor: AuthUser) {
     const software = await this.getSoftware(id);
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");
     const version = await this.versions.findById(versionId);
     if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
+    if (input.releaseName !== undefined) version.releaseName = String(input.releaseName).slice(0, 200);
+    if (input.releaseDate !== undefined) {
+      const date = input.releaseDate ? new Date(input.releaseDate) : undefined;
+      if (date && Number.isNaN(date.getTime())) throw new BadRequestException("Invalid release date");
+      version.releaseDate = date;
+    }
+    if (input.channel !== undefined) version.channel = String(input.channel).slice(0, 40);
+    if (input.prerelease !== undefined) version.prerelease = !!input.prerelease;
+    if (input.sourceUrl !== undefined) {
+      if (input.sourceUrl) { try { const url = new URL(input.sourceUrl); if (url.protocol !== "https:") throw new Error("https required"); } catch { throw new BadRequestException("Version source URL must use HTTPS"); } }
+      version.sourceUrl = input.sourceUrl;
+    }
+    for (const key of ["architectures", "operatingSystems", "compatibility"] as const) {
+      if (input[key] !== undefined) {
+        const values = input[key] as string[];
+        if (!Array.isArray(values) || values.length > 20 || values.some(value => typeof value !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(value))) throw new BadRequestException("Version compatibility metadata is invalid");
+        (version as any)[key] = values;
+      }
+    }
+    if (input.runtimeRequirements !== undefined) {
+      if (!input.runtimeRequirements || typeof input.runtimeRequirements !== "object" || Array.isArray(input.runtimeRequirements) || JSON.stringify(input.runtimeRequirements).length > 4096) throw new BadRequestException("Runtime requirements metadata is invalid");
+      version.runtimeRequirements = input.runtimeRequirements;
+    }
+    if (input.checksum !== undefined) { if (typeof input.checksum !== "string" || input.checksum.length > 256) throw new BadRequestException("Checksum is too long"); version.checksum = input.checksum; }
+    if (input.signature !== undefined) { if (typeof input.signature !== "string" || input.signature.length > 4096) throw new BadRequestException("Signature metadata is too long"); version.signature = input.signature; }
+    const assessment = this.assessCompatibility(software, version);
+    version.compatible = assessment.compatible;
+    version.incompatibilityReasons = assessment.incompatibilityReasons;
     if (input.publicationStatus === "published" && version.compatible === false) throw new BadRequestException("Incompatible versions cannot be published to customers");
     if (input.recommended) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: version._id } }); }
     else if (input.recommended === false) await this.catalog.updateOne({ _id: id, recommendedVersionId: version._id }, { $set: { recommendedVersionId: null } });
