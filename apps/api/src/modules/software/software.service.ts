@@ -390,6 +390,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!safeVersion || safeVersion !== version.version) throw new BadRequestException("The selected version cannot be safely used as a container tag");
     const dockerImage = template.replaceAll("{version}", safeVersion);
     if (!/^[A-Za-z0-9._:/@-]+$/.test(dockerImage)) throw new BadRequestException("Configured container image is invalid");
+    const configuredEnvironment = (software.installationConfig?.environment ?? {}) as Record<string, string>;
+    const resolvedEnvironment = Object.fromEntries(Object.entries(configuredEnvironment).map(([key, value]) => [key, value.replaceAll("{version}", safeVersion)]));
     const beforeStatus = service.status;
     const previousState = { dockerImage: service.dockerImage, software: service.software, softwareVersion: service.softwareVersion, containerId: service.containerId };
     let agentNode: any;
@@ -409,7 +411,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       agentNode = await this.nodes.get(service.nodeId.toString());
       agentUpgrade = await this.nodes.agentCall(agentNode, "/services/" + service._id.toString() + "/upgrade", {
         dockerImage, cpuPercent: service.cpuPercent, ramMb: service.ramMb, diskGb: service.diskGb,
-        startupCommand: service.startupCommand ?? [], env: (software.installationConfig?.environment ?? {}) as Record<string, string>,
+        startupCommand: service.startupCommand ?? [], env: resolvedEnvironment,
       }, "POST", 10 * 60 * 1000);
       operation.status = "verifying"; operation.progress = 85; await operation.save();
       if (agentUpgrade.status !== "online" || !agentUpgrade.running || agentUpgrade.installedImage !== dockerImage || !agentUpgrade.containerId || !agentUpgrade.previousContainerName) throw new BadRequestException("Node Agent did not verify the replacement container and retain the previous container for rollback");
@@ -456,7 +458,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (["vps", "vds"].includes(service.type.toLowerCase())) return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: [] };
     const options = await this.catalog.find({ enabled: true, customerAvailable: true, serviceTypes: service.type }).lean();
     const output = await Promise.all(options.map(async (software) => ({
-      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && software.installationConfig.imageTemplate.includes("{version}") },
+      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && (software.installationConfig.imageTemplate.includes("{version}") || Object.values((software.installationConfig.environment ?? {}) as Record<string, string>).some(value => typeof value === "string" && value.includes("{version}"))) },
       versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false }).sort({ recommended: -1, releaseDate: -1 }).lean(),
     })));
     return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: output };
@@ -476,12 +478,17 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       if (config.environment !== undefined) throw new BadRequestException("Environment overrides require a Docker image-template installer");
       return;
     }
-    const prefix = template.endsWith(":{version}") ? template.slice(0, -10) : "";
-    if (method !== "docker-image-template" || !prefix || !/^[A-Za-z0-9._:/-]+$/.test(prefix)) throw new BadRequestException("Installation adapter must be a safe Docker image template ending in :{version}");
+    const normalizedImage = template.replaceAll("{version}", "version");
     const environment = config.environment ?? {};
     if (!environment || typeof environment !== "object" || Array.isArray(environment) || Object.keys(environment).length > 100) throw new BadRequestException("Installer environment must be an object with at most 100 entries");
+    let environmentHasVersion = false;
     for (const [key, value] of Object.entries(environment as Record<string, unknown>)) {
       if (!/^[A-Z_][A-Z0-9_]{0,127}$/.test(key) || typeof value !== "string" || value.length > 4096 || value.indexOf(String.fromCharCode(0)) !== -1) throw new BadRequestException("Installer environment contains an invalid key or value");
+      if (value.includes("{version}")) environmentHasVersion = true;
+    }
+    const imageHasVersion = template.includes("{version}");
+    if (method !== "docker-image-template" || !template || !/^[A-Za-z0-9._:/-]+$/.test(normalizedImage) || (!imageHasVersion && !environmentHasVersion)) {
+      throw new BadRequestException("Installer must use a safe Docker image template or a version placeholder in its environment");
     }
   }
 
