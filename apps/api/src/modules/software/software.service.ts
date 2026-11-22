@@ -753,7 +753,9 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "php-releases" && config.majorVersion && !/^\d{1,2}(?:\.\d{1,2})?$/.test(config.majorVersion)) throw new BadRequestException("PHP release line must look like 8 or 8.4");
     if (type === "papermc" && !["paper", "folia", "velocity", "waterfall"].includes(config.project ?? "paper")) throw new BadRequestException("Unsupported PaperMC project");
     if (type === "purpur" && config.project && config.project !== "purpur") throw new BadRequestException("Purpur source project must be purpur");
-    if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven", "python-releases", "php-releases", "lavalink-releases", "mongodb-releases"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (["papermc-v3", "purpur-api"].includes(type) && !/^\d+\.\d+(?:\.\d+)?$/.test(config.minecraftVersion ?? "")) throw new BadRequestException("Minecraft build sources require a valid Minecraft version such as 1.21.11");
+    if (type === "papermc-v3" && !["paper", "folia"].includes(config.project ?? "paper")) throw new BadRequestException("PaperMC build source supports Paper or Folia");
+    if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "papermc-v3", "purpur", "purpur-api", "forge-promotions", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven", "python-releases", "php-releases", "lavalink-releases", "mongodb-releases"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
