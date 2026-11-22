@@ -170,12 +170,16 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length) throw new BadRequestException("Choose at least one supported service type");
     this.validateSource(input.sourceType ?? "manual", input.sourceConfig ?? {});
     this.validateInstallation(input.installationConfig ?? {});
+    this.validateCatalogMetadata(input);
     const createFrequency = input.syncFrequency ?? "manual";
     if (!["manual", "6h", "12h", "24h", "7d"].includes(createFrequency)) throw new BadRequestException("Invalid sync frequency");
     if (input.autoSync && createFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
     const software = await this.catalog.create({
       name: input.name.trim(), identifier: input.identifier, description: input.description ?? "",
-      category: input.category ?? "runtime", serviceTypes: [...new Set(input.serviceTypes)],
+      category: input.category ?? "runtime", logoUrl: input.logoUrl ?? "", officialUrl: input.officialUrl ?? "",
+      supportedOperatingSystems: input.supportedOperatingSystems ?? [], supportedArchitectures: input.supportedArchitectures ?? [],
+      requiredRuntime: input.requiredRuntime ?? "", defaultVersion: input.defaultVersion ?? "",
+      serviceTypes: [...new Set(input.serviceTypes)],
       sourceType: input.sourceType ?? "manual", sourceConfig: input.sourceConfig ?? {}, installationConfig: input.installationConfig ?? {},
       enabled: input.enabled ?? true, customerAvailable: input.customerAvailable ?? true,
       autoSync: input.autoSync ?? false, syncFrequency: input.syncFrequency ?? "manual",
@@ -190,12 +194,13 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!software) throw new NotFoundException("Software not found");
     if (input.sourceType || input.sourceConfig) this.validateSource(input.sourceType ?? software.sourceType, input.sourceConfig ?? software.sourceConfig);
     if (input.installationConfig) this.validateInstallation(input.installationConfig);
+    this.validateCatalogMetadata(input);
     const nextFrequency = input.syncFrequency ?? software.syncFrequency;
     const nextAutoSync = input.autoSync ?? software.autoSync;
     if (!["manual", "6h", "12h", "24h", "7d"].includes(nextFrequency)) throw new BadRequestException("Invalid sync frequency");
     if (nextAutoSync && nextFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
     if (input.serviceTypes !== undefined && (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length || input.serviceTypes.some(value => typeof value !== "string" || !/^[a-z0-9_-]{2,32}$/.test(value)))) throw new BadRequestException("Choose valid service types");
-    const allowed = ["name", "description", "category", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
+    const allowed = ["name", "description", "category", "logoUrl", "officialUrl", "supportedOperatingSystems", "supportedArchitectures", "requiredRuntime", "defaultVersion", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
     for (const key of allowed) if (input[key] !== undefined) (software as any)[key] = input[key];
     await software.save();
     await this.audit.log({ actorId: actor.id, action: "software.updated", targetType: "software", targetId: id, sensitive: true });
@@ -497,6 +502,23 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const software = await this.catalog.findById(id);
     if (!software) throw new NotFoundException("Software not found");
     return software;
+  }
+
+  private validateCatalogMetadata(input: Partial<Software>) {
+    for (const [label, value] of [["official website", input.officialUrl], ["logo URL", input.logoUrl]] as const) {
+      if (value === undefined || value === "") continue;
+      let parsed: URL;
+      try { parsed = new URL(value); } catch { throw new BadRequestException("Invalid " + label + " URL"); }
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new BadRequestException(label + " must be a valid HTTPS URL");
+    }
+    for (const [label, values] of [["supported operating systems", input.supportedOperatingSystems], ["supported architectures", input.supportedArchitectures]] as const) {
+      if (values === undefined) continue;
+      if (!Array.isArray(values) || values.length > 30 || values.some(value => typeof value !== "string" || !/^[A-Za-z0-9._ -]{1,64}$/.test(value))) {
+        throw new BadRequestException("Invalid " + label);
+      }
+    }
+    if (input.requiredRuntime !== undefined && (typeof input.requiredRuntime !== "string" || input.requiredRuntime.length > 120)) throw new BadRequestException("Runtime requirement must be 120 characters or fewer");
+    if (input.defaultVersion !== undefined && (typeof input.defaultVersion !== "string" || input.defaultVersion.length > 100)) throw new BadRequestException("Default version must be 100 characters or fewer");
   }
 
   private validateInstallation(config: Record<string, unknown>) {
