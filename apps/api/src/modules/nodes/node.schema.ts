@@ -9,7 +9,10 @@ export class Node {
   @Prop({ default: 22 }) sshPort!: number;
   @Prop({ default: "root" }) sshUsername!: string;
   @Prop() sshKeyFingerprint?: string; // never store raw private keys on the control plane
-  @Prop() os?: string; // ubuntu | debian
+  @Prop() os?: string; // admin-registered OS label
+  @Prop() detectedOs?: string; // reported by the authenticated node agent
+  @Prop() osVersion?: string;
+  @Prop() architecture?: string; // amd64 | arm64 | ...
   @Prop() location?: string;
   @Prop({ required: true }) agentUrl!: string; // https://node-ip:7443
   @Prop({ select: false }) agentTokenHash?: string; // HMAC of per-node credential

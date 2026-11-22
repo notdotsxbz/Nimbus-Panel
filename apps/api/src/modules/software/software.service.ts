@@ -498,17 +498,28 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   }
   private async assertNodeOsCompatibility(software: SoftwareDocument, nodeId: string) {
     const supportedOs = software.supportedOperatingSystems ?? [];
-    if (!supportedOs.length) return;
+    const supportedArchitectures = software.supportedArchitectures ?? [];
+    if (!supportedOs.length && !supportedArchitectures.length) return;
     const node = await this.nodes.get(nodeId);
-    const actualOs = String(node.os ?? "").trim().toLowerCase();
-    if (!actualOs) throw new BadRequestException("The hosting node operating system is unknown, so this software's OS compatibility cannot be verified");
-    const supported = supportedOs.map(value => value.trim().toLowerCase());
-    const matches = supported.some(value => {
-      const normalized = value.replace(/[_-]/g, " ");
-      if (normalized === "linux") return ["linux", "ubuntu", "debian"].includes(actualOs);
-      return normalized === actualOs || normalized.startsWith(actualOs + " ") || actualOs.startsWith(normalized + " ");
-    });
-    if (!matches) throw new BadRequestException("This software does not support the operating system installed on the selected hosting node");
+    if (supportedOs.length) {
+      const actualOs = String(node.detectedOs || node.os || "").trim().toLowerCase();
+      if (!actualOs) throw new BadRequestException("The hosting node operating system is unknown, so this software's OS compatibility cannot be verified");
+      const supported = supportedOs.map(value => value.trim().toLowerCase());
+      const matches = supported.some(value => {
+        const normalized = value.replace(/[_-]/g, " ");
+        if (normalized === "linux") return ["linux", "ubuntu", "debian"].includes(actualOs);
+        return normalized === actualOs || normalized.startsWith(actualOs + " ") || actualOs.startsWith(normalized + " ");
+      });
+      if (!matches) throw new BadRequestException("This software does not support the operating system installed on the selected hosting node");
+    }
+    if (supportedArchitectures.length) {
+      const actualArchitecture = String(node.architecture || "").trim().toLowerCase();
+      if (!actualArchitecture) throw new BadRequestException("The hosting node architecture is unknown, so this software's architecture compatibility cannot be verified");
+      const aliases: Record<string, string> = { x86_64: "amd64", x64: "amd64", aarch64: "arm64" };
+      const actual = aliases[actualArchitecture] ?? actualArchitecture;
+      const supported = supportedArchitectures.map(value => value.trim().toLowerCase()).map(value => aliases[value] ?? value);
+      if (!supported.includes(actual)) throw new BadRequestException("This software does not support the architecture of the selected hosting node");
+    }
   }
 
   async createServiceFromCatalog(input: Omit<CreateServiceDto, "dockerImage" | "software" | "softwareVersion" | "versionProbe" | "expectedVersion"> & { softwareId: string; versionId: string }, actor: AuthUser) {

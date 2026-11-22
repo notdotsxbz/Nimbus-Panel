@@ -101,3 +101,19 @@ Never share enrollment tokens or node credentials in support tickets or public c
 - Per-service SFTP account provisioning is not part of this Software & Version Manager implementation.
 
 Do not use the existing destructive **Reinstall** action to change software. Software upgrades must use the Software tab's backup-and-upgrade workflow.
+
+## Node OS and architecture telemetry
+
+The authenticated node agent reports its Linux distribution ID and version from
+`/etc/os-release`, plus the CPU architecture from Go's `runtime.GOARCH`.
+The API validates these values before persisting them on the node record.
+Older agents remain compatible because these heartbeat fields are optional.
+
+Initial installs and software changes compare catalogue OS and architecture
+requirements against detected node values. If a required value is missing or
+does not match, the operation is rejected rather than assuming compatibility.
+The admin-registered node OS remains a fallback for OS checks when an older
+agent has not reported its distribution. Architecture checks fail closed when
+the catalogue declares an architecture requirement but the node has not
+reported one.
+
