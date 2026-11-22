@@ -342,6 +342,14 @@ async function call(path, { method = "GET", token, body } = {}) {
   const software = await call("/software", { method: "POST", token: ownerToken, body: { name: "Smoke Docker Runtime", identifier: "smoke-docker-" + suffix, description: "catalog smoke test", category: "runtime", serviceTypes: ["docker"], sourceType: "manual", sourceConfig: {}, installationConfig: {}, enabled: true, customerAvailable: true } });
   check("admin creates software catalog entry", software.status === 201 && !!software.body?._id, "status=" + software.status);
   const softwareId = software.body?._id;
+  const adminOperations = await call("/software/operations", { token: ownerToken });
+  check("admin can view software operation monitor", adminOperations.status === 200 && Array.isArray(adminOperations.body), "status=" + adminOperations.status);
+  const customerOperations = await call("/software/operations", { token: custToken });
+  check("customer cannot view global software operations", customerOperations.status === 403, "status=" + customerOperations.status);
+  const manualPreview = await call("/software/" + softwareId + "/preview", { method: "POST", token: ownerToken });
+  check("manual-only catalog cannot call an automatic source adapter", manualPreview.status === 400, "status=" + manualPreview.status);
+  const emptyImport = await call("/software/" + softwareId + "/import", { method: "POST", token: ownerToken, body: { all: true } });
+  check("version import requires a current source preview", emptyImport.status === 400, "status=" + emptyImport.status);
   const customerCatalog = await call("/software", { token: custToken });
   check("customer cannot list admin software catalog", customerCatalog.status === 403, "status=" + customerCatalog.status);
   const customerCreate = await call("/software", { method: "POST", token: custToken, body: { name: "Nope", identifier: "customer-nope-" + suffix, serviceTypes: ["docker"], sourceType: "manual" } });
