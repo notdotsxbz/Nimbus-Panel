@@ -11,6 +11,7 @@ type SoftwareRow = {
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; channel?: string; importedAt?: string; compatibility?: string[]; architectures?: string[]; runtimeRequirements?: Record<string, unknown>; checksum?: string; signature?: string; sourceUrl?: string };
 type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
+type VersionPage = { items: VersionRow[]; total: number; page: number; limit: number; pages: number };
 type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: string } | string; status: string; attempts: number; maxAttempts: number; runAt: string; lastError?: string; discovered?: number; imported?: number; failed?: number };
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedBy?: { username?: string } | string; requestedSoftware: string; requestedVersion: string; previousSoftware?: string; previousVersion?: string; status: string; progress: number; error?: string; warning?: string; startedAt?: string; completedAt?: string; verification?: { running?: boolean; installedImage?: string; containerId?: string; healthStatus?: string; previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
 
@@ -18,6 +19,9 @@ export default function AdminSoftwarePage() {
   const [items, setItems] = useState<SoftwareRow[]>([]);
   const [selected, setSelected] = useState<SoftwareRow | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
+  const [versionPage, setVersionPage] = useState(1);
+  const [versionPages, setVersionPages] = useState(1);
+  const [versionTotal, setVersionTotal] = useState(0);
   const [busy, setBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -34,10 +38,19 @@ export default function AdminSoftwarePage() {
   };
   useEffect(() => { void load(); }, []);
 
+  const loadVersionPage = async (softwareId: string, page = 1) => {
+    const result = await api.get<VersionPage>(`/software/${softwareId}/versions?page=${page}&limit=50`);
+    setVersions(result.items);
+    setVersionPage(result.page);
+    setVersionPages(result.pages);
+    setVersionTotal(result.total);
+    setSelectedVersionIds([]);
+  };
+
   const openSoftware = async (software: SoftwareRow) => {
     setSelected(software);
     setSelectedVersionIds([]);
-    try { setVersions(await api.get<VersionRow[]>(`/software/${software._id}/versions`)); }
+    try { await loadVersionPage(software._id, 1); }
     catch (e) { show(e instanceof Error ? e.message : "Could not load versions", "err"); }
   };
 
@@ -322,15 +335,17 @@ export default function AdminSoftwarePage() {
               {version.runtimeRequirements && Object.keys(version.runtimeRequirements).length ? <p className="text-xs text-muted">Runtime: {JSON.stringify(version.runtimeRequirements)}</p> : null}
               {version.checksum ? <p className="break-all text-xs text-muted">Checksum: {version.checksum}</p> : null}
               {version.sourceUrl ? <a className="text-xs text-sky-300 underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}
-              {version.releaseDate ? <p className="text-xs text-muted">Released {new Date(version.releaseDate).toLocaleDateString()}</p> : null}
-              {version.architectures?.length ? <p className="text-xs text-muted">Architectures: {version.architectures.join(", ")}</p> : null}
-              {version.compatibility?.length ? <p className="text-xs text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}
-              {version.runtimeRequirements && Object.keys(version.runtimeRequirements).length ? <p className="text-xs text-muted">Runtime: {JSON.stringify(version.runtimeRequirements)}</p> : null}
-              {version.checksum ? <p className="break-all text-xs text-muted">Checksum: {version.checksum}</p> : null}
-              {version.sourceUrl ? <a className="text-xs text-sky-300 underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}</div>
+</div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
-            {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually through the API.</p>}
+            {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually.</p>}
+            {versionTotal > 0 ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3 text-xs text-muted">
+              <span>{versionTotal.toLocaleString()} versions · Page {versionPage} of {versionPages}</span>
+              <div className="flex gap-2">
+                <button className="btn-ghost !px-3 !py-1" disabled={versionPage <= 1 || busy} onClick={() => selected && void loadVersionPage(selected._id, versionPage - 1)}>Previous</button>
+                <button className="btn-ghost !px-3 !py-1" disabled={versionPage >= versionPages || busy} onClick={() => selected && void loadVersionPage(selected._id, versionPage + 1)}>Next</button>
+              </div>
+            </div> : null}
           </div>
         </> : <p className="py-12 text-center text-sm text-muted">Select software to view versions.</p>}
       </GlassCard>
