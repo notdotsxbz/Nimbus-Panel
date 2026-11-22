@@ -827,6 +827,25 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       if (!Array.isArray(rows)) throw new BadRequestException("PaperMC release source returned an invalid response");
       return rows.map((version: string) => ({ version, sourceUrl: "https://papermc.io/downloads/" + project, metadata: { project } }));
     }
+    if (software.sourceType === "papermc-v3") {
+      const minecraftVersion = software.sourceConfig.minecraftVersion;
+      const project = software.sourceConfig.project ?? "paper";
+      const response = await axios.get("https://fill.papermc.io/v3/projects/" + encodeURIComponent(project) + "/versions/" + encodeURIComponent(minecraftVersion) + "/builds", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      if (!Array.isArray(response.data)) throw new BadRequestException("PaperMC returned an invalid build list");
+      return (response.data as any[]).map(build => {
+        const buildId = String(build.id ?? "");
+        const download = build.downloads?.["server:default"];
+        if (!/^\d+$/.test(buildId) || typeof download?.url !== "string" || !download.url.startsWith("https://")) return null;
+        return {
+          version: minecraftVersion + "-" + buildId, releaseName: project.toUpperCase() + " " + minecraftVersion + " build " + buildId,
+          releaseDate: build.time ?? build.createdAt, prerelease: String(build.channel ?? "").toUpperCase() !== "STABLE",
+          sourceUrl: download.url, sourceId: buildId, compatibility: [minecraftVersion],
+          metadata: { minecraftVersion, build: buildId, channel: String(build.channel ?? "UNKNOWN"), checksums: download.checksums ?? {} },
+        } as DiscoveredVersion;
+      }).filter((item): item is DiscoveredVersion => item !== null);
+    }
     if (software.sourceType === "purpur") {
       const response = await axios.get("https://api.purpurmc.org/v2/purpur", { timeout: 20000, headers: { Accept: "application/json" } });
       const rows = (response.data as any).versions;
@@ -857,6 +876,50 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         const version = asset?.version?.semver;
         if (typeof version !== "string") return [];
         return [{ version, sourceUrl: "https://adoptium.net/temurin/releases/", architectures: ["x64"], operatingSystems: ["linux"], checksum: String(asset.binary?.package?.checksum ?? ""), metadata: { major, build: asset.version.build, architecture: "x64", os: "linux", imageType: "jdk", checksum: asset.binary?.package?.checksum } }];
+      });
+    }
+    if (software.sourceType === "purpur-api") {
+      const minecraftVersion = software.sourceConfig.minecraftVersion;
+      const response = await axios.get("https://api.purpurmc.org/v2/purpur/" + encodeURIComponent(minecraftVersion), {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      const builds = response.data?.builds?.all;
+      if (!Array.isArray(builds)) throw new BadRequestException("Purpur returned an invalid build list");
+      const latest = String(response.data?.builds?.latest ?? "");
+      return builds.filter((value: unknown) => /^\d+$/.test(String(value))).map((value: unknown) => {
+        const buildId = String(value);
+        return {
+          version: minecraftVersion + "-" + buildId, releaseName: "Purpur " + minecraftVersion + " build " + buildId,
+          prerelease: false, sourceUrl: "https://api.purpurmc.org/v2/purpur/" + encodeURIComponent(minecraftVersion) + "/" + buildId + "/download",
+          sourceId: buildId, compatibility: [minecraftVersion], metadata: { minecraftVersion, build: buildId, latest: buildId === latest },
+        } as DiscoveredVersion;
+      });
+    }
+    if (software.sourceType === "forge-promotions") {
+      const response = await axios.get("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      const promos = response.data?.promos;
+      if (!promos || typeof promos !== "object" || Array.isArray(promos)) throw new BadRequestException("Forge returned an invalid promotions index");
+      const grouped = new Map<string, { minecraftVersion: string; forgeVersion: string; promotions: Set<string> }>();
+      for (const [key, value] of Object.entries(promos as Record<string, unknown>)) {
+        const separator = key.lastIndexOf("-");
+        if (separator <= 0 || !["latest", "recommended"].includes(key.slice(separator + 1))) continue;
+        const minecraftVersion = key.slice(0, separator);
+        const forgeVersion = String(value ?? "");
+        if (!/^\d+\.\d+(?:\.\d+)?$/.test(minecraftVersion) || !/^\d+\.\d+(?:\.\d+)?$/.test(forgeVersion)) continue;
+        const id = minecraftVersion + "-" + forgeVersion;
+        const item = grouped.get(id) ?? { minecraftVersion, forgeVersion, promotions: new Set<string>() };
+        item.promotions.add(key.slice(separator + 1));
+        grouped.set(id, item);
+      }
+      return [...grouped.values()].map(item => {
+        const id = item.minecraftVersion + "-" + item.forgeVersion;
+        return {
+          version: id, releaseName: "Forge " + item.minecraftVersion + " build " + item.forgeVersion,
+          prerelease: false, sourceUrl: "https://maven.minecraftforge.net/net/minecraftforge/forge/" + id + "/forge-" + id + "-installer.jar",
+          sourceId: id, compatibility: [item.minecraftVersion], metadata: { minecraftVersion: item.minecraftVersion, forgeVersion: item.forgeVersion, promotions: [...item.promotions] },
+        } as DiscoveredVersion;
       });
     }
     if (software.sourceType === "forge-maven" || software.sourceType === "neoforge-maven") {
