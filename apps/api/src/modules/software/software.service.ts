@@ -492,7 +492,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       agentUpgrade = await this.nodes.agentCall(agentNode, "/services/" + service._id.toString() + "/upgrade", {
         dockerImage, cpuPercent: service.cpuPercent, ramMb: service.ramMb, diskGb: service.diskGb,
         startupCommand: service.startupCommand ?? [], env: resolvedEnvironment,
-        versionProbe, expectedVersion: safeVersion,
+        versionProbe, expectedVersion: versionProbe === "java-version" ? safeVersion.split("+")[0] : safeVersion,
       }, "POST", 10 * 60 * 1000);
       operation.status = "verifying"; operation.progress = 85; await operation.save();
       if (agentUpgrade.status !== "online" || !agentUpgrade.running || agentUpgrade.installedImage !== dockerImage || !agentUpgrade.containerId || !agentUpgrade.previousContainerName || (versionProbe !== "" && agentUpgrade.versionVerified !== true) || (Object.keys(resolvedEnvironment).length > 0 && agentUpgrade.environmentVerified !== true)) throw new BadRequestException("Node Agent did not verify the requested application version, replacement container, and rollback state");
@@ -629,7 +629,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     }
     const imageHasVersion = template.includes("{version}");
     const versionProbe = config.versionProbe;
-    const supportedVersionProbes = ["minecraft-log", "nodejs-version", "python-version", "php-version", "go-version", "java-version", "mongodb-version"];
+    const supportedVersionProbes = ["minecraft-log", "nodejs-version", "python-version", "php-version", "go-version", "java-version", "dotnet-version", "mongodb-version"];
     if (typeof versionProbe === "string" && versionProbe !== "" && !supportedVersionProbes.includes(versionProbe)) throw new BadRequestException("Unsupported application version verification probe");
     if (versionProbe === "minecraft-log" && !((environment as Record<string, unknown>).VERSION as string | undefined)?.includes("{version}")) throw new BadRequestException("Minecraft log verification requires VERSION={version} in the installer environment");
     if (method !== "docker-image-template" || !template || !/^[A-Za-z0-9._:/-]+$/.test(normalizedImage) || (!imageHasVersion && !environmentHasVersion)) {
