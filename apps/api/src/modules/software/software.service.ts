@@ -187,7 +187,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const catalog = await this.catalog.find().sort({ name: 1 }).lean();
     if (!catalog.length) return catalog;
     const ids = catalog.map(item => item._id);
-    const versions = await this.versions.find({ softwareId: { $in: ids } }).select("softwareId version recommended publicationStatus deprecated releaseDate importedAt").sort({ releaseDate: -1, importedAt: -1 }).lean();
+    const versions = await this.versions.find({ softwareId: { $in: ids } }).select("softwareId version recommended publicationStatus deprecated compatible releaseDate importedAt").sort({ releaseDate: -1, importedAt: -1 }).lean();
     const summary = new Map<string, { latestDiscoveredVersion: string | null; latestPublishedVersion: string | null; recommendedVersion: string | null; versionCount: number }>();
     for (const item of catalog) summary.set(item._id.toString(), { latestDiscoveredVersion: null, latestPublishedVersion: null, recommendedVersion: null, versionCount: 0 });
     for (const version of versions) {
