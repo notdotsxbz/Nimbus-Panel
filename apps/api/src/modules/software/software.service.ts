@@ -357,7 +357,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           timeout: 15000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" },
         });
         const rows = response.data as any[];
-        for (const release of rows) results.push({
+        for (const release of rows.filter((item: any) => !item.draft)) results.push({
           version: String(release.tag_name ?? ""), releaseName: String(release.name ?? ""),
           releaseDate: release.published_at, prerelease: !!release.prerelease,
           sourceUrl: String(release.html_url ?? ""), sourceId: String(release.id ?? ""),
