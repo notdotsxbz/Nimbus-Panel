@@ -59,7 +59,7 @@ const GB = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 export default function AdminNodes() {
   const [nodes, setNodes] = useState<NodeRow[]>([]);
   const [open, setOpen] = useState(false);
-  const [enroll, setEnroll] = useState<{ name: string; token: string } | null>(null);
+  const [enroll, setEnroll] = useState<{ name: string; token: string; forceReenroll?: boolean } | null>(null);
   const [detail, setDetail] = useState<NodeRow | null>(null);
   const [workloads, setWorkloads] = useState<WorkloadRow[] | null>(null);
   const [allocs, setAllocs] = useState<AllocationRow[] | null>(null);
@@ -150,7 +150,7 @@ export default function AdminNodes() {
     if (!confirm(`Revoke agent credentials for "${detail.name}"? The running agent will be locked out until re-enrollment.`)) return;
     try {
       const res = await api.post<{ enrollmentToken: string }>(`/nodes/${detail._id}/revoke-credentials`);
-      setEnroll({ name: detail.name, token: res.enrollmentToken });
+      setEnroll({ name: detail.name, token: res.enrollmentToken, forceReenroll: true });
       setDetail(null);
       void load();
     } catch (err) {
@@ -231,8 +231,10 @@ export default function AdminNodes() {
     }
   };
 
-  const enrollCommand = (token: string) =>
-    `curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install-node.sh | sudo bash -s -- \\\n  --api ${typeof window !== "undefined" ? window.location.origin : "https://YOUR-PANEL-DOMAIN"} \\\n  --token ${token}`;
+  const enrollCommand = (token: string, forceReenroll = false) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://YOUR-PANEL-DOMAIN";
+    return "curl -fsSL https://raw.githubusercontent.com/notdotsxbz/Nimbus-Panel/main/installer/install-node.sh | sudo bash -s -- --api " + origin + " --token " + token + (forceReenroll ? " --force-reenroll" : "");
+  };
 
   return (
     <div className="space-y-6">
@@ -299,7 +301,7 @@ export default function AdminNodes() {
       {/* Enrollment token */}
       <Modal open={enroll !== null} title={`Enroll ${enroll?.name ?? ""}`} onClose={() => setEnroll(null)}>
         <p className="text-sm text-muted">Run this on the node (Ubuntu/Debian). The token is single-use and expires in 30 minutes.</p>
-        <pre className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-black/60 p-4 font-mono text-xs leading-relaxed">{enrollCommand(enroll?.token ?? "")}</pre>
+        <pre className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-black/60 p-4 font-mono text-xs leading-relaxed">{enrollCommand(enroll?.token ?? "", enroll?.forceReenroll === true)}</pre>
         <button className="btn-ghost mt-4 w-full text-xs" onClick={() => void navigator.clipboard.writeText(enroll?.token ?? "")}>Copy token</button>
       </Modal>
 
