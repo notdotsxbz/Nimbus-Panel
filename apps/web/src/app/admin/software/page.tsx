@@ -21,7 +21,6 @@ export default function AdminSoftwarePage() {
   const [busy, setBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [manualVersion, setManualVersion] = useState("");
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<string[]>([]);
   const [selectedVersionIds, setSelectedVersionIds] = useState<string[]>([]);
@@ -165,11 +164,41 @@ export default function AdminSoftwarePage() {
   };
   const addManualVersion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selected || !manualVersion.trim()) return;
+    if (!selected) return;
+    const data = new FormData(event.currentTarget);
+    const version = String(data.get("version") ?? "").trim();
+    if (!version) return;
+    let runtimeRequirements: Record<string, unknown> = {};
+    const runtimeText = String(data.get("runtimeRequirements") ?? "").trim();
+    if (runtimeText) {
+      try {
+        const parsed = JSON.parse(runtimeText);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Runtime requirements must be a JSON object");
+        runtimeRequirements = parsed;
+      } catch (error) {
+        show(error instanceof Error ? error.message : "Invalid runtime requirements JSON", "err");
+        return;
+      }
+    }
+    const channel = String(data.get("channel") ?? "stable");
     try {
-      await api.post("/software/" + selected._id + "/versions", { version: manualVersion.trim() });
-      setManualVersion(""); await openSoftware(selected); show("Version added as pending approval", "ok");
-    } catch (e) { show(e instanceof Error ? e.message : "Could not add version", "err"); }
+      await api.post("/software/" + selected._id + "/versions", {
+        version,
+        releaseName: String(data.get("releaseName") ?? "").trim(),
+        releaseDate: data.get("releaseDate") || undefined,
+        channel,
+        prerelease: channel === "prerelease" || channel === "nightly",
+        sourceUrl: String(data.get("sourceUrl") ?? "").trim() || undefined,
+        compatibility: String(data.get("compatibility") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+        architectures: String(data.get("architectures") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+        checksum: String(data.get("checksum") ?? "").trim(),
+        signature: String(data.get("signature") ?? "").trim(),
+        runtimeRequirements,
+      });
+      event.currentTarget.reset();
+      await openSoftware(selected);
+      show("Version added as pending approval", "ok");
+    } catch (error) { show(error instanceof Error ? error.message : "Could not add version", "err"); }
   };
 
   const bulkAction = async (action: string) => {
@@ -248,9 +277,18 @@ export default function AdminSoftwarePage() {
               </label>)}
             </div>
           </div>}
-          <form onSubmit={addManualVersion} className="mt-4 flex gap-2">
-            <input className="input min-w-0 flex-1" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Add version manually" aria-label="Version number" />
-            <button className="btn-ghost" type="submit">Add version</button>
+          <form onSubmit={addManualVersion} className="mt-4 grid gap-2 rounded-lg border border-white/10 p-3 sm:grid-cols-2">
+            <input name="version" required className="input min-w-0" placeholder="Version number" aria-label="Version number" />
+            <input name="releaseName" className="input min-w-0" placeholder="Release name" />
+            <input name="releaseDate" type="date" className="input min-w-0" aria-label="Release date" />
+            <select name="channel" className="input min-w-0" defaultValue="stable"><option value="stable">Stable</option><option value="lts">LTS</option><option value="prerelease">Prerelease</option><option value="nightly">Nightly</option></select>
+            <input name="sourceUrl" type="url" className="input min-w-0 sm:col-span-2" placeholder="HTTPS release source URL" />
+            <input name="architectures" className="input min-w-0" placeholder="Architectures: amd64,arm64" />
+            <input name="compatibility" className="input min-w-0" placeholder="Compatibility: 1.21,1.21.1" />
+            <input name="checksum" className="input min-w-0 sm:col-span-2" placeholder="Checksum (SHA-256 where available)" />
+            <input name="signature" className="input min-w-0 sm:col-span-2" placeholder="Signature / verification reference" />
+            <textarea name="runtimeRequirements" className="input min-w-0 font-mono sm:col-span-2" rows={2} placeholder='Runtime requirements JSON, e.g. {"java":"21"}' />
+            <button className="btn-ghost sm:col-span-2" type="submit">Add manual version for approval</button>
           </form>
           {selectedVersionIds.length > 0 && <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-white/10 p-3">
             <span className="self-center text-xs text-muted">{selectedVersionIds.length} selected</span>
