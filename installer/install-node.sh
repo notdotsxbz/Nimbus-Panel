@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO="notdotsxbz/Nimbus-Panel"
-API_URL=""; TOKEN=""
+API_URL=""; TOKEN=""; FORCE_REENROLL=0
 
 log() { printf '\033[1;37m[nimbus-node]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[nimbus-node] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -19,10 +19,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --api)   API_URL="$2"; shift 2 ;;
     --token) TOKEN="$2"; shift 2 ;;
+    --force-reenroll) FORCE_REENROLL=1; shift ;;
     *) die "Unknown argument: $1" ;;
   esac
 done
-[ -n "${API_URL}" ] && [ -n "${TOKEN}" ] || die "Usage: --api https://panel:port --token TOKEN"
+[ -n "${API_URL}" ] && [ -n "${TOKEN}" ] || die "Usage: --api https://panel:port --token TOKEN [--force-reenroll]"
 
 . /etc/os-release
 case "${ID:-}" in
@@ -57,6 +58,13 @@ chmod +x /usr/local/bin/nimbus-agent
 
 mkdir -p /etc/nimbus /var/lib/nimbus/services /var/lib/nimbus/backups
 chmod 750 /var/lib/nimbus
+
+# A fresh single-use token after revocation must replace the saved local credential.
+if [ "${FORCE_REENROLL}" -eq 1 ]; then
+  log "Preparing credential re-enrollment (service data and TLS certificate are preserved)…"
+  systemctl stop nimbus-agent >/dev/null 2>&1 || true
+  rm -f /etc/nimbus/agent-token /etc/nimbus/node-id
+fi
 
 log "Generating agent TLS certificate (self-signed, agent-local)…"
 openssl req -x509 -newkey rsa:2048 -keyout /etc/nimbus/agent.key -out /etc/nimbus/agent.crt \
