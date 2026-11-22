@@ -562,7 +562,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Minecraft build sources require a valid Minecraft version such as 1.21.11");
     }
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
-    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "papermc-v3", "purpur-api", "mojang-manifest", "fabric-meta", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "papermc-v3", "purpur-api", "mojang-manifest", "fabric-meta", "forge-promotions", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -651,6 +651,37 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         compatibility: [row.id],
         metadata: { type: String(row.type ?? "unknown"), complianceLevel: Number(row.complianceLevel ?? 0) },
       }));
+    }
+    if (software.sourceType === "forge-promotions") {
+      const response = await axios.get("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      const promos = response.data?.promos;
+      if (!promos || typeof promos !== "object" || Array.isArray(promos)) throw new BadRequestException("Forge returned an invalid promotions index");
+      const grouped = new Map<string, { minecraftVersion: string; forgeVersion: string; promotions: Set<string> }>();
+      for (const [key, value] of Object.entries(promos as Record<string, unknown>)) {
+        const separator = key.lastIndexOf("-");
+        if (separator <= 0 || !["latest", "recommended"].includes(key.slice(separator + 1))) continue;
+        const minecraftVersion = key.slice(0, separator);
+        const forgeVersion = String(value ?? "");
+        if (!/^\\d+\\.\\d+(?:\\.\\d+)?$/.test(minecraftVersion) || !/^\\d+\\.\\d+(?:\\.\\d+)?$/.test(forgeVersion)) continue;
+        const id = minecraftVersion + "-" + forgeVersion;
+        const item = grouped.get(id) ?? { minecraftVersion, forgeVersion, promotions: new Set<string>() };
+        item.promotions.add(key.slice(separator + 1));
+        grouped.set(id, item);
+      }
+      return [...grouped.values()].map(item => {
+        const id = item.minecraftVersion + "-" + item.forgeVersion;
+        return {
+          version: id,
+          releaseName: "Forge " + item.minecraftVersion + " build " + item.forgeVersion,
+          prerelease: false,
+          sourceUrl: "https://maven.minecraftforge.net/net/minecraftforge/forge/" + id + "/forge-" + id + "-installer.jar",
+          sourceId: id,
+          compatibility: [item.minecraftVersion],
+          metadata: { minecraftVersion: item.minecraftVersion, forgeVersion: item.forgeVersion, promotions: [...item.promotions] },
+        } as DiscoveredVersion;
+      });
     }
     if (software.sourceType === "fabric-meta") {
       const response = await axios.get("https://meta.fabricmc.net/v2/versions/game", {
