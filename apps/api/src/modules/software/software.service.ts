@@ -277,7 +277,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       try {
         const result = await this.versions.updateOne({ softwareId: software._id, version: item.version }, { $setOnInsert: {
           softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "", releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
-          channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease ? "published" : "pending",
+          channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(item.version) && typeof item.sourceUrl === "string" && item.sourceUrl.startsWith("https://") && item.metadata?.incomplete !== true ? "published" : "pending",
           sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "", compatibility: item.compatibility ?? [],
           architectures: item.architectures ?? [], runtimeRequirements: item.runtimeRequirements ?? {},
           checksum: item.checksum ?? (typeof item.metadata?.checksum === "string" ? item.metadata.checksum : ""), signature: item.signature ?? "",
