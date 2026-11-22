@@ -7,7 +7,7 @@ import { GlassCard, useToast } from "@/components/glass";
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
   serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>;
-  enabled: boolean; customerAvailable: boolean; autoPublish: boolean; lastSyncedAt?: string; lastSyncStatus: string;
+  enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
 type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
