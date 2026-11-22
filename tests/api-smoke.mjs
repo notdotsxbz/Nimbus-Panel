@@ -353,6 +353,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   if (svcId && softwareId) {
     const crossOptions = await call("/software/for-service/" + svcId, { token: custToken });
     check("customer cannot read another customer software options", crossOptions.status === 403, "status=" + crossOptions.status);
+    const crossOperations = await call("/software/services/" + svcId + "/operations", { token: custToken });
+    check("customer cannot read another customer software operation history", crossOperations.status === 403, "status=" + crossOperations.status);
+    const crossChange = await call("/software/services/" + svcId + "/change", { method: "POST", token: custToken, body: { softwareId, versionId: manualVersion.body?._id } });
+    check("customer cannot change another users software", crossChange.status === 403, "status=" + crossChange.status);
     const ownerOptions = await call("/software/for-service/" + svcId, { token: ownerToken });
     check("authorized owner can read service-specific software options", ownerOptions.status === 200 && Array.isArray(ownerOptions.body?.options), "status=" + ownerOptions.status);
   }
