@@ -275,10 +275,16 @@ export class NodesService {
       containersRunning: number;
       uptimeSeconds: number;
       agentVersion: string;
+      os?: string;
+      osVersion?: string;
+      architecture?: string;
     },
   ) {
     node.online = true;
     node.lastHeartbeatAt = new Date();
+    if (typeof hb.os === "string" && /^[a-z0-9._-]{1,64}$/i.test(hb.os)) node.detectedOs = hb.os.toLowerCase();
+    if (typeof hb.osVersion === "string" && /^[a-z0-9._+-]{1,64}$/i.test(hb.osVersion)) node.osVersion = hb.osVersion;
+    if (typeof hb.architecture === "string" && /^[a-z0-9_]{1,32}$/i.test(hb.architecture)) node.architecture = hb.architecture.toLowerCase();
     node.lastHeartbeat = { nodeId: node._id!.toString(), at: new Date().toISOString(), ...hb };
     await node.save();
     return { ok: true, maintenanceMode: node.maintenanceMode };
