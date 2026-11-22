@@ -132,7 +132,7 @@ export default function AdminServices() {
         show("Choose a published software version before assigning this service.", "err");
         return;
       }
-      await api.post("/software/services/create", {
+      const created = await api.post<ServiceRow>("/software/services/create", {
         name: f.get("name"),
         type: f.get("type"),
         ownerId: f.get("ownerId"),
@@ -144,7 +144,8 @@ export default function AdminServices() {
         versionId,
       });
       setOpen(false);
-      show("Service created — node is installing it", "ok");
+      if (created.status === "online") show("Service installed and container version verification completed.", "ok");
+      else show("Service record created, but installation failed. Check the service status and operation history.", "err");
       void load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Assignment failed", "err");
