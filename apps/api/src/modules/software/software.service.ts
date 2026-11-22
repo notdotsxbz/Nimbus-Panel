@@ -274,7 +274,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     await this.getSoftware(id);
     const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
     const limit = Number.isFinite(requestedLimit) ? Math.min(100, Math.max(1, Math.floor(requestedLimit))) : 50;
-    const filter = { softwareId: id };
+    const filter = { softwareId: new Types.ObjectId(id) };
     const [items, total] = await Promise.all([
       this.versions.find(filter).sort({ releaseDate: -1, version: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.versions.countDocuments(filter),
