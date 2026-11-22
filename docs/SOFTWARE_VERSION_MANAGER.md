@@ -14,6 +14,7 @@ The currently implemented official-source adapters are:
 - **Python** — actual CPython release stages from Python PEP release metadata.
 - **PHP** — official PHP release metadata and source checksums.
 - **Lavalink** — official Lavalink project releases from GitHub Releases.
+- **MongoDB Server** — official MongoDB current release manifest, filtered to stable server releases and Ubuntu 22.04/24.04 target builds.
 - **Python** — actual CPython release stages from Python PEP release metadata.
 - **PHP** — official PHP release metadata and source checksums.
 - **Lavalink** — official Lavalink project releases from GitHub Releases.

@@ -561,7 +561,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "php-releases" && config.majorVersion && !/^\d{1,2}$/.test(config.majorVersion)) throw new BadRequestException("PHP major version must be a number such as 8");
     if (type === "papermc" && !["paper", "folia", "velocity", "waterfall"].includes(config.project ?? "paper")) throw new BadRequestException("Unsupported PaperMC project");
     if (type === "purpur" && config.project && config.project !== "purpur") throw new BadRequestException("Purpur source project must be purpur");
-    if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven", "python-releases", "php-releases", "lavalink-releases"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven", "python-releases", "php-releases", "lavalink-releases", "mongodb-releases"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -722,6 +722,24 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         if (rows.length < 100) break;
       }
       return results;
+    }
+    if (software.sourceType === "mongodb-releases") {
+      const response = await axios.get("https://downloads.mongodb.org/current.json", { timeout: 30000, headers: { Accept: "application/json" } });
+      const rows = (response.data as any)?.versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("MongoDB official release manifest returned an invalid response");
+      return rows.filter((row: any) => typeof row.version === "string" && row.development_release !== true && row.release_candidate !== true)
+        .map((row: any) => {
+          const supported = Array.isArray(row.downloads) ? row.downloads.filter((item: any) => item.edition === "targeted" && ["ubuntu2204", "ubuntu2404"].includes(String(item.target ?? ""))) : [];
+          const architectures = [...new Set<string>(supported.map((item: any) => String(item.arch ?? "")).filter(Boolean))];
+          const archive = supported.find((item: any) => item.archive?.sha256);
+          return {
+            version: String(row.version), releaseDate: row.date ? new Date(row.date).toISOString() : undefined,
+            prerelease: false, sourceUrl: "https://www.mongodb.com/docs/manual/release-notes/",
+            architectures, checksum: String(archive?.archive?.sha256 ?? ""),
+            compatibility: [...new Set<string>(supported.map((item: any) => String(item.target ?? "")).filter(Boolean))],
+            metadata: { stable: true, targets: [...new Set<string>(supported.map((item: any) => String(item.target ?? "")).filter(Boolean))], releaseNotes: row.changes ?? "" },
+          };
+        });
     }
     if (software.sourceType === "dockerhub-tags") {
       const repository = software.sourceConfig.repository;
