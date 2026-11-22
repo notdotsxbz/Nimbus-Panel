@@ -140,6 +140,7 @@ export default function AdminServices() {
         cpuPercent: Number(f.get("cpuPercent")),
         ramMb: Number(f.get("ramMb")),
         diskGb: Number(f.get("diskGb")),
+        startupCommand: String(f.get("startupCommand") ?? "").split(/\r?\n/).map(value => value.trim()).filter(Boolean),
         softwareId,
         versionId,
       });
@@ -256,6 +257,11 @@ export default function AdminServices() {
           <div>
             <label className="label" htmlFor="s-cpu">CPU (%)</label>
             <input id="s-cpu" name="cpuPercent" type="number" min={10} max={400} defaultValue={100} required className="input" />
+          </div>
+          <div className="col-span-2">
+            <label className="label" htmlFor="s-startup">Startup command (optional, one argument per line)</label>
+            <textarea id="s-startup" name="startupCommand" rows={2} className="input" placeholder={"npm\nstart"} />
+            <p className="mt-1 text-xs text-muted">Examples: npm then start, or python then app.py. Leave blank for software images that provide their own startup.</p>
           </div>
           <div className="col-span-2">
             <label className="label" htmlFor="s-software">Approved software</label>
