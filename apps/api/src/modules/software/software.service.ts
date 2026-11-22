@@ -627,13 +627,13 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       return (response.data as any[]).map(build => {
         const buildId = String(build.id ?? "");
         const download = build.downloads?.["server:default"];
-        if (!/^\d+$/.test(buildId)) return null;
+        if (!/^\d+$/.test(buildId) || typeof download?.url !== "string" || !download.url.startsWith("https://")) return null;
         return {
           version: minecraftVersion + "-" + buildId,
           releaseName: "Paper " + minecraftVersion + " build " + buildId,
           releaseDate: build.time ?? build.createdAt,
           prerelease: String(build.channel ?? "").toUpperCase() !== "STABLE",
-          sourceUrl: typeof download?.url === "string" ? download.url : "https://fill.papermc.io/",
+          sourceUrl: download.url,
           sourceId: buildId,
           compatibility: [minecraftVersion],
           metadata: {
