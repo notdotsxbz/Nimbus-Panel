@@ -7,6 +7,7 @@ import { GlassCard, useToast } from "@/components/glass";
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
   serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>;
+  logoUrl?: string; officialUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
@@ -57,6 +58,8 @@ export default function AdminSoftwarePage() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const serviceTypes = String(data.get("serviceTypes") ?? "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
+    const supportedOperatingSystems = String(data.get("supportedOperatingSystems") ?? "").split(",").map(v => v.trim()).filter(Boolean);
+    const supportedArchitectures = String(data.get("supportedArchitectures") ?? "").split(",").map(v => v.trim()).filter(Boolean);
     const sourceType = String(data.get("sourceType") ?? "manual");
     const sourceConfig: Record<string, string> = {};
     if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
@@ -74,6 +77,9 @@ export default function AdminSoftwarePage() {
       await api.post("/software", {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
+        logoUrl: String(data.get("logoUrl") ?? "").trim(), officialUrl: String(data.get("officialUrl") ?? "").trim(),
+        supportedOperatingSystems, supportedArchitectures,
+        requiredRuntime: String(data.get("requiredRuntime") ?? "").trim(), defaultVersion: String(data.get("defaultVersion") ?? "").trim(),
         enabled: true, customerAvailable: true, autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
         installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate, environment } : {},
@@ -128,9 +134,27 @@ export default function AdminSoftwarePage() {
     if (name === null || !name.trim()) return;
     const description = window.prompt("Description", selected.description ?? "");
     if (description === null) return;
+    const officialUrl = window.prompt("Official website URL (HTTPS)", selected.officialUrl ?? "");
+    if (officialUrl === null) return;
+    const logoUrl = window.prompt("Logo URL (HTTPS)", selected.logoUrl ?? "");
+    if (logoUrl === null) return;
+    const requiredRuntime = window.prompt("Required runtime", selected.requiredRuntime ?? "");
+    if (requiredRuntime === null) return;
+    const defaultVersion = window.prompt("Default version", selected.defaultVersion ?? "");
+    if (defaultVersion === null) return;
+    const supportedOperatingSystems = window.prompt("Supported operating systems (comma-separated)", (selected.supportedOperatingSystems ?? []).join(", "));
+    if (supportedOperatingSystems === null) return;
+    const supportedArchitectures = window.prompt("Supported architectures (comma-separated)", (selected.supportedArchitectures ?? []).join(", "));
+    if (supportedArchitectures === null) return;
+    const metadata = {
+      name: name.trim(), description, officialUrl: officialUrl.trim(), logoUrl: logoUrl.trim(),
+      requiredRuntime: requiredRuntime.trim(), defaultVersion: defaultVersion.trim(),
+      supportedOperatingSystems: supportedOperatingSystems.split(",").map(value => value.trim()).filter(Boolean),
+      supportedArchitectures: supportedArchitectures.split(",").map(value => value.trim()).filter(Boolean),
+    };
     try {
-      await api.patch("/software/" + selected._id, { name: name.trim(), description });
-      const updated = { ...selected, name: name.trim(), description };
+      await api.patch("/software/" + selected._id, metadata);
+      const updated = { ...selected, ...metadata };
       setSelected(updated); setItems(current => current.map(item => item._id === updated._id ? updated : item));
       show("Software details updated", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Could not update software", "err"); }
@@ -191,6 +215,12 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">Identifier<input name="identifier" required pattern="[a-z0-9][a-z0-9._-]{1,63}" className="input w-full" placeholder="nodejs" /></label>
         <label className="space-y-1 text-sm">Category<input name="category" className="input w-full" defaultValue="runtime" /></label>
         <label className="space-y-1 text-sm">Service types<input name="serviceTypes" required className="input w-full" placeholder="discord,website,backend" /></label>
+        <label className="space-y-1 text-sm">Official website (HTTPS)<input name="officialUrl" type="url" className="input w-full" placeholder="https://example.com" /></label>
+        <label className="space-y-1 text-sm">Logo URL (HTTPS)<input name="logoUrl" type="url" className="input w-full" placeholder="https://example.com/logo.png" /></label>
+        <label className="space-y-1 text-sm">Required runtime<input name="requiredRuntime" className="input w-full" placeholder="Java 21 / Node.js 22" /></label>
+        <label className="space-y-1 text-sm">Default version<input name="defaultVersion" className="input w-full" placeholder="Optional" /></label>
+        <label className="space-y-1 text-sm">Supported operating systems<input name="supportedOperatingSystems" className="input w-full" placeholder="linux,windows" /></label>
+        <label className="space-y-1 text-sm">Supported architectures<input name="supportedArchitectures" className="input w-full" placeholder="amd64,arm64" /></label>
         <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="go-index">Official Go releases</option><option value="mongodb-current">Official MongoDB current releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
         <label className="space-y-1 text-sm">GitHub / Docker Hub repository<input name="repository" className="input w-full" placeholder="owner/repository or namespace/repository" /></label>
         <label className="space-y-1 text-sm">Modrinth project ID<input name="projectId" className="input w-full" /></label>
