@@ -42,6 +42,11 @@ export class SoftwareController {
     return this.software.update(id, body as never, actor);
   }
 
+  @Post("services/create")
+  @Roles("owner", "admin")
+  createServiceFromCatalog(@Body() body: Record<string, unknown>, @CurrentUser() actor: AuthUser) {
+    return this.software.createServiceFromCatalog(body as never, actor);
+  }
   @Post("services/:serviceId/change")
   changeServiceSoftware(@Param("serviceId") serviceId: string, @Body() body: { softwareId: string; versionId: string }, @CurrentUser() actor: AuthUser) {
     return this.software.changeServiceSoftware(serviceId, body.softwareId, body.versionId, actor);
