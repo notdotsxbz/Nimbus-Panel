@@ -656,6 +656,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         version: String(row.version).replace(/^go/, ""), prerelease: row.stable !== true,
         sourceUrl: "https://go.dev/dl/" + String(row.version),
         architectures: Array.isArray(row.files) ? [...new Set<string>(row.files.map((file: any) => String(file.arch ?? "")).filter(Boolean))] : [],
+        operatingSystems: Array.isArray(row.files) ? [...new Set<string>(row.files.map((file: any) => String(file.os ?? "").toLowerCase()).filter(Boolean))] : [],
         checksum: Array.isArray(row.files) ? String(row.files.find((file: any) => file.kind === "archive" && file.sha256)?.sha256 ?? "") : "",
         metadata: { officialVersion: row.version, stable: row.stable === true, files: Array.isArray(row.files) ? row.files.map((file: any) => ({ os: file.os, arch: file.arch, kind: file.kind, filename: file.filename, sha256: file.sha256 })) : [] },
       }));
@@ -707,7 +708,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         const asset = Array.isArray(data) ? data[0] : undefined;
         const version = asset?.version?.semver;
         if (typeof version !== "string") return [];
-        return [{ version, sourceUrl: "https://adoptium.net/temurin/releases/", architectures: ["x64"], checksum: String(asset.binary?.package?.checksum ?? ""), metadata: { major, build: asset.version.build, architecture: "x64", os: "linux", imageType: "jdk", checksum: asset.binary?.package?.checksum } }];
+        return [{ version, sourceUrl: "https://adoptium.net/temurin/releases/", architectures: ["x64"], operatingSystems: ["linux"], checksum: String(asset.binary?.package?.checksum ?? ""), metadata: { major, build: asset.version.build, architecture: "x64", os: "linux", imageType: "jdk", checksum: asset.binary?.package?.checksum } }];
       });
     }
     if (software.sourceType === "forge-maven" || software.sourceType === "neoforge-maven") {
@@ -783,7 +784,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           return {
             version: String(row.version), releaseDate: row.date ? new Date(row.date).toISOString() : undefined,
             prerelease: false, sourceUrl: "https://www.mongodb.com/docs/manual/release-notes/",
-            architectures, checksum: String(archive?.archive?.sha256 ?? ""),
+            architectures, operatingSystems: ["linux"], checksum: String(archive?.archive?.sha256 ?? ""),
             compatibility: [...new Set<string>(supported.map((item: any) => String(item.target ?? "")).filter(Boolean))],
             metadata: { stable: true, targets: [...new Set<string>(supported.map((item: any) => String(item.target ?? "")).filter(Boolean))], releaseNotes: row.changes ?? "" },
           };
@@ -801,6 +802,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           sourceId: String(row.digest ?? row.id ?? ""),
           compatibility: Array.isArray(row.images) ? [...new Set<string>(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [],
           architectures: Array.isArray(row.images) ? [...new Set<string>(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [],
+          operatingSystems: Array.isArray(row.images) ? [...new Set<string>(row.images.map((image: any) => String(image.os ?? "").toLowerCase()).filter(Boolean))] : [],
           metadata: { architectures: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [], os: Array.isArray(row.images) ? [...new Set<string>(row.images.map((image: any) => String(image.os ?? "")).filter(Boolean))] : [] },
         })));
         if (rows.length < 100) break;
