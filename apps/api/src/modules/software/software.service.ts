@@ -294,7 +294,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease && item.compatible !== false && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(item.version) && typeof item.sourceUrl === "string" && item.sourceUrl.startsWith("https://") && item.metadata?.incomplete !== true ? "published" : "pending",
           sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "", compatibility: item.compatibility ?? [],
           architectures: item.architectures ?? [], operatingSystems: item.operatingSystems ?? [],
-          ...compatibility, runtimeRequirements: item.runtimeRequirements ?? {},
+          ...this.assessCompatibility(software, item), runtimeRequirements: item.runtimeRequirements ?? {},
           checksum: item.checksum ?? (typeof item.metadata?.checksum === "string" ? item.metadata.checksum : ""), signature: item.signature ?? "",
           metadata: item.metadata ?? {}, importedAt: new Date(),
         } }, { upsert: true });
