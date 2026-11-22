@@ -23,6 +23,9 @@ type DiscoveredVersion = {
   compatibility?: string[];
   metadata?: Record<string, unknown>;
   architectures?: string[];
+  operatingSystems?: string[];
+  compatible?: boolean;
+  incompatibilityReasons?: string[];
   runtimeRequirements?: Record<string, unknown>;
   checksum?: string;
   signature?: string;
@@ -514,6 +517,22 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const software = await this.catalog.findById(id);
     if (!software) throw new NotFoundException("Software not found");
     return software;
+  }
+
+  private assessCompatibility(software: Software, item: { architectures?: string[]; operatingSystems?: string[]; runtimeRequirements?: Record<string, unknown> }) {
+    const reasons: string[] = [];
+    const normalize = (value: string) => value.toLowerCase().replace("x86_64", "amd64").replace("x64", "amd64").replace("aarch64", "arm64");
+    const supportedArchitectures = (software.supportedArchitectures ?? []).map(normalize);
+    const availableArchitectures = (item.architectures ?? []).map(normalize);
+    if (supportedArchitectures.length && availableArchitectures.length && !availableArchitectures.some(value => supportedArchitectures.includes(value))) reasons.push("No matching supported CPU architecture");
+    const supportedOS = (software.supportedOperatingSystems ?? []).map(normalize);
+    const availableOS = (item.operatingSystems ?? []).map(normalize);
+    if (supportedOS.length && availableOS.length && !availableOS.some(value => supportedOS.some(supported => value === supported || value.startsWith(supported) || supported.startsWith(value)))) reasons.push("No matching supported operating system");
+    if (software.requiredRuntime && item.runtimeRequirements) {
+      const values = Object.values(item.runtimeRequirements).map(value => String(value).toLowerCase());
+      if (values.length && !values.some(value => value.includes(software.requiredRuntime.toLowerCase()))) reasons.push("Runtime requirements do not match the configured runtime");
+    }
+    return { compatible: reasons.length === 0, incompatibilityReasons: reasons };
   }
 
   private validateSoftwareMetadata(input: Partial<Software>) {
