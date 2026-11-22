@@ -46,12 +46,32 @@ type heartbeat struct {
 	ContainersRunning int     `json:"containersRunning"`
 	UptimeSeconds     uint64  `json:"uptimeSeconds"`
 	AgentVersion      string  `json:"agentVersion"`
+	OS                string  `json:"os,omitempty"`
+	OSVersion         string  `json:"osVersion,omitempty"`
+	Architecture      string  `json:"architecture,omitempty"`
 }
 
 const agentVersion = "1.0.0"
 
+func parseOSRelease(raw []byte) (string, string) {
+	var id, version string
+	for _, line := range strings.Split(string(raw), "\\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok { continue }
+		value = strings.Trim(strings.TrimSpace(value), `\"'`)
+		switch key {
+		case "ID": id = strings.ToLower(value)
+		case "VERSION_ID": version = value
+		}
+	}
+	return id, version
+}
+
 func collectHeartbeat() (*heartbeat, error) {
-	hb := &heartbeat{AgentVersion: agentVersion, UptimeSeconds: uptimeSeconds()}
+	hb := &heartbeat{AgentVersion: agentVersion, UptimeSeconds: uptimeSeconds(), Architecture: runtime.GOARCH}
+	if raw, err := os.ReadFile("/etc/os-release"); err == nil {
+		hb.OS, hb.OSVersion = parseOSRelease(raw)
+	}
 
 	// Memory
 	if mem, err := os.ReadFile("/proc/meminfo"); err == nil {
