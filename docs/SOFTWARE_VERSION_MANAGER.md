@@ -20,7 +20,7 @@ GitHub discovery follows up to five pages of 100 releases. Node.js uses the offi
 2. Enter a unique lowercase identifier and a name.
 3. Enter service type values exactly as used by NIMBUS (for example `minecraft`, `discord`, `website`, `backend`, `database`, or `docker`).
 4. Select an implemented source adapter and fill its repository/project fields.
-5. Optionally configure a Docker image template ending in `:{version}`, such as `example/application:{version}`. Use this only when the upstream project's published Docker tags actually match the version identifiers returned by the selected source.
+5. Optionally configure a Docker image template ending in `:{version}`, such as `example/application:{version}`. Use this only when the upstream project's published Docker tags actually match the version identifiers returned by the selected source. You may also supply installer environment overrides (for example `{"TYPE":"PAPER","EULA":"TRUE"}`); keys and values are validated and passed to the Node Agent, which merges them over the existing container environment.
 6. Choose auto-sync frequency and whether stable discoveries may be published automatically.
 7. Save the entry and select it in the catalog.
 
@@ -61,7 +61,7 @@ For a supported container change, NIMBUS:
 
 Operation history is available on the service's **Software** tab. The current verification is container-level: running state, configured image, and Docker health status when a health check exists. An application without a Docker health check cannot receive an application-specific health guarantee from this adapter.
 
-The current adapter is intentionally limited to Docker image-template upgrades. A catalog record without this adapter can be discovered and published, but cannot be installed through the customer workflow.
+The current adapter is intentionally limited to Docker image-template upgrades. A catalog record without this adapter can be discovered and published, but cannot be installed through the customer workflow. The Admin catalog form exposes the image template and validated environment overrides so compatible containerized software can be configured without editing MongoDB manually.
 
 ## Node credential compatibility
 

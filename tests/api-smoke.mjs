@@ -341,6 +341,12 @@ async function call(path, { method = "GET", token, body } = {}) {
   // ── Software catalog and ownership boundaries ──────────────────
   const software = await call("/software", { method: "POST", token: ownerToken, body: { name: "Smoke Docker Runtime", identifier: "smoke-docker-" + suffix, description: "catalog smoke test", category: "runtime", serviceTypes: ["docker"], sourceType: "manual", sourceConfig: {}, installationConfig: {}, enabled: true, customerAvailable: true } });
   check("admin creates software catalog entry", software.status === 201 && !!software.body?._id, "status=" + software.status);
+  const invalidInstallerEnv = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid Installer", identifier: "invalid-installer-" + suffix, serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { "BAD KEY": "value" } } } });
+  check("installer rejects unsafe environment keys", invalidInstallerEnv.status === 400, "status=" + invalidInstallerEnv.status);
+  const configuredInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Configured Installer", identifier: "configured-installer-" + suffix, serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { NODE_ENV: "production" } } } });
+  check("admin can configure validated image installer environment", configuredInstaller.status === 201 && configuredInstaller.body?.installationConfig?.environment?.NODE_ENV === "production", "status=" + configuredInstaller.status);
+  if (configuredInstaller.body?._id) await call("/software/" + configuredInstaller.body._id, { method: "DELETE", token: ownerToken });
+
   const softwareId = software.body?._id;
   const adminSyncJobs = await call("/software/sync-jobs", { token: ownerToken });
   check("admin can inspect durable software sync queue", adminSyncJobs.status === 200 && Array.isArray(adminSyncJobs.body), "status=" + adminSyncJobs.status);
