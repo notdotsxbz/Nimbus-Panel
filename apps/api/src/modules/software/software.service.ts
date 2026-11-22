@@ -238,7 +238,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!input.version?.trim() || input.version.length > 100) throw new BadRequestException("A version identifier is required");
     if (input.releaseName !== undefined && (typeof input.releaseName !== "string" || input.releaseName.length > 200)) throw new BadRequestException("Release name must be 200 characters or fewer");
     if (input.channel !== undefined && !["stable", "beta", "alpha", "prerelease"].includes(input.channel)) throw new BadRequestException("Invalid release channel");
-    if (input.releaseDate !== undefined && Number.isNaN(new Date(input.releaseDate).getTime())) throw new BadRequestException("Invalid release date");
+    if (input.releaseDate !== undefined && Number.isNaN(new Date(String(input.releaseDate)).getTime())) throw new BadRequestException("Invalid release date");
     if (input.sourceUrl) {
       let source: URL;
       try { source = new URL(input.sourceUrl); } catch { throw new BadRequestException("Invalid release source URL"); }
