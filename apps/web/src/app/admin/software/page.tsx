@@ -73,6 +73,7 @@ export default function AdminSoftwarePage() {
     const sourceConfig: Record<string, string> = {};
     if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
     if (sourceType === "modrinth") sourceConfig.projectId = String(data.get("projectId") ?? "").trim();
+    if (sourceType === "papermc-v3" || sourceType === "purpur-api") sourceConfig.minecraftVersion = String(data.get("minecraftVersion") ?? "").trim();
     const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
     const environment: Record<string, string> = {};
     for (const line of String(data.get("environment") ?? "").split(/\r?\n/)) {
@@ -230,9 +231,10 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">Default version<input name="defaultVersion" className="input w-full" placeholder="Optional" /></label>
         <label className="space-y-1 text-sm">Supported operating systems<input name="supportedOperatingSystems" className="input w-full" placeholder="linux,windows" /></label>
         <label className="space-y-1 text-sm">Supported architectures<input name="supportedArchitectures" className="input w-full" placeholder="amd64,arm64" /></label>
-        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="go-index">Official Go releases</option><option value="mongodb-current">Official MongoDB current releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
+        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="go-index">Official Go releases</option><option value="mongodb-current">Official MongoDB current releases</option><option value="papermc-v3">PaperMC builds (v3)</option><option value="purpur-api">Purpur builds</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
         <label className="space-y-1 text-sm">GitHub / Docker Hub repository<input name="repository" className="input w-full" placeholder="owner/repository or namespace/repository" /></label>
         <label className="space-y-1 text-sm">Modrinth project ID<input name="projectId" className="input w-full" /></label>
+        <label className="space-y-1 text-sm">Minecraft version for Paper/Purpur<input name="minecraftVersion" className="input w-full" placeholder="1.21.11" /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Docker image template (optional)<input name="imageTemplate" className="input w-full" placeholder="itzg/minecraft-server:{version}" /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" /></label>
