@@ -78,6 +78,15 @@ export default function AdminSoftwarePage() {
       setPreview([]); setSelectedPreview([]); await openSoftware(selected); await load();
     } catch (e) { show(e instanceof Error ? e.message : "Version import failed", "err"); }
   };
+  const updateSyncSettings = async (autoSync: boolean, syncFrequency: string) => {
+    if (!selected) return;
+    try {
+      await api.patch("/software/" + selected._id, { autoSync, syncFrequency });
+      const updated = { ...selected, autoSync, syncFrequency }; setSelected(updated);
+      setItems(current => current.map(item => item._id === updated._id ? updated : item));
+      show("Automatic synchronization settings updated", "ok");
+    } catch (e) { show(e instanceof Error ? e.message : "Could not update sync settings", "err"); }
+  };
   const editSoftware = async () => {
     if (!selected) return;
     const name = window.prompt("Software name", selected.name);
@@ -166,7 +175,7 @@ export default function AdminSoftwarePage() {
       </GlassCard>
       <GlassCard className="p-5">
         {selected ? <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus}</p></div><div className="flex flex-wrap gap-2"><button className="btn-ghost" onClick={() => void editSoftware()}>Edit</button><button className="btn-ghost" onClick={() => void toggleSoftware("enabled", selected.enabled)}>{selected.enabled ? "Disable software" : "Enable software"}</button><button className="btn-ghost" onClick={() => void deleteSoftware()}>Delete software</button><button className="btn-ghost" onClick={() => void toggleSoftware("customerAvailable", selected.customerAvailable)}>{selected.customerAvailable ? "Hide from customers" : "Show to customers"}</button><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus} · Next: {selected.nextSyncAt ? new Date(selected.nextSyncAt).toLocaleString() : "Manual"}</p></div><div className="flex flex-wrap gap-2"><button className="btn-ghost" onClick={() => void editSoftware()}>Edit</button><button className="btn-ghost" onClick={() => void toggleSoftware("enabled", selected.enabled)}>{selected.enabled ? "Disable software" : "Enable software"}</button><button className="btn-ghost" onClick={() => void deleteSoftware()}>Delete software</button><button className="btn-ghost" onClick={() => void toggleSoftware("customerAvailable", selected.customerAvailable)}>{selected.customerAvailable ? "Hide from customers" : "Show to customers"}</button><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div></div>
           {preview.length > 0 && <div className="mt-4 rounded-lg border border-white/10 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">Discovered versions</strong><div className="flex gap-2"><button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void importPreview(false)} disabled={!selectedPreview.length}>Import selected</button><button className="btn-primary !px-2 !py-1 text-xs" onClick={() => void importPreview(true)}>Import all</button></div></div>
             <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
@@ -186,6 +195,14 @@ export default function AdminSoftwarePage() {
             <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("disable")}>Disable</button>
             <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("deprecate")}>Deprecate</button>
           </div>}
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={selected.autoSync} onChange={e => void updateSyncSettings(e.target.checked, e.target.checked && selected.syncFrequency === "manual" ? "24h" : selected.syncFrequency)} /> Automatic sync</label>
+            <label className="flex items-center gap-2">Frequency<select className="input !w-auto !py-1" value={selected.syncFrequency} onChange={e => void updateSyncSettings(selected.autoSync, e.target.value)}>{["manual", "6h", "12h", "24h", "7d"].map(value => <option key={value} value={value} disabled={selected.autoSync && value === "manual"}>{value === "manual" ? "Manual" : value}</option>)}</select></label>
+          </div>
+          {selected.syncHistory?.length ? <div className="mt-4 rounded-lg border border-white/10 p-3">
+            <strong className="text-sm">Recent sync history</strong>
+            <div className="mt-2 space-y-1">{selected.syncHistory.slice(-5).reverse().map((entry, index) => <p key={index} className="text-xs text-muted">{new Date(entry.startedAt).toLocaleString()} · {entry.status} · found {entry.discovered ?? 0}, imported {entry.imported ?? 0}, skipped {entry.skipped ?? 0}, failed {entry.failed ?? 0}{entry.error ? " · " + entry.error : ""}</p>)}</div>
+          </div> : null}
           <div className="mt-4 space-y-2">
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
               <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />

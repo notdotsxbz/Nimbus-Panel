@@ -64,6 +64,9 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length) throw new BadRequestException("Choose at least one supported service type");
     this.validateSource(input.sourceType ?? "manual", input.sourceConfig ?? {});
     this.validateInstallation(input.installationConfig ?? {});
+    const createFrequency = input.syncFrequency ?? "manual";
+    if (!["manual", "6h", "12h", "24h", "7d"].includes(createFrequency)) throw new BadRequestException("Invalid sync frequency");
+    if (input.autoSync && createFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
     const software = await this.catalog.create({
       name: input.name.trim(), identifier: input.identifier, description: input.description ?? "",
       category: input.category ?? "runtime", serviceTypes: [...new Set(input.serviceTypes)],
@@ -81,6 +84,11 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!software) throw new NotFoundException("Software not found");
     if (input.sourceType || input.sourceConfig) this.validateSource(input.sourceType ?? software.sourceType, input.sourceConfig ?? software.sourceConfig);
     if (input.installationConfig) this.validateInstallation(input.installationConfig);
+    const nextFrequency = input.syncFrequency ?? software.syncFrequency;
+    const nextAutoSync = input.autoSync ?? software.autoSync;
+    if (!["manual", "6h", "12h", "24h", "7d"].includes(nextFrequency)) throw new BadRequestException("Invalid sync frequency");
+    if (nextAutoSync && nextFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
+    if (input.serviceTypes !== undefined && (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length || input.serviceTypes.some(value => typeof value !== "string" || !/^[a-z0-9_-]{2,32}$/.test(value)))) throw new BadRequestException("Choose valid service types");
     const allowed = ["name", "description", "category", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
     for (const key of allowed) if (input[key] !== undefined) (software as any)[key] = input[key];
     await software.save();
