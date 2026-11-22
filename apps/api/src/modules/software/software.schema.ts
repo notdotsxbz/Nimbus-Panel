@@ -13,7 +13,7 @@ export class Software {
   @Prop({ type: [String], required: true, index: true }) serviceTypes!: string[];
   @Prop({ enum: SOFTWARE_SOURCE_TYPES, default: "manual" }) sourceType!: SoftwareSourceType;
   @Prop({ type: Object, default: {} }) sourceConfig!: Record<string, string>;
-  @Prop({ type: Object, default: {} }) installationConfig!: Record<string, string>;
+  @Prop({ type: Object, default: {} }) installationConfig!: Record<string, unknown>;
   @Prop({ default: true }) enabled!: boolean;
   @Prop({ default: true }) customerAvailable!: boolean;
   @Prop({ default: false }) autoSync!: boolean;
