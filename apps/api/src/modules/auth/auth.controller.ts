@@ -113,6 +113,12 @@ export class AuthController {
       const existingEmail = await this.users.findByEmail(decoded.email);
       if (existingEmail) throw new UnauthorizedException("An account with this email already exists. Sign in instead.");
       user = await this.users.createFirebaseUser(decoded.uid, decoded.email, decoded.name, body.username);
+    } else if (body.username && user.username !== body.username.trim().toLowerCase()) {
+      // A Firebase account may already exist when a username collision is
+      // corrected in the registration wizard. Re-verify through Firebase and
+      // allow that same account to choose its final unique Nimbus username.
+      user = await this.users.changeUsername(user._id.toString(), body.username);
+      if (!user) throw new UnauthorizedException("Could not update this account's username");
     }
     if (user.role !== "customer" || user.deletedAt || user.suspended) throw new UnauthorizedException("This account cannot self-register");
     await this.users.recordLogin(user._id.toString(), true);
