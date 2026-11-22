@@ -343,7 +343,15 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     else if (action === "pending") update.publicationStatus = "pending";
     else if (action === "deprecate") update.deprecated = true;
     else if (action === "undeprecate") update.deprecated = false;
-    else if (action === "recommend" && ids.length === 1) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: ids[0] } }); update.recommended = true; }
+    else if (action === "recommend" && ids.length === 1) {
+      const candidate = await this.versions.findOne({ softwareId: id, _id: ids[0] }).select("publicationStatus deprecated").lean();
+      if (!candidate || candidate.publicationStatus !== "published" || candidate.deprecated) {
+        throw new BadRequestException("Only published, non-deprecated versions can be recommended");
+      }
+      await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } });
+      await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: ids[0] } });
+      update.recommended = true;
+    }
     else throw new BadRequestException("Unsupported bulk action");
     const result = await this.versions.updateMany({ softwareId: id, _id: { $in: ids } }, { $set: update });
     await this.audit.log({ actorId: actor.id, action: "software.versions.bulk_updated", targetType: "software", targetId: id, detail: "action=" + action + " modified=" + result.modifiedCount, sensitive: true });
@@ -354,7 +362,15 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");
     const version = await this.versions.findById(versionId);
     if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
-    if (input.recommended) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: version._id } }); }
+    if (input.recommended === true) {
+      const resultingPublicationStatus = input.publicationStatus ?? version.publicationStatus;
+      const resultingDeprecated = input.deprecated ?? version.deprecated;
+      if (resultingPublicationStatus !== "published" || resultingDeprecated) {
+        throw new BadRequestException("Only published, non-deprecated versions can be recommended");
+      }
+      await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } });
+      await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: version._id } });
+    }
     else if (input.recommended === false) await this.catalog.updateOne({ _id: id, recommendedVersionId: version._id }, { $set: { recommendedVersionId: null } });
     if (input.publicationStatus !== undefined) version.publicationStatus = input.publicationStatus;
     if (input.deprecated !== undefined) version.deprecated = input.deprecated;
@@ -510,18 +526,30 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (software.sourceType === "github-releases") {
       const repo = software.sourceConfig.repository;
       const results: DiscoveredVersion[] = [];
-      for (let page = 1; page <= 5; page++) {
+      // GitHub's releases endpoint is page-based. Read a bounded number of
+      // pages so large projects are not silently truncated at the first 500
+      // releases, while keeping a single sync job within a predictable budget.
+      const maxPages = 20;
+      for (let page = 1; page <= maxPages; page++) {
         const response = await axios.get(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`, {
-          timeout: 15000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" },
+          timeout: 20000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" },
         });
+        if (!Array.isArray(response.data)) throw new BadRequestException("GitHub returned an invalid releases response");
         const rows = response.data as any[];
-        for (const release of rows.filter((item: any) => !item.draft)) results.push({
-          version: String(release.tag_name ?? ""), releaseName: String(release.name ?? ""),
-          releaseDate: release.published_at, prerelease: !!release.prerelease,
-          sourceUrl: String(release.html_url ?? ""), sourceId: String(release.id ?? ""),
-          metadata: { draft: !!release.draft },
-        });
-        if (rows.length < 100) break;
+        for (const release of rows.filter((item: any) => !item.draft)) {
+          const tag = typeof release.tag_name === "string" ? release.tag_name.trim() : "";
+          if (!tag || tag.length > 100) continue;
+          results.push({
+            version: tag, releaseName: String(release.name ?? ""),
+            releaseDate: release.published_at, prerelease: !!release.prerelease,
+            sourceUrl: String(release.html_url ?? ""), sourceId: String(release.id ?? ""),
+            metadata: { draft: !!release.draft, targetCommitish: String(release.target_commitish ?? "") },
+          });
+        }
+        if (rows.length < 100) return results;
+        if (page === maxPages) {
+          throw new BadRequestException("GitHub release discovery reached its 2,000-release safety limit. Narrow the source repository or use a dedicated release feed.");
+        }
       }
       return results;
     }
