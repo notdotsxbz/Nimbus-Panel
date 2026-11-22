@@ -519,7 +519,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "github-releases" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("GitHub source requires an owner/repository");
     if (type === "modrinth" && !/^[A-Za-z0-9_-]{1,64}$/.test(config.projectId ?? "")) throw new BadRequestException("Modrinth source requires a project ID");
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
-    if (!["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "nodejs-index", "go-index", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -560,6 +560,37 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         sourceUrl: `https://nodejs.org/dist/${String(row.version ?? "").replace(/^v/, "")}/`,
         metadata: { lts: row.lts || false, npm: row.npm, v8: row.v8 },
       }));
+    }
+    if (software.sourceType === "go-index") {
+      // Official Go distribution metadata includes checksums and per-platform
+      // archives. Keep the full platform matrix in metadata so the admin can
+      // review architecture support without guessing from a version string.
+      const response = await axios.get("https://go.dev/dl/?mode=json&include=all", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager" },
+      });
+      if (!Array.isArray(response.data)) throw new BadRequestException("Go returned an invalid release index");
+      return (response.data as any[]).filter(row => typeof row.version === "string" && /^go[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$/.test(row.version)).map(row => {
+        const files = Array.isArray(row.files) ? row.files : [];
+        const linuxArchives = files.filter((file: any) => file.os === "linux" && file.kind === "archive");
+        const supportedArchitectures = [...new Set<string>(linuxArchives.map((file: any) => String(file.arch ?? "")).filter(Boolean))];
+        const linuxAmd64 = linuxArchives.find((file: any) => file.arch === "amd64");
+        return {
+          version: row.version.replace(/^go/, ""),
+          releaseName: row.version,
+          prerelease: row.stable === false,
+          sourceUrl: linuxAmd64 ? "https://go.dev/dl/" + linuxAmd64.filename : "https://go.dev/dl/" + row.version + ".src.tar.gz",
+          sourceId: row.version,
+          compatibility: supportedArchitectures,
+          metadata: {
+            stable: row.stable === true,
+            architectures: supportedArchitectures,
+            files: files.filter((file: any) => file.os === "linux" && file.kind === "archive").map((file: any) => ({
+              filename: String(file.filename ?? ""), architecture: String(file.arch ?? ""),
+              sha256: String(file.sha256 ?? ""), size: Number(file.size ?? 0),
+            })),
+          },
+        } as DiscoveredVersion;
+      });
     }
     if (software.sourceType === "dockerhub-tags") {
       const repository = software.sourceConfig.repository;
