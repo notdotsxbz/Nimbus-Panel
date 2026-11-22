@@ -9,6 +9,7 @@ type SoftwareRow = {
   serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>;
   logoUrl?: string; officialUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
   versionCount?: number; recommendedVersionId?: { version?: string } | string | null;
+  installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string> };
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; sourceUrl?: string; compatibility?: string[]; metadata?: Record<string, unknown> };
@@ -161,11 +162,43 @@ export default function AdminSoftwarePage() {
     if (supportedOperatingSystems === null) return;
     const supportedArchitectures = window.prompt("Supported architectures (comma-separated)", (selected.supportedArchitectures ?? []).join(", "));
     if (supportedArchitectures === null) return;
+    const sourceType = window.prompt("Source adapter (manual, github-releases, nodejs-index, go-index, mongodb-current, papermc-v3, purpur-api, mojang-manifest, fabric-meta, modrinth, dockerhub-tags)", selected.sourceType);
+    if (sourceType === null) return;
+    const sourceConfig: Record<string, string> = {};
+    if (sourceType === "github-releases" || sourceType === "dockerhub-tags") {
+      const repository = window.prompt("Source repository (owner/repository)", selected.sourceConfig?.repository ?? "");
+      if (repository === null) return;
+      sourceConfig.repository = repository.trim();
+    } else if (sourceType === "modrinth") {
+      const projectId = window.prompt("Modrinth project ID", selected.sourceConfig?.projectId ?? "");
+      if (projectId === null) return;
+      sourceConfig.projectId = projectId.trim();
+    } else if (sourceType === "papermc-v3" || sourceType === "purpur-api") {
+      const minecraftVersion = window.prompt("Minecraft version", selected.sourceConfig?.minecraftVersion ?? "");
+      if (minecraftVersion === null) return;
+      sourceConfig.minecraftVersion = minecraftVersion.trim();
+    }
+    const imageTemplate = window.prompt("Docker image template ending in :{version} (blank disables the installer)", selected.installationConfig?.imageTemplate ?? "");
+    if (imageTemplate === null) return;
+    const environmentText = window.prompt("Installer environment overrides (KEY=VALUE, one per line)", Object.entries(selected.installationConfig?.environment ?? {}).map(([key, value]) => key + "=" + value).join("\n"));
+    if (environmentText === null) return;
+    const environment: Record<string, string> = {};
+    for (const line of environmentText.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const separator = trimmed.indexOf("=");
+      if (separator <= 0) { show("Environment entries must use KEY=VALUE.", "err"); return; }
+      environment[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1);
+    }
+    const installationConfig = imageTemplate.trim()
+      ? { method: "docker-image-template", imageTemplate: imageTemplate.trim(), environment }
+      : {};
     const metadata = {
       name: name.trim(), description, officialUrl: officialUrl.trim(), logoUrl: logoUrl.trim(),
       requiredRuntime: requiredRuntime.trim(), defaultVersion: defaultVersion.trim(),
       supportedOperatingSystems: supportedOperatingSystems.split(",").map(value => value.trim()).filter(Boolean),
       supportedArchitectures: supportedArchitectures.split(",").map(value => value.trim()).filter(Boolean),
+      sourceType, sourceConfig, installationConfig,
     };
     try {
       await api.patch("/software/" + selected._id, metadata);
