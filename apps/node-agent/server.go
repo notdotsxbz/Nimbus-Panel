@@ -93,7 +93,7 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	type inspectResult struct { ID string `json:"Id"`; Config struct { Image string `json:"Image"` } `json:"Config"`; State struct { Running bool `json:"Running"`; Health *struct { Status string `json:"Status"` } `json:"Health"` } `json:"State"` }
+	type inspectResult struct { ID string `json:"Id"`; Config struct { Image string `json:"Image"`; Env []string `json:"Env"` } `json:"Config"`; State struct { Running bool `json:"Running"`; Health *struct { Status string `json:"Status"` } `json:"Health"` } `json:"State"` }
 
 	switch op {
 	case "install":
@@ -126,7 +126,24 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		if _, err := docker("pull", req.DockerImage); err != nil { http.Error(w, "could not pull target image: "+err.Error(), http.StatusBadGateway); return }
 		oldName := "nimbus-" + serviceID
 		previousName := fmt.Sprintf("nimbus-prev-%s-%d", serviceID, time.Now().UnixNano())
-		if _, err := docker("inspect", oldName); err != nil { http.Error(w, "existing service container was not found; refusing an in-place upgrade", http.StatusNotFound); return }
+		existingJSON, existingErr := docker("inspect", oldName)
+		var existing []inspectResult
+		if existingErr == nil { existingErr = json.Unmarshal([]byte(existingJSON), &existing) }
+		if existingErr != nil || len(existing) == 0 {
+			http.Error(w, "existing service container could not be inspected; refusing an in-place upgrade", http.StatusNotFound)
+			return
+		}
+		// Preserve the currently running container's environment by default.
+		// Explicitly supplied values override existing values without dropping
+		// unrelated secrets or runtime configuration.
+		environment := make(map[string]string, len(existing[0].Config.Env)+len(req.Env))
+		for _, entry := range existing[0].Config.Env {
+			key, value, ok := strings.Cut(entry, "=")
+			if ok && key != "" { environment[key] = value }
+		}
+		for key, value := range req.Env {
+			if strings.TrimSpace(key) != "" { environment[key] = value }
+		}
 		if _, err := docker("stop", "--time", "30", oldName); err != nil { http.Error(w, "could not stop existing container: "+err.Error(), http.StatusBadGateway); return }
 		if _, err := docker("rename", oldName, previousName); err != nil { _, _ = docker("start", oldName); http.Error(w, "could not stage existing container: "+err.Error(), http.StatusBadGateway); return }
 		rollback := func() error {
@@ -136,7 +153,7 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		args := []string{"run", "-d", "--name", oldName, "--memory", fmt.Sprintf("%dm", req.RAMMb), "--cpus", fmt.Sprintf("%.2f", float64(req.CPUPercent)/100.0), "--restart", "unless-stopped", "--security-opt", "no-new-privileges", "-v", dir + ":/data", "-w", "/data"}
-		for k, v := range req.Env { args = append(args, "-e", k+"="+v) }
+		for k, v := range environment { args = append(args, "-e", k+"="+v) }
 		args = append(args, req.DockerImage)
 		args = append(args, req.StartupCommand...)
 		containerID, runErr := docker(args...)

@@ -24,9 +24,9 @@ case "$1" in
     ;;
   inspect)
     if [ "${UNHEALTHY:-0}" = "1" ]; then
-      echo '[{"Config":{"Image":"new:1"},"State":{"Running":true,"Health":{"Status":"unhealthy"}}}]'
+      echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production"]},"State":{"Running":true,"Health":{"Status":"unhealthy"}}}]'
     else
-      echo '[{"Config":{"Image":"new:1"},"State":{"Running":true}}]'
+      echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production"]},"State":{"Running":true}}]'
     fi
     exit 0
     ;;
@@ -78,6 +78,9 @@ func TestSoftwareUpgradePullsAndVerifiesReplacement(t *testing.T) {
 	commands := string(log)
 	if !strings.Contains(commands, "pull new:1") || !strings.Contains(commands, "stop --time 30 nimbus-svc-test") || !strings.Contains(commands, "rename nimbus-svc-test nimbus-prev-") {
 		t.Fatalf("expected pull, stop, and rename sequence; commands: %s", commands)
+	}
+	if !strings.Contains(commands, "-e TOKEN=existing-secret") || !strings.Contains(commands, "-e MODE=production") {
+		t.Fatalf("upgrade must preserve existing container environment variables; commands: %s", commands)
 	}
 	previousName, ok := result["previousContainerName"].(string)
 	if !ok || !strings.HasPrefix(previousName, "nimbus-prev-svc-test-") { t.Fatalf("expected previous container reference in response: %#v", result) }
