@@ -16,6 +16,10 @@ type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: strin
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
 
 function versionChecksum(metadata?: Record<string, unknown>): string | undefined {
+  const checksums = metadata?.checksums && typeof metadata.checksums === "object"
+    ? metadata.checksums as Record<string, unknown>
+    : {};
+  if (typeof checksums.sha256 === "string" && checksums.sha256.length > 0) return checksums.sha256;
   const entries = [
     ...(Array.isArray(metadata?.files) ? metadata.files : []),
     ...(Array.isArray(metadata?.platforms) ? metadata.platforms : []),
