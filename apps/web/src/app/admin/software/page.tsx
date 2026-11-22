@@ -85,10 +85,10 @@ export default function AdminSoftwarePage() {
         enabled: data.get("enabled") === "true", customerAvailable: data.get("customerAvailable") === "true",
         autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
-        installationConfig: installationMethod === "docker-image-template"
-          ? { method: "docker-image-template", imageTemplate, environment }
-          : installationMethod === "virtualization-image"
-            ? { method: "virtualization-image", provider: "kvm-libvirt", imageId: String(data.get("osImageId") ?? "").trim(), minRamMb: Number(data.get("osMinRamMb")), architecture: String(data.get("osArchitecture") ?? "amd64") }
+        installationConfig: installationMethod === "virtualization-image"
+          ? { method: "virtualization-image", provider: "kvm-libvirt", imageId: String(data.get("osImageId") ?? "").trim(), minRamMb: Number(data.get("osMinRamMb")), architecture: String(data.get("osArchitecture") ?? "amd64") }
+          : imageTemplate || installationMethod === "docker-image-template"
+            ? { method: "docker-image-template", imageTemplate, environment }
             : {},
       };
       if (editingId) await api.patch("/software/" + editingId, payload);
