@@ -9,6 +9,7 @@ The currently implemented official-source adapters are:
 - **GitHub Releases** — release metadata from a configured public `owner/repository`.
 - **Node.js releases** — the official Node.js distribution index.
 - **Go releases** — the official `go.dev` distribution index, including Linux archive checksums and architecture metadata.
+- **MongoDB current releases** — MongoDB's official `current.json` feed, limited to Community (`targeted`) Linux packages, with per-platform URLs and SHA-256 metadata. This feed reports current releases per series, not every historical patch.
 - **Modrinth** — versions from a configured Modrinth project ID.
 - **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
 - **Manual** — fallback for software without an implemented source adapter.
