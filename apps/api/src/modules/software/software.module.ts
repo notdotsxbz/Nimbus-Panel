@@ -9,6 +9,7 @@ import { SoftwareService } from "./software.service";
 import { Software, SoftwareSchema } from "./software.schema";
 import { SoftwareVersion, SoftwareVersionSchema } from "./software-version.schema";
 import { SoftwareOperation, SoftwareOperationSchema } from "./software-operation.schema";
+import { SoftwareSyncJob, SoftwareSyncJobSchema } from "./software-sync-job.schema";
 import { Service, ServiceSchema } from "../services/service.schema";
 
 @Module({
@@ -17,6 +18,7 @@ import { Service, ServiceSchema } from "../services/service.schema";
       { name: Software.name, schema: SoftwareSchema },
       { name: SoftwareVersion.name, schema: SoftwareVersionSchema },
       { name: SoftwareOperation.name, schema: SoftwareOperationSchema },
+      { name: SoftwareSyncJob.name, schema: SoftwareSyncJobSchema },
       { name: Service.name, schema: ServiceSchema },
     ]),
     AuditModule,

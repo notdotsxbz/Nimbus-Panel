@@ -14,6 +14,14 @@ export class SoftwareController {
   @Roles("owner", "admin")
   cleanupPreviousContainer(@Param("operationId") operationId: string, @CurrentUser() actor: AuthUser) { return this.software.cleanupPreviousContainer(operationId, actor); }
 
+  @Get("sync-jobs")
+  @Roles("owner", "admin")
+  syncJobs() { return this.software.listSyncJobs(); }
+
+  @Post("sync-jobs/:jobId/retry")
+  @Roles("owner", "admin")
+  retrySyncJob(@Param("jobId") jobId: string, @CurrentUser() actor: AuthUser) { return this.software.retrySyncJob(jobId, actor); }
+
   @Get("operations")
   @Roles("owner", "admin")
   listOperations() { return this.software.listOperations(); }

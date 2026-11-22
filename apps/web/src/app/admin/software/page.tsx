@@ -11,6 +11,7 @@ type SoftwareRow = {
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
 type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
+type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: string } | string; status: string; attempts: number; maxAttempts: number; runAt: string; lastError?: string; discovered?: number; imported?: number; failed?: number };
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
 
 export default function AdminSoftwarePage() {
@@ -24,10 +25,11 @@ export default function AdminSoftwarePage() {
   const [selectedPreview, setSelectedPreview] = useState<string[]>([]);
   const [selectedVersionIds, setSelectedVersionIds] = useState<string[]>([]);
   const [recentOperations, setRecentOperations] = useState<OperationRow[]>([]);
+  const [syncJobs, setSyncJobs] = useState<SyncJobRow[]>([]);
   const { show, node } = useToast();
 
   const load = async () => {
-    try { const [catalog, operations] = await Promise.all([api.get<SoftwareRow[]>("/software"), api.get<OperationRow[]>("/software/operations")]); setItems(catalog); setRecentOperations(operations); }
+    try { const [catalog, operations, jobs] = await Promise.all([api.get<SoftwareRow[]>("/software"), api.get<OperationRow[]>("/software/operations"), api.get<SyncJobRow[]>("/software/sync-jobs")]); setItems(catalog); setRecentOperations(operations); setSyncJobs(jobs); }
     catch (e) { show(e instanceof Error ? e.message : "Could not load catalog", "err"); }
   };
   useEffect(() => { void load(); }, []);
@@ -60,13 +62,21 @@ export default function AdminSoftwarePage() {
     if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
     if (sourceType === "modrinth") sourceConfig.projectId = String(data.get("projectId") ?? "").trim();
     const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
+    const environment: Record<string, string> = {};
+    for (const line of String(data.get("environment") ?? "").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const separator = trimmed.indexOf("=");
+      if (separator <= 0) { show("Environment entries must use KEY=VALUE, one per line.", "err"); return; }
+      environment[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1);
+    }
     try {
       await api.post("/software", {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
         enabled: true, customerAvailable: true, autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
-        installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate } : {},
+        installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate, environment } : {},
       });
       setFormOpen(false); show("Software added to catalog", "ok"); await load();
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }
@@ -97,6 +107,13 @@ export default function AdminSoftwarePage() {
       setItems(current => current.map(item => item._id === updated._id ? updated : item));
       show("Automatic synchronization settings updated", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Could not update sync settings", "err"); }
+  };
+  const retrySyncJob = async (job: SyncJobRow) => {
+    try {
+      await api.post("/software/sync-jobs/" + job._id + "/retry", {});
+      show("Synchronization job queued for retry", "ok");
+      await load();
+    } catch (e) { show(e instanceof Error ? e.message : "Could not retry synchronization", "err"); }
   };
   const retryCleanup = async (operation: OperationRow) => {
     try {
@@ -177,6 +194,8 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
         <label className="space-y-1 text-sm">GitHub / Docker Hub repository<input name="repository" className="input w-full" placeholder="owner/repository or namespace/repository" /></label>
         <label className="space-y-1 text-sm">Modrinth project ID<input name="projectId" className="input w-full" /></label>
+        <label className="space-y-1 text-sm sm:col-span-2">Docker image template (optional)<input name="imageTemplate" className="input w-full" placeholder="itzg/minecraft-server:{version}" /></label>
+        <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" /></label>
         <div className="flex gap-2 sm:col-span-2"><button className="btn-primary" type="submit">Save software</button><button className="btn-ghost" type="button" onClick={() => setFormOpen(false)}>Cancel</button></div>
       </form>
@@ -234,6 +253,16 @@ export default function AdminSoftwarePage() {
       </GlassCard>
     </div>
         <GlassCard className="p-5">
+      <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">Automatic synchronization queue</h2><button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void load()}>Refresh</button></div>
+      <div className="mt-3 space-y-2">
+        {syncJobs.map(job => <div key={job._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3 text-sm">
+          <div><strong>{typeof job.softwareId === "object" ? job.softwareId?.name ?? "Software" : job.softwareId}</strong><p className="text-xs text-muted">Attempt {job.attempts}/{job.maxAttempts} · next run {new Date(job.runAt).toLocaleString()}</p>{job.lastError ? <p className="text-xs text-rose-300">{job.lastError}</p> : null}</div>
+          <div className="flex items-center gap-2"><span className="text-xs text-muted">{job.status} · discovered {job.discovered ?? 0}, imported {job.imported ?? 0}</span>{["failed", "retry"].includes(job.status) ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void retrySyncJob(job)}>Retry</button> : null}</div>
+        </div>)}
+        {!syncJobs.length && <p className="text-sm text-muted">No synchronization jobs have been queued.</p>}
+      </div>
+    </GlassCard>
+    <GlassCard className="p-5">
       <h2 className="font-semibold">Recent software operations</h2>
       <div className="mt-3 space-y-2">
         {recentOperations.map(operation => <div key={operation._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3 text-sm">
