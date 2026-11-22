@@ -82,6 +82,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   const owner = login.body?.token;
   if (!owner) process.exit(1);
 
+  const seededCatalog = await call("/software", { token: owner });
+  const seededIds = (seededCatalog.body ?? []).map(item => item.identifier);
+  check("default software presets are seeded for Admin review", seededCatalog.status === 200 && ["minecraft-vanilla", "minecraft-paper", "runtime-nodejs", "runtime-python", "database-mongodb", "audio-lavalink", "os-ubuntu-2404"].every(id => seededIds.includes(id)), "entries=" + seededIds.length);
+  check("seeded software presets are not exposed to customers by default", (seededCatalog.body ?? []).filter(item => seededIds.includes(item.identifier)).every(item => item.customerAvailable === false), "review required");
   const me = await call("/auth/me", { token: owner });
   check("authenticated /auth/me", me.status === 200 && !!me.body?.username, `username=${me.body?.username}`);
 
