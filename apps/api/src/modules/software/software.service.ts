@@ -518,6 +518,16 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       if (config.environment !== undefined) throw new BadRequestException("Environment overrides require a Docker image-template installer");
       return;
     }
+    if (method === "virtualization-image") {
+      const provider = config.provider;
+      const imageId = config.imageId;
+      const minRamMb = config.minRamMb;
+      const architecture = config.architecture;
+      if (provider !== "kvm-libvirt" || typeof imageId !== "string" || !/^kvm\/[A-Za-z0-9._-]{2,80}$/.test(imageId)) throw new BadRequestException("OS templates must use an approved KVM/libvirt image identifier");
+      if (!Number.isInteger(minRamMb) || Number(minRamMb) < 512 || Number(minRamMb) > 262144) throw new BadRequestException("OS template minimum RAM must be between 512 and 262144 MB");
+      if (architecture !== undefined && !["amd64", "arm64"].includes(String(architecture))) throw new BadRequestException("Unsupported OS image architecture");
+      return;
+    }
     const normalizedImage = template.replaceAll("{version}", "version");
     const environment = config.environment ?? {};
     if (!environment || typeof environment !== "object" || Array.isArray(environment) || Object.keys(environment).length > 100) throw new BadRequestException("Installer environment must be an object with at most 100 entries");
