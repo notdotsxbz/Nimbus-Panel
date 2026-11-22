@@ -25,6 +25,8 @@ export interface CreateServiceDto {
   softwareVersion?: string;
   subdomain?: string;
   expiresAt?: string;
+  versionProbe?: string;
+  expectedVersion?: string;
 }
 
 @Injectable()
@@ -83,8 +85,10 @@ export class ServicesService {
         diskGb: dto.diskGb,
         startupCommand: dto.startupCommand ?? [],
         env: dto.envVars ?? {},
-      }, "POST", 120_000) as { status?: string; containerId?: string; installedImage?: string; running?: boolean };
-      if (installed.status !== "online" || installed.running !== true || installed.installedImage !== dto.dockerImage || !installed.containerId) {
+        versionProbe: dto.versionProbe ?? "",
+        expectedVersion: dto.expectedVersion ?? "",
+      }, "POST", 120_000) as { status?: string; containerId?: string; installedImage?: string; running?: boolean; environmentVerified?: boolean; versionVerified?: boolean };
+      if (installed.status !== "online" || installed.running !== true || installed.installedImage !== dto.dockerImage || !installed.containerId || (dto.versionProbe && installed.versionVerified !== true) || (Object.keys(dto.envVars ?? {}).length > 0 && installed.environmentVerified !== true)) {
         throw new BadRequestException("Node Agent did not verify the newly installed container");
       }
       service.containerId = installed.containerId;
