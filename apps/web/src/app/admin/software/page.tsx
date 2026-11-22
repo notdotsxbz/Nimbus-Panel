@@ -6,7 +6,7 @@ import { GlassCard, useToast } from "@/components/glass";
 
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
-  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string> }; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
+  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string>; provider?: string; imageId?: string; minRamMb?: number; architecture?: string }; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; compatibility?: string[]; architectures?: string[]; runtimeRequirements?: Record<string, unknown>; checksum?: string; signature?: string; sourceUrl?: string };
@@ -67,6 +67,7 @@ export default function AdminSoftwarePage() {
     if (sourceType === "dotnet-index") sourceConfig.channelVersion = String(data.get("channelVersion") ?? "").trim();
     if (sourceType === "papermc") sourceConfig.project = String(data.get("paperProject") ?? "paper");
     const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
+    const installationMethod = String(data.get("installationMethod") ?? "none");
     const environment: Record<string, string> = {};
     for (const line of String(data.get("environment") ?? "").split(/\r?\n/)) {
       const trimmed = line.trim();
@@ -84,7 +85,11 @@ export default function AdminSoftwarePage() {
         enabled: data.get("enabled") === "true", customerAvailable: data.get("customerAvailable") === "true",
         autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
-        installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate, environment } : {},
+        installationConfig: installationMethod === "docker-image-template"
+          ? { method: "docker-image-template", imageTemplate, environment }
+          : installationMethod === "virtualization-image"
+            ? { method: "virtualization-image", provider: "kvm-libvirt", imageId: String(data.get("osImageId") ?? "").trim(), minRamMb: Number(data.get("osMinRamMb")), architecture: String(data.get("osArchitecture") ?? "amd64") }
+            : {},
       };
       if (editingId) await api.patch("/software/" + editingId, payload);
       else await api.post("/software", payload);
@@ -202,6 +207,11 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">.NET channel version<input name="channelVersion" className="input w-full" placeholder="8.0 or 10.0" defaultValue={editingId ? selected?.sourceConfig?.channelVersion : ""} /></label>
         <label className="space-y-1 text-sm">PaperMC project<select name="paperProject" className="input w-full" defaultValue={editingId ? selected?.sourceConfig?.project ?? "paper" : "paper"}><option value="paper">Paper</option><option value="folia">Folia</option><option value="velocity">Velocity</option><option value="waterfall">Waterfall</option></select></label>
         <label className="space-y-1 text-sm sm:col-span-2">Docker image template (optional)<input name="imageTemplate" className="input w-full" placeholder="itzg/minecraft-server:java21 (use VERSION={version} below)" defaultValue={editingId ? selected?.installationConfig?.imageTemplate : ""} /></label>
+        <label className="space-y-1 text-sm">Installation adapter<select name="installationMethod" className="input w-full" defaultValue={editingId ? selected?.installationConfig?.method ?? "none" : "none"}><option value="none">Catalog only / not installable</option><option value="docker-image-template">Docker image template</option><option value="virtualization-image">KVM/libvirt OS image metadata</option></select></label>
+        <label className="space-y-1 text-sm">KVM OS image ID<input name="osImageId" className="input w-full" placeholder="kvm/ubuntu-2404" defaultValue={editingId ? selected?.installationConfig?.imageId : ""} /></label>
+        <label className="space-y-1 text-sm">Minimum VM RAM (MB)<input name="osMinRamMb" type="number" min={512} max={262144} className="input w-full" defaultValue={editingId ? selected?.installationConfig?.minRamMb ?? 1024 : 1024} /></label>
+        <label className="space-y-1 text-sm">OS architecture<select name="osArchitecture" className="input w-full" defaultValue={editingId ? selected?.installationConfig?.architecture ?? "amd64" : "amd64"}><option value="amd64">amd64</option><option value="arm64">arm64</option></select></label>
+        <p className="text-xs text-amber-200 sm:col-span-2">KVM/libvirt OS entries are catalog metadata only. This repository does not yet contain a virtualization Node Agent/provider, so no OS reinstall or apply action is offered.</p>
         <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} defaultValue={editingId ? Object.entries(selected?.installationConfig?.environment ?? {}).map(([key, value]) => key + "=" + value).join("\n") : ""} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" defaultValue={editingId ? selected?.description : ""} /></label>
         <label className="space-y-1 text-sm">Supported OS<input name="supportedOperatingSystems" className="input w-full" placeholder="linux,windows" defaultValue={editingId ? selected?.supportedOperatingSystems?.join(",") : ""} /></label>
