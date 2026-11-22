@@ -266,6 +266,12 @@ export default function AdminSoftwarePage() {
               {version.compatibility?.length ? <p className="text-xs text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}
               {version.runtimeRequirements && Object.keys(version.runtimeRequirements).length ? <p className="text-xs text-muted">Runtime: {JSON.stringify(version.runtimeRequirements)}</p> : null}
               {version.checksum ? <p className="break-all text-xs text-muted">Checksum: {version.checksum}</p> : null}
+              {version.sourceUrl ? <a className="text-xs text-sky-300 underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}
+              {version.releaseDate ? <p className="text-xs text-muted">Released {new Date(version.releaseDate).toLocaleDateString()}</p> : null}
+              {version.architectures?.length ? <p className="text-xs text-muted">Architectures: {version.architectures.join(", ")}</p> : null}
+              {version.compatibility?.length ? <p className="text-xs text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}
+              {version.runtimeRequirements && Object.keys(version.runtimeRequirements).length ? <p className="text-xs text-muted">Runtime: {JSON.stringify(version.runtimeRequirements)}</p> : null}
+              {version.checksum ? <p className="break-all text-xs text-muted">Checksum: {version.checksum}</p> : null}
               {version.sourceUrl ? <a className="text-xs text-sky-300 underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}</div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
