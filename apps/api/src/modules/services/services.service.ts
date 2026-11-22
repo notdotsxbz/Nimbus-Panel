@@ -20,6 +20,7 @@ export interface CreateServiceDto {
   diskGb: number;
   dockerImage: string;
   startupCommand?: string[];
+  envVars?: Record<string, string>;
   software?: string;
   softwareVersion?: string;
   subdomain?: string;
@@ -74,17 +75,20 @@ export class ServicesService {
     });
     // Fire install to the node agent; agent confirms with real container state.
     try {
-      await this.nodes.agentCall(node, "/services/install", {
-        serviceId: service._id!.toString(),
+      const installed = await this.nodes.agentCall(node, `/services/${service._id!.toString()}/install`, {
         dockerImage: dto.dockerImage,
         cpuPercent: dto.cpuPercent,
         ramMb: dto.ramMb,
         diskGb: dto.diskGb,
         startupCommand: dto.startupCommand ?? [],
-        env: {},
-      });
-      service.status = "offline";
-      service.activity.push({ at: new Date(), action: "install", ok: true });
+        env: dto.envVars ?? {},
+      }, "POST", 120_000) as { status?: string; containerId?: string; installedImage?: string; running?: boolean };
+      if (installed.status !== "online" || installed.running !== true || installed.installedImage !== dto.dockerImage || !installed.containerId) {
+        throw new BadRequestException("Node Agent did not verify the newly installed container");
+      }
+      service.containerId = installed.containerId;
+      service.status = "online";
+      service.activity.push({ at: new Date(), action: "install", ok: true, detail: "container=" + installed.containerId });
     } catch (err) {
       service.status = "error";
       service.activity.push({

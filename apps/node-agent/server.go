@@ -109,8 +109,28 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, req.DockerImage)
 		args = append(args, req.StartupCommand...)
-	out, err := docker(args...)
-	reply(w, err, map[string]string{"containerId": strings.TrimSpace(out)})
+	containerID, runErr := docker(args...)
+	if runErr != nil {
+		http.Error(w, "container installation failed: "+runErr.Error(), http.StatusBadGateway)
+		return
+	}
+	inspectJSON, inspectErr := docker("inspect", "nimbus-"+serviceID)
+	var inspected []inspectResult
+	if inspectErr == nil { inspectErr = json.Unmarshal([]byte(inspectJSON), &inspected) }
+	for attempt := 0; inspectErr == nil && len(inspected) > 0 && inspected[0].State.Running && inspected[0].State.Health != nil && inspected[0].State.Health.Status == "starting" && attempt < 30; attempt++ {
+		time.Sleep(2 * time.Second)
+		inspectJSON, inspectErr = docker("inspect", "nimbus-"+serviceID)
+		inspected = nil
+		if inspectErr == nil { inspectErr = json.Unmarshal([]byte(inspectJSON), &inspected) }
+	}
+	if inspectErr != nil || len(inspected) == 0 || !inspected[0].State.Running || inspected[0].Config.Image != req.DockerImage || (inspected[0].State.Health != nil && inspected[0].State.Health.Status != "healthy") {
+		_, _ = docker("rm", "-f", "nimbus-"+serviceID)
+		http.Error(w, "new container failed image/running/health verification", http.StatusBadGateway)
+		return
+	}
+	healthStatus := "not-configured"
+	if inspected[0].State.Health != nil { healthStatus = inspected[0].State.Health.Status }
+	writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "healthStatus": healthStatus})
 	case "start":
 		_, err := docker("start", "nimbus-"+serviceID)
 		reply(w, err, map[string]string{"status": "online"})
