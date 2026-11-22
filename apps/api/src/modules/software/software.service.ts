@@ -519,7 +519,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "github-releases" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("GitHub source requires an owner/repository");
     if (type === "modrinth" && !/^[A-Za-z0-9_-]{1,64}$/.test(config.projectId ?? "")) throw new BadRequestException("Modrinth source requires a project ID");
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
-    if (!["manual", "github-releases", "nodejs-index", "go-index", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -591,6 +591,48 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           },
         } as DiscoveredVersion;
       });
+    }
+    if (software.sourceType === "mongodb-current") {
+      // MongoDB's official current.json feed lists the current supported
+      // release for each series. Keep Community (targeted) Linux packages only;
+      // never mix Enterprise builds into a customer-facing catalog.
+      const response = await axios.get("https://downloads.mongodb.org/current.json", {
+        timeout: 30000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager" },
+      });
+      const rows = (response.data as { versions?: any[] })?.versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("MongoDB returned an invalid current release index");
+      return rows
+        .filter(row => typeof row.version === "string" && /^\\d+\\.\\d+\\.\\d+$/.test(row.version))
+        .map(row => {
+          const packages = (Array.isArray(row.downloads) ? row.downloads : []).filter((download: any) =>
+            download.edition === "targeted" &&
+            /^(ubuntu|debian)/.test(String(download.target ?? "")) &&
+            ["x86_64", "aarch64"].includes(String(download.arch ?? "")) &&
+            typeof download.archive?.url === "string" &&
+            download.archive.url.startsWith("https://fastdl.mongodb.org/"),
+          );
+          if (!packages.length) return null;
+          const preferred = packages.find((download: any) => download.target === "ubuntu2404" && download.arch === "x86_64")
+            ?? packages.find((download: any) => download.arch === "x86_64")
+            ?? packages[0];
+          return {
+            version: row.version,
+            releaseName: "MongoDB " + row.version,
+            releaseDate: row.date ? new Date(row.date).toISOString() : undefined,
+            prerelease: row.development_release === true,
+            sourceUrl: preferred.archive.url,
+            sourceId: row.version,
+            compatibility: [...new Set<string>(packages.map((download: any) => String(download.target) + "/" + String(download.arch)))],
+            metadata: {
+              developmentRelease: row.development_release === true,
+              platforms: packages.map((download: any) => ({
+                target: String(download.target), architecture: String(download.arch),
+                url: String(download.archive.url), sha256: String(download.archive.sha256 ?? ""),
+              })),
+            },
+          } as DiscoveredVersion;
+        })
+        .filter((item): item is DiscoveredVersion => item !== null);
     }
     if (software.sourceType === "dockerhub-tags") {
       const repository = software.sourceConfig.repository;
