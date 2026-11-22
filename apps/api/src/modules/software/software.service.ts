@@ -235,7 +235,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     return { matched: result.matchedCount, modified: result.modifiedCount };
   }
   async setVersion(id: string, versionId: string, input: { publicationStatus?: string; deprecated?: boolean; recommended?: boolean }, actor: AuthUser) {
-    await this.getSoftware(id);
+    const software = await this.getSoftware(id);
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");
     const version = await this.versions.findById(versionId);
     if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
