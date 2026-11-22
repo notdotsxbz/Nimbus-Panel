@@ -22,6 +22,10 @@ type DiscoveredVersion = {
   sourceId?: string;
   compatibility?: string[];
   metadata?: Record<string, unknown>;
+  architectures?: string[];
+  runtimeRequirements?: Record<string, unknown>;
+  checksum?: string;
+  signature?: string;
 };
 
 @Injectable()
@@ -154,6 +158,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Name and a valid lowercase identifier are required");
     }
     if (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length) throw new BadRequestException("Choose at least one supported service type");
+    this.validateSoftwareMetadata(input);
     this.validateSource(input.sourceType ?? "manual", input.sourceConfig ?? {});
     this.validateInstallation(input.installationConfig ?? {});
     const createFrequency = input.syncFrequency ?? "manual";
@@ -161,6 +166,9 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (input.autoSync && createFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
     const software = await this.catalog.create({
       name: input.name.trim(), identifier: input.identifier, description: input.description ?? "",
+      officialWebsite: input.officialWebsite ?? "", iconUrl: input.iconUrl ?? "",
+      supportedOperatingSystems: input.supportedOperatingSystems ?? [], supportedArchitectures: input.supportedArchitectures ?? [],
+      requiredRuntime: input.requiredRuntime ?? "", defaultVersion: input.defaultVersion ?? "",
       category: input.category ?? "runtime", serviceTypes: [...new Set(input.serviceTypes)],
       sourceType: input.sourceType ?? "manual", sourceConfig: input.sourceConfig ?? {}, installationConfig: input.installationConfig ?? {},
       enabled: input.enabled ?? true, customerAvailable: input.customerAvailable ?? true,
@@ -175,13 +183,14 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const software = await this.catalog.findById(id);
     if (!software) throw new NotFoundException("Software not found");
     if (input.sourceType || input.sourceConfig) this.validateSource(input.sourceType ?? software.sourceType, input.sourceConfig ?? software.sourceConfig);
+    this.validateSoftwareMetadata(input);
     if (input.installationConfig) this.validateInstallation(input.installationConfig);
     const nextFrequency = input.syncFrequency ?? software.syncFrequency;
     const nextAutoSync = input.autoSync ?? software.autoSync;
     if (!["manual", "6h", "12h", "24h", "7d"].includes(nextFrequency)) throw new BadRequestException("Invalid sync frequency");
     if (nextAutoSync && nextFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
     if (input.serviceTypes !== undefined && (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length || input.serviceTypes.some(value => typeof value !== "string" || !/^[a-z0-9_-]{2,32}$/.test(value)))) throw new BadRequestException("Choose valid service types");
-    const allowed = ["name", "description", "category", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
+    const allowed = ["name", "description", "officialWebsite", "iconUrl", "supportedOperatingSystems", "supportedArchitectures", "requiredRuntime", "defaultVersion", "category", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
     for (const key of allowed) if (input[key] !== undefined) (software as any)[key] = input[key];
     await software.save();
     await this.audit.log({ actorId: actor.id, action: "software.updated", targetType: "software", targetId: id, sensitive: true });
@@ -223,7 +232,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       softwareId: software._id, version: input.version.trim(), releaseName: input.releaseName ?? "",
       releaseDate: input.releaseDate, channel: input.channel ?? "stable", prerelease: input.prerelease ?? false,
       recommended: false, deprecated: false, publicationStatus: "pending", sourceUrl: input.sourceUrl ?? "",
-      compatibility: input.compatibility ?? [], metadata: input.metadata ?? {}, importedAt: new Date(),
+      compatibility: input.compatibility ?? [], architectures: input.architectures ?? [], runtimeRequirements: input.runtimeRequirements ?? {},
+      checksum: input.checksum ?? "", signature: input.signature ?? "", metadata: input.metadata ?? {}, importedAt: new Date(),
     });
     await this.audit.log({ actorId: actor.id, action: "software.version.added", targetType: "software-version", targetId: version._id.toString(), sensitive: true });
     return version;
@@ -257,7 +267,10 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         const result = await this.versions.updateOne({ softwareId: software._id, version: item.version }, { $setOnInsert: {
           softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "", releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
           channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease ? "published" : "pending",
-          sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "", compatibility: item.compatibility ?? [], metadata: item.metadata ?? {}, importedAt: new Date(),
+          sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "", compatibility: item.compatibility ?? [],
+          architectures: item.architectures ?? [], runtimeRequirements: item.runtimeRequirements ?? {},
+          checksum: item.checksum ?? (typeof item.metadata?.checksum === "string" ? item.metadata.checksum : ""), signature: item.signature ?? "",
+          metadata: item.metadata ?? {}, importedAt: new Date(),
         } }, { upsert: true });
         if (result.upsertedCount) imported++; else skipped++;
       } catch { failed++; }
@@ -290,7 +303,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
               channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease,
               publicationStatus: software.autoPublish && !item.prerelease ? "published" : "pending",
               sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "",
-              compatibility: item.compatibility ?? [], metadata: item.metadata ?? {}, importedAt: new Date(),
+              compatibility: item.compatibility ?? [], architectures: item.architectures ?? [], runtimeRequirements: item.runtimeRequirements ?? {},
+              checksum: item.checksum ?? (typeof item.metadata?.checksum === "string" ? item.metadata.checksum : ""), signature: item.signature ?? "", metadata: item.metadata ?? {}, importedAt: new Date(),
             } },
             { upsert: true },
           );
@@ -469,6 +483,23 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const software = await this.catalog.findById(id);
     if (!software) throw new NotFoundException("Software not found");
     return software;
+  }
+
+  private validateSoftwareMetadata(input: Partial<Software>) {
+    for (const key of ["officialWebsite", "iconUrl"] as const) {
+      const value = input[key];
+      if (value === undefined || value === "") continue;
+      if (typeof value !== "string" || value.length > 2048) throw new BadRequestException("Software website and icon URLs must be valid HTTPS URLs");
+      try { const url = new URL(value); if (url.protocol !== "https:") throw new Error("https required"); }
+      catch { throw new BadRequestException("Software website and icon URLs must be valid HTTPS URLs"); }
+    }
+    for (const key of ["supportedOperatingSystems", "supportedArchitectures"] as const) {
+      const values = input[key];
+      if (values === undefined) continue;
+      if (!Array.isArray(values) || values.length > 20 || values.some(value => typeof value !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(value))) throw new BadRequestException("Software platform compatibility values are invalid");
+    }
+    if (input.requiredRuntime !== undefined && (typeof input.requiredRuntime !== "string" || input.requiredRuntime.length > 128)) throw new BadRequestException("Required runtime must be 128 characters or fewer");
+    if (input.defaultVersion !== undefined && (typeof input.defaultVersion !== "string" || input.defaultVersion.length > 100)) throw new BadRequestException("Default version must be 100 characters or fewer");
   }
 
   private validateInstallation(config: Record<string, unknown>) {
