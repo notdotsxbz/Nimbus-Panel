@@ -544,7 +544,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Minecraft build sources require a valid Minecraft version such as 1.21.11");
     }
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
-    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "papermc-v3", "purpur-api", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "papermc-v3", "purpur-api", "mojang-manifest", "fabric-meta", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -616,6 +616,38 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           },
         } as DiscoveredVersion;
       });
+    }
+    if (software.sourceType === "mojang-manifest") {
+      const response = await axios.get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      const rows = response.data?.versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("Mojang returned an invalid version manifest");
+      return rows.filter(row => typeof row.id === "string" && row.id.length <= 100).map(row => ({
+        version: row.id,
+        releaseName: "Minecraft " + row.id,
+        releaseDate: row.releaseTime,
+        prerelease: row.type !== "release",
+        sourceUrl: typeof row.url === "string" && row.url.startsWith("https://piston-meta.mojang.com/") ? row.url : "https://www.minecraft.net/",
+        sourceId: row.id,
+        compatibility: [row.id],
+        metadata: { type: String(row.type ?? "unknown"), complianceLevel: Number(row.complianceLevel ?? 0) },
+      }));
+    }
+    if (software.sourceType === "fabric-meta") {
+      const response = await axios.get("https://meta.fabricmc.net/v2/versions/game", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      if (!Array.isArray(response.data)) throw new BadRequestException("Fabric returned an invalid game-version list");
+      return response.data.filter(row => typeof row.version === "string" && row.version.length <= 100).map(row => ({
+        version: row.version,
+        releaseName: "Fabric-compatible Minecraft " + row.version,
+        prerelease: row.stable !== true,
+        sourceUrl: "https://meta.fabricmc.net/v2/versions/game",
+        sourceId: row.version,
+        compatibility: [row.version],
+        metadata: { stable: row.stable === true },
+      }));
     }
     if (software.sourceType === "papermc-v3") {
       const minecraftVersion = software.sourceConfig.minecraftVersion;
