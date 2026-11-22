@@ -569,7 +569,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager" },
       });
       if (!Array.isArray(response.data)) throw new BadRequestException("Go returned an invalid release index");
-      return (response.data as any[]).filter(row => typeof row.version === "string" && /^go[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$/.test(row.version)).map(row => {
+      return (response.data as any[]).filter(row => typeof row.version === "string" && /^go[0-9]+\.[0-9]+(?:\.[0-9]+)?$/.test(row.version)).map(row => {
         const files = Array.isArray(row.files) ? row.files : [];
         const linuxArchives = files.filter((file: any) => file.os === "linux" && file.kind === "archive");
         const supportedArchitectures = [...new Set<string>(linuxArchives.map((file: any) => String(file.arch ?? "")).filter(Boolean))];
