@@ -188,9 +188,28 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "new container environment verification failed", http.StatusBadGateway)
 		return
 	}
+	versionVerified := req.VersionProbe == ""
+	if req.VersionProbe == "minecraft-log" {
+		for attempt := 0; attempt < 30; attempt++ {
+			logs, logErr := docker("logs", "--tail", "500", "nimbus-"+serviceID)
+			if logErr == nil && minecraftLogHasVersion(logs, req.ExpectedVersion) { versionVerified = true; break }
+			time.Sleep(2 * time.Second)
+		}
+	} else if req.VersionProbe != "" {
+		for attempt := 0; attempt < 5; attempt++ {
+			output, probeErr := runContainerVersionProbe("nimbus-"+serviceID, req.VersionProbe)
+			if probeErr == nil && versionOutputHasExpected(output, req.ExpectedVersion) { versionVerified = true; break }
+			time.Sleep(2 * time.Second)
+		}
+	}
+	if !versionVerified {
+		_, _ = docker("rm", "-f", "nimbus-"+serviceID)
+		http.Error(w, "new container failed application version verification", http.StatusBadGateway)
+		return
+	}
 	healthStatus := "not-configured"
 	if inspected[0].State.Health != nil { healthStatus = inspected[0].State.Health.Status }
-	writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "healthStatus": healthStatus, "environmentVerified": environmentVerified})
+	writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "healthStatus": healthStatus, "environmentVerified": environmentVerified, "versionVerified": versionVerified})
 	case "start":
 		_, err := docker("start", "nimbus-"+serviceID)
 		reply(w, err, map[string]string{"status": "online"})
