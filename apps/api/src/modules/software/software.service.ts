@@ -49,7 +49,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   private syncWorkerRunning = false;
 
   async onModuleInit() {
-    await this.seedDefaultCatalog();
+    try { await this.seedDefaultCatalog(); }
+    catch (error) { console.error("[software-catalog] preset seeding failed:", error instanceof Error ? error.message : "unknown error"); }
     // MongoDB-backed jobs survive API restarts. The timer only wakes the
     // scheduler/worker; job state, retries and leases are persisted.
     this.syncTimer = setInterval(() => { void this.runSyncQueue(); }, 15_000);
