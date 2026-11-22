@@ -664,7 +664,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         if (separator <= 0 || !["latest", "recommended"].includes(key.slice(separator + 1))) continue;
         const minecraftVersion = key.slice(0, separator);
         const forgeVersion = String(value ?? "");
-        if (!/^\\d+\\.\\d+(?:\\.\\d+)?$/.test(minecraftVersion) || !/^\\d+\\.\\d+(?:\\.\\d+)?$/.test(forgeVersion)) continue;
+        if (!/^\d+\.\d+(?:\.\d+)?$/.test(minecraftVersion) || !/^\d+\.\d+(?:\.\d+)?$/.test(forgeVersion)) continue;
         const id = minecraftVersion + "-" + forgeVersion;
         const item = grouped.get(id) ?? { minecraftVersion, forgeVersion, promotions: new Set<string>() };
         item.promotions.add(key.slice(separator + 1));
