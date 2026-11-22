@@ -390,6 +390,15 @@ async function call(path, { method = "GET", token, body } = {}) {
   if (osCatalog.body?._id) await call("/software/" + osCatalog.body._id, { method: "DELETE", token: ownerToken });
   const rejectedOsProvider = await call("/software", { method: "POST", token: ownerToken, body: { name: "Unapproved OS Image", identifier: "smoke-unapproved-os-" + suffix, category: "operating-system", serviceTypes: ["vps"], sourceType: "manual", installationConfig: { method: "virtualization-image", provider: "proxmox", imageId: "kvm/ubuntu-2404", minRamMb: 1024 } } });
   check("OS catalog rejects unsupported virtualization providers", rejectedOsProvider.status === 400, "status=" + rejectedOsProvider.status);
+  const compatibilityCatalog = await call("/software", { method: "POST", token: ownerToken, body: { name: "Compatibility Test Catalog", identifier: "compatibility-test-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", supportedOperatingSystems: ["linux"], supportedArchitectures: ["amd64"] } });
+  check("admin creates catalog with supported platform metadata", compatibilityCatalog.status === 201 && compatibilityCatalog.body?.supportedArchitectures?.includes("amd64"), "status=" + compatibilityCatalog.status);
+  const compatibilityVersion = compatibilityCatalog.body?._id ? await call("/software/" + compatibilityCatalog.body._id + "/versions", { method: "POST", token: ownerToken, body: { version: "2.0.0", architectures: ["arm64"], operatingSystems: ["linux"] } }) : { status: 0, body: {} };
+  check("version is marked incompatible with configured architecture", compatibilityVersion.status === 201 && compatibilityVersion.body?.compatible === false, "status=" + compatibilityVersion.status);
+  if (compatibilityCatalog.body?._id && compatibilityVersion.body?._id) {
+    const publishIncompatible = await call("/software/" + compatibilityCatalog.body._id + "/versions/" + compatibilityVersion.body._id, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published" } });
+    check("incompatible version cannot be published", publishIncompatible.status === 400, "status=" + publishIncompatible.status);
+    await call("/software/" + compatibilityCatalog.body._id, { method: "DELETE", token: ownerToken });
+  }
   const softwareId = software.body?._id;
   const adminSyncJobs = await call("/software/sync-jobs", { token: ownerToken });
   check("admin can inspect durable software sync queue", adminSyncJobs.status === 200 && Array.isArray(adminSyncJobs.body), "status=" + adminSyncJobs.status);
