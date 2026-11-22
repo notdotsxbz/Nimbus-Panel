@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { GlassCard, useToast } from "@/components/glass";
 
-type VersionOption = { _id: string; version: string; releaseName?: string; recommended?: boolean; prerelease?: boolean; publicationStatus: string };
-type SoftwareOption = { software: { id: string; name: string; identifier: string; description: string; category: string; installable: boolean }; versions: VersionOption[] };
-type OptionsResponse = { serviceType: string; currentSoftware: string | null; currentVersion: string | null; options: SoftwareOption[] };
+type VersionOption = { _id: string; version: string; releaseName?: string; releaseDate?: string; recommended?: boolean; prerelease?: boolean; publicationStatus: string; compatibility?: string[]; architectures?: string[]; runtimeRequirements?: Record<string, unknown> };
+type SoftwareOption = { software: { id: string; name: string; identifier: string; description: string; category: string; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string; installable: boolean }; versions: VersionOption[] };
+type OptionsResponse = { serviceType: string; currentSoftware: string | null; currentVersion: string | null; lastSuccessfulUpdate?: string | null; options: SoftwareOption[] };
 type Operation = { _id: string; requestedSoftware: string; requestedVersion: string; previousSoftware: string; previousVersion: string; status: string; progress: number; error?: string; warning?: string; createdAt: string; completedAt?: string };
 
 export function SoftwareManager({ serviceId, serviceType }: { serviceId: string; serviceType: string }) {
@@ -58,6 +58,7 @@ export function SoftwareManager({ serviceId, serviceType }: { serviceId: string;
   return <div className="space-y-4">
     <GlassCard className="p-6">
       <h2 className="font-semibold">Software &amp; version</h2>
+      {data?.lastSuccessfulUpdate ? <p className="mt-1 text-xs text-muted">Last successful update: {new Date(data.lastSuccessfulUpdate).toLocaleString()}</p> : null}
       <p className="mt-1 text-xs text-muted">Current software: <strong>{data?.currentSoftware || "Not recorded"}</strong> · Version: <strong>{data?.currentVersion || "Not recorded"}</strong></p>
       {["vps", "vds"].includes(serviceType.toLowerCase()) ? (
         <p className="mt-4 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-sm text-amber-100">VPS and VDS operating-system changes are restricted to authorized administrators. Customer OS controls are not available here.</p>
@@ -74,11 +75,21 @@ export function SoftwareManager({ serviceId, serviceType }: { serviceId: string;
             <label className="space-y-1 text-sm">Published version
               <select className="input w-full" value={versionId} onChange={event => setVersionId(event.target.value)} disabled={!selected}>
                 <option value="">Choose version…</option>
-                {(selected?.versions ?? []).map(version => <option key={version._id} value={version._id}>{version.version}{version.recommended ? " · Recommended" : ""}{version.prerelease ? " · Prerelease" : ""}</option>)}
+                {(selected?.versions ?? []).map(version => <option key={version._id} value={version._id}>{version.version}{version.releaseName ? " · " + version.releaseName : ""}{version.recommended ? " · Recommended" : ""}{version.prerelease ? " · Prerelease" : ""}</option>)}
               </select>
             </label>
           </div>
-          <button className="btn-primary mt-4" disabled={busy || !selected?.software.installable || !versionId} onClick={() => void change()}>{busy ? "Backing up and upgrading…" : "Back up & change version"}</button>
+          {selected ? <div className="mt-3 rounded-lg border border-white/10 p-3 text-xs text-muted">
+            {selected.software.description ? <p>{selected.software.description}</p> : null}
+            {selected.software.officialWebsite ? <p className="mt-1"><a className="text-sky-300 underline" href={selected.software.officialWebsite} target="_blank" rel="noreferrer">Official website</a></p> : null}
+            {selected.software.requiredRuntime ? <p className="mt-1">Required runtime: {selected.software.requiredRuntime}</p> : null}
+            {selected.software.supportedOperatingSystems?.length ? <p className="mt-1">Supported OS: {selected.software.supportedOperatingSystems.join(", ")}</p> : null}
+            {selected.software.supportedArchitectures?.length ? <p className="mt-1">Architectures: {selected.software.supportedArchitectures.join(", ")}</p> : null}
+            {selected.versions.find(item => item._id === versionId)?.compatibility?.length ? <p className="mt-1">Version compatibility: {selected.versions.find(item => item._id === versionId)?.compatibility?.join(", ")}</p> : null}
+            {selected.versions.find(item => item._id === versionId)?.architectures?.length ? <p className="mt-1">Version architectures: {selected.versions.find(item => item._id === versionId)?.architectures?.join(", ")}</p> : null}
+            {selected.versions.find(item => item._id === versionId)?.runtimeRequirements ? <p className="mt-1">Runtime requirements: {JSON.stringify(selected.versions.find(item => item._id === versionId)?.runtimeRequirements)}</p> : null}
+          </div> : null}
+<button className="btn-primary mt-4" disabled={busy || !selected?.software.installable || !versionId} onClick={() => void change()}>{busy ? "Backing up and upgrading…" : "Back up & change version"}</button>
           {!data?.options.some(item => item.software.installable && item.versions.length) && <p className="mt-3 text-xs text-muted">No installable software versions have been published for this service type yet.</p>}
         </>
       )}

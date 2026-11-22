@@ -82,6 +82,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   const owner = login.body?.token;
   if (!owner) process.exit(1);
 
+  const seededCatalog = await call("/software", { token: owner });
+  const seededIds = (seededCatalog.body ?? []).map(item => item.identifier);
+  check("default software presets are seeded for Admin review", seededCatalog.status === 200 && ["minecraft-vanilla", "minecraft-paper", "runtime-nodejs", "runtime-python", "runtime-java-temurin", "database-mongodb", "audio-lavalink", "os-ubuntu-2404"].every(id => seededIds.includes(id)), "entries=" + seededIds.length);
+  check("seeded software presets are not exposed to customers by default", (seededCatalog.body ?? []).filter(item => seededIds.includes(item.identifier)).every(item => item.customerAvailable === false), "review required");
   const me = await call("/auth/me", { token: owner });
   check("authenticated /auth/me", me.status === 200 && !!me.body?.username, `username=${me.body?.username}`);
 
@@ -298,6 +302,8 @@ async function call(path, { method = "GET", token, body } = {}) {
   // workload blocking: assign the service to a different active customer so the custToken checks below genuinely test cross-customer access.
   const serviceOwner = await call("/users", { method: "POST", token: ownerToken, body: { email: `service-owner-${suffix}@example.com`, username: `svcowner${suffix}`, password: "smokepass123", role: "customer" } });
   check("separate service owner created", serviceOwner.status === 201 && !!serviceOwner.body?._id, `status=${serviceOwner.status}`);
+  const dockerOnlyVps = await call("/services", { method: "POST", token: ownerToken, body: { name: "Test VPS", type: "vps", ramMb: 1024, diskGb: 10 } });
+  check("VPS provisioning is not falsely routed through Docker", dockerOnlyVps.status === 400 && String(dockerOnlyVps.body?.message ?? "").includes("KVM/libvirt"), "status=" + dockerOnlyVps.status);
   const svc = await call("/services", { method: "POST", token: ownerToken, body: { name: "smoke-svc-" + suffix, type: "docker", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" } });
   check("workload created on node (agent offline, error state)", svc.status === 201, `status=${svc.status}`);
 
@@ -343,10 +349,62 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("admin creates software catalog entry", software.status === 201 && !!software.body?._id, "status=" + software.status);
   const invalidInstallerEnv = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid Installer", identifier: "invalid-installer-" + suffix, serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { "BAD KEY": "value" } } } });
   check("installer rejects unsafe environment keys", invalidInstallerEnv.status === 400, "status=" + invalidInstallerEnv.status);
-  const configuredInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Configured Installer", identifier: "configured-installer-" + suffix, serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { NODE_ENV: "production" } } } });
+  const invalidMetadata = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid Metadata", identifier: "invalid-metadata-" + suffix, officialWebsite: "javascript:alert(1)", serviceTypes: ["docker"], sourceType: "manual" } });
+  check("software metadata rejects non-HTTPS URLs", invalidMetadata.status === 400, "status=" + invalidMetadata.status);
+  const configuredInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Configured Installer", identifier: "configured-installer-" + suffix, officialWebsite: "https://example.com", iconUrl: "https://example.com/icon.png", supportedOperatingSystems: ["linux"], supportedArchitectures: ["amd64", "arm64"], requiredRuntime: "Node.js 22", defaultVersion: "22", serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { NODE_ENV: "production" } } } });
   check("admin can configure validated image installer environment", configuredInstaller.status === 201 && configuredInstaller.body?.installationConfig?.environment?.NODE_ENV === "production", "status=" + configuredInstaller.status);
   if (configuredInstaller.body?._id) await call("/software/" + configuredInstaller.body._id, { method: "DELETE", token: ownerToken });
+  const minecraftInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Minecraft Env Installer", identifier: "minecraft-env-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "itzg/minecraft-server:java21", environment: { TYPE: "PAPER", VERSION: "{version}", EULA: "TRUE" }, versionProbe: "minecraft-log" } } });
+  check("Minecraft installer supports verified version environment placeholders", minecraftInstaller.status === 201 && minecraftInstaller.body?.installationConfig?.environment?.VERSION === "{version}" && minecraftInstaller.body?.installationConfig?.versionProbe === "minecraft-log", "status=" + minecraftInstaller.status);
+  if (minecraftInstaller.body?._id) await call("/software/" + minecraftInstaller.body._id, { method: "DELETE", token: ownerToken });
+  const missingVersionProbe = await call("/software", { method: "POST", token: ownerToken, body: { name: "Missing Probe", identifier: "missing-probe-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "itzg/minecraft-server:java21", environment: { VERSION: "{version}" } } } });
+  check("environment-based version placeholders require a probe", missingVersionProbe.status === 400, "status=" + missingVersionProbe.status);
+  const invalidVersionProbe = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid Probe", identifier: "invalid-probe-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "itzg/minecraft-server:java21", environment: { VERSION: "{version}" }, versionProbe: "arbitrary-command" } } });
+  check("installer rejects unapproved version probes", invalidVersionProbe.status === 400, "status=" + invalidVersionProbe.status);
+  const unsafeStaticInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Unsafe Static Installer", identifier: "unsafe-static-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "itzg/minecraft-server:java21", environment: { TYPE: "PAPER" } } } });
+  check("installer rejects static image without a version placeholder", unsafeStaticInstaller.status === 400, "status=" + unsafeStaticInstaller.status);
 
+
+  const sourceCases = [
+    { name: "Minecraft Vanilla source", identifier: "smoke-minecraft-manifest-" + suffix, sourceType: "minecraft-manifest", sourceConfig: {} },
+    { name: "Go source", identifier: "smoke-go-" + suffix, sourceType: "go-index", sourceConfig: {} },
+    { name: ".NET source", identifier: "smoke-dotnet-" + suffix, sourceType: "dotnet-index", sourceConfig: { channelVersion: "8.0" } },
+    { name: "Paper source", identifier: "smoke-paper-" + suffix, sourceType: "papermc", sourceConfig: { project: "paper" } },
+    { name: "Purpur source", identifier: "smoke-purpur-" + suffix, sourceType: "purpur", sourceConfig: {} },
+    { name: "Fabric source", identifier: "smoke-fabric-" + suffix, sourceType: "fabric-meta", sourceConfig: {} },
+    { name: "Quilt source", identifier: "smoke-quilt-" + suffix, sourceType: "quilt-meta", sourceConfig: {} },
+    { name: "Java source", identifier: "smoke-java-" + suffix, sourceType: "java-adoptium", sourceConfig: {} },
+    { name: "Forge source", identifier: "smoke-forge-" + suffix, sourceType: "forge-maven", sourceConfig: {} },
+    { name: "NeoForge source", identifier: "smoke-neoforge-" + suffix, sourceType: "neoforge-maven", sourceConfig: {} },
+    { name: "Python source", identifier: "smoke-python-" + suffix, sourceType: "python-releases", sourceConfig: {} },
+    { name: "PHP source", identifier: "smoke-php-" + suffix, sourceType: "php-releases", sourceConfig: { majorVersion: "8.4" } },
+    { name: "Lavalink source", identifier: "smoke-lavalink-" + suffix, sourceType: "lavalink-releases", sourceConfig: {} },
+    { name: "MongoDB source", identifier: "smoke-mongodb-" + suffix, sourceType: "mongodb-releases", sourceConfig: {} },
+  ];
+  for (const item of sourceCases) {
+    const created = await call("/software", { method: "POST", token: ownerToken, body: { name: item.name, identifier: item.identifier, serviceTypes: ["minecraft"], sourceType: item.sourceType, sourceConfig: item.sourceConfig } });
+    check("admin can configure " + item.sourceType + " source", created.status === 201 && !!created.body?._id, "status=" + created.status + " body=" + JSON.stringify(created.body).slice(0, 200));
+    if (created.body?._id) await call("/software/" + created.body._id, { method: "DELETE", token: ownerToken });
+  }
+  const invalidDotnet = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid .NET source", identifier: "smoke-dotnet-invalid-" + suffix, serviceTypes: ["backend"], sourceType: "dotnet-index", sourceConfig: { channelVersion: "latest" } } });
+  check(".NET source rejects an invalid channel", invalidDotnet.status === 400, "status=" + invalidDotnet.status);
+  const invalidPhp = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid PHP source", identifier: "smoke-php-invalid-" + suffix, serviceTypes: ["backend"], sourceType: "php-releases", sourceConfig: { majorVersion: "latest" } } });
+  check("PHP source rejects an invalid release line", invalidPhp.status === 400, "status=" + invalidPhp.status);
+
+  const osCatalog = await call("/software", { method: "POST", token: ownerToken, body: { name: "Ubuntu 24.04 OS Image", identifier: "smoke-ubuntu-os-" + suffix, category: "operating-system", serviceTypes: ["vps", "vds"], customerAvailable: false, sourceType: "manual", installationConfig: { method: "virtualization-image", provider: "kvm-libvirt", imageId: "kvm/ubuntu-2404", minRamMb: 1024, architecture: "amd64" } } });
+  check("admin can manage metadata for a KVM OS image", osCatalog.status === 201 && osCatalog.body?.installationConfig?.imageId === "kvm/ubuntu-2404", "status=" + osCatalog.status);
+  if (osCatalog.body?._id) await call("/software/" + osCatalog.body._id, { method: "DELETE", token: ownerToken });
+  const rejectedOsProvider = await call("/software", { method: "POST", token: ownerToken, body: { name: "Unapproved OS Image", identifier: "smoke-unapproved-os-" + suffix, category: "operating-system", serviceTypes: ["vps"], sourceType: "manual", installationConfig: { method: "virtualization-image", provider: "proxmox", imageId: "kvm/ubuntu-2404", minRamMb: 1024 } } });
+  check("OS catalog rejects unsupported virtualization providers", rejectedOsProvider.status === 400, "status=" + rejectedOsProvider.status);
+  const compatibilityCatalog = await call("/software", { method: "POST", token: ownerToken, body: { name: "Compatibility Test Catalog", identifier: "compatibility-test-" + suffix, serviceTypes: ["minecraft"], sourceType: "manual", supportedOperatingSystems: ["linux"], supportedArchitectures: ["amd64"] } });
+  check("admin creates catalog with supported platform metadata", compatibilityCatalog.status === 201 && compatibilityCatalog.body?.supportedArchitectures?.includes("amd64"), "status=" + compatibilityCatalog.status);
+  const compatibilityVersion = compatibilityCatalog.body?._id ? await call("/software/" + compatibilityCatalog.body._id + "/versions", { method: "POST", token: ownerToken, body: { version: "2.0.0", architectures: ["arm64"], operatingSystems: ["linux"] } }) : { status: 0, body: {} };
+  check("version is marked incompatible with configured architecture", compatibilityVersion.status === 201 && compatibilityVersion.body?.compatible === false, "status=" + compatibilityVersion.status);
+  if (compatibilityCatalog.body?._id && compatibilityVersion.body?._id) {
+    const publishIncompatible = await call("/software/" + compatibilityCatalog.body._id + "/versions/" + compatibilityVersion.body._id, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published" } });
+    check("incompatible version cannot be published", publishIncompatible.status === 400, "status=" + publishIncompatible.status);
+    await call("/software/" + compatibilityCatalog.body._id, { method: "DELETE", token: ownerToken });
+  }
   const softwareId = software.body?._id;
   const adminSyncJobs = await call("/software/sync-jobs", { token: ownerToken });
   check("admin can inspect durable software sync queue", adminSyncJobs.status === 200 && Array.isArray(adminSyncJobs.body), "status=" + adminSyncJobs.status);
@@ -364,8 +422,19 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("customer cannot list admin software catalog", customerCatalog.status === 403, "status=" + customerCatalog.status);
   const customerCreate = await call("/software", { method: "POST", token: custToken, body: { name: "Nope", identifier: "customer-nope-" + suffix, serviceTypes: ["docker"], sourceType: "manual" } });
   check("customer cannot create software catalog entries", customerCreate.status === 403, "status=" + customerCreate.status);
-  const manualVersion = await call("/software/" + softwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0" } });
-  check("admin adds manual fallback version", manualVersion.status === 201 && !!manualVersion.body?._id, "status=" + manualVersion.status);
+  const manualVersion = await call("/software/" + softwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0", architectures: ["amd64"], runtimeRequirements: { java: "21" }, checksum: "sha256:test" } });
+  check("admin adds manual fallback version with compatibility metadata", manualVersion.status === 201 && !!manualVersion.body?._id && manualVersion.body?.architectures?.includes("amd64") && manualVersion.body?.checksum === "sha256:test", "status=" + manualVersion.status);
+  check("manual version is attached to the selected software", String(manualVersion.body?.softwareId ?? "") === String(softwareId), "softwareId=" + manualVersion.body?.softwareId + " expected=" + softwareId);
+  const pendingInitialInstall = await call("/software/provision", { method: "POST", token: ownerToken, body: { name: "Pending version must not install", type: "docker", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, softwareId, versionId: manualVersion.body?._id } });
+  check("initial service provisioning rejects unpublished software versions", pendingInitialInstall.status === 400, "status=" + pendingInitialInstall.status + " body=" + JSON.stringify(pendingInitialInstall.body));
+  const customerInitialInstall = await call("/software/provision", { method: "POST", token: custToken, body: { name: "Customer cannot assign service", type: "docker", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, softwareId, versionId: manualVersion.body?._id } });
+  check("initial catalog service provisioning is Admin-only", customerInitialInstall.status === 403, "status=" + customerInitialInstall.status);
+  const editedManualVersion = manualVersion.body?._id ? await call("/software/" + softwareId + "/versions/" + manualVersion.body._id, { method: "PATCH", token: ownerToken, body: { releaseName: "Smoke Release", channel: "lts", architectures: ["amd64"], operatingSystems: ["linux"], sourceUrl: "https://example.com/releases/1.0.0", checksum: "sha256:updated" } }) : { status: 0, body: {} };
+  check("admin can edit version provenance and compatibility metadata", editedManualVersion.status === 200 && editedManualVersion.body?.releaseName === "Smoke Release" && editedManualVersion.body?.checksum === "sha256:updated", "status=" + editedManualVersion.status);
+  const versionPage = await call("/software/" + softwareId + "/versions?page=1&limit=10", { token: ownerToken });
+  check("admin can read paginated software versions", versionPage.status === 200 && Array.isArray(versionPage.body?.items) && versionPage.body?.page === 1 && versionPage.body?.limit === 10 && versionPage.body?.total >= 1, "status=" + versionPage.status);
+  const cappedVersionPage = await call("/software/" + softwareId + "/versions?page=1&limit=500", { token: ownerToken });
+  check("software version page size is capped", cappedVersionPage.status === 200 && cappedVersionPage.body?.limit === 100, "status=" + cappedVersionPage.status);
   const publishedVersion = await call("/software/" + softwareId + "/versions/" + manualVersion.body?._id, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published", recommended: true } });
   check("admin publishes and recommends a version", publishedVersion.status === 200 && publishedVersion.body?.publicationStatus === "published", "status=" + publishedVersion.status + " body=" + JSON.stringify(publishedVersion.body).slice(0, 180));
   if (svcId && softwareId) {

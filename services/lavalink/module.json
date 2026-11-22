@@ -1,0 +1,13 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "lavalink",
+  "label": "Lavalink Audio Node",
+  "subdomainPattern": null,
+  "requiresPort": true,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "lavalink4", "label": "Lavalink 4", "image": "ghcr.io/lavalink-devs/lavalink:4", "versions": ["4"], "minRamMb": 512 }
+  ],
+  "features": ["console", "logs", "env-vars", "port-mappings", "health-checks", "backups"],
+  "notes": "Container-based Lavalink hosting. Configure a supported Java runtime and server configuration before enabling customer provisioning."
+}

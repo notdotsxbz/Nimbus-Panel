@@ -15,6 +15,13 @@ export class SoftwareVersion {
   @Prop({ default: "" }) sourceUrl!: string;
   @Prop({ default: "" }) sourceId!: string;
   @Prop({ type: [String], default: [] }) compatibility!: string[];
+  @Prop({ type: [String], default: [] }) architectures!: string[];
+  @Prop({ type: [String], default: [] }) operatingSystems!: string[];
+  @Prop({ default: true }) compatible!: boolean;
+  @Prop({ type: [String], default: [] }) incompatibilityReasons!: string[];
+  @Prop({ type: Object, default: {} }) runtimeRequirements!: Record<string, unknown>;
+  @Prop({ default: "" }) checksum!: string;
+  @Prop({ default: "" }) signature!: string;
   @Prop({ type: Object, default: {} }) metadata!: Record<string, unknown>;
   @Prop({ default: null }) importedAt?: Date;
   @Prop() createdAt!: Date;

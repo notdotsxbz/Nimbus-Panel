@@ -1,0 +1,14 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "mongodb",
+  "label": "MongoDB Hosting",
+  "subdomainPattern": null,
+  "requiresPort": true,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "mongodb80", "label": "MongoDB 8.0", "image": "mongo:8.0", "versions": ["8.0"], "minRamMb": 512 },
+    { "id": "mongodb90", "label": "MongoDB 9.0", "image": "mongo:9.0", "versions": ["9.0"], "minRamMb": 512 }
+  ],
+  "features": ["db-create", "db-delete", "users", "permissions", "password-reset", "connection-strings", "backups", "restore", "private-networking"],
+  "notes": "Private networking is the default. Database hostnames stay off public DNS."
+}

@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { HydratedDocument, Types } from "mongoose";
 
-export const SOFTWARE_SOURCE_TYPES = ["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags"] as const;
+export const SOFTWARE_SOURCE_TYPES = ["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven", "python-releases", "php-releases", "lavalink-releases", "mongodb-releases"] as const;
 export type SoftwareSourceType = (typeof SOFTWARE_SOURCE_TYPES)[number];
 
 @Schema({ collection: "software_catalog", timestamps: true })
@@ -9,6 +9,12 @@ export class Software {
   @Prop({ required: true, trim: true }) name!: string;
   @Prop({ required: true, unique: true, lowercase: true, trim: true, index: true }) identifier!: string;
   @Prop({ default: "" }) description!: string;
+  @Prop({ default: "" }) officialWebsite!: string;
+  @Prop({ default: "" }) iconUrl!: string;
+  @Prop({ type: [String], default: [] }) supportedOperatingSystems!: string[];
+  @Prop({ type: [String], default: [] }) supportedArchitectures!: string[];
+  @Prop({ default: "" }) requiredRuntime!: string;
+  @Prop({ default: "" }) defaultVersion!: string;
   @Prop({ default: "runtime" }) category!: string;
   @Prop({ type: [String], required: true, index: true }) serviceTypes!: string[];
   @Prop({ enum: SOFTWARE_SOURCE_TYPES, default: "manual" }) sourceType!: SoftwareSourceType;

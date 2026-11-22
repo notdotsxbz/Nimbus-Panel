@@ -1,85 +1,101 @@
 # Software & Version Manager
 
-## Current scope
+## Implemented catalog
 
-The Software & Versions area is available to Owner/Admin accounts at **Admin → Software & Versions**. It stores software catalog entries and version records in the existing MongoDB database, and writes catalog actions to the existing audit log.
+The Software & Versions area is available to Owner/Admin accounts at **Admin → Software & Versions**. Catalog entries, version records, synchronization jobs and software operations are stored in MongoDB. Catalog changes and important operations are written to the existing audit log.
 
-The currently implemented official-source adapters are:
+On API startup, NIMBUS inserts safe default catalog presets using `$setOnInsert`. Existing catalog records are never overwritten by this seeding step. Presets are enabled for Admin review but are not customer-visible, do not auto-sync and do not auto-publish until an Admin explicitly changes those settings.
 
-- **GitHub Releases** — release metadata from a configured public `owner/repository`.
-- **Node.js releases** — the official Node.js distribution index.
+Implemented source adapters:
+
+- **GitHub Releases** — configured public `owner/repository`, paginated.
+- **Minecraft Vanilla** — Mojang's official version manifest.
+- **PaperMC / Folia** — official PaperMC project API.
+- **Purpur** — official Purpur API.
+- **Fabric** — official Fabric Meta API.
+- **Quilt** — official Quilt Meta API.
+- **Forge / NeoForge** — official Maven metadata.
+- **Node.js** — official Node.js distribution index.
+- **Python** — official Python release metadata.
+- **PHP** — official PHP release metadata and source checksums; optional release line such as `8` or `8.4`.
+- **Go** — official Go download index, including archive checksums and platform metadata.
+- **.NET** — Microsoft release metadata for a configured channel such as `8.0`.
+- **Eclipse Temurin Java** — official Adoptium release metadata.
+- **MongoDB Server** — official MongoDB release manifest, filtered to stable releases and supported Ubuntu targets.
+- **Lavalink** — official Lavalink project releases.
 - **Modrinth** — versions from a configured Modrinth project ID.
-- **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
+- **Docker Hub** — tags from a configured public namespace/repository; floating `latest` is skipped.
 - **Manual** — fallback for software without an implemented source adapter.
 
-GitHub discovery follows up to five pages of 100 releases. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
+The source adapters validate response shapes and use request timeouts. Paginated sources use bounded page limits. A source failure leaves existing catalog data intact and records a failed sync.
 
-## Add a catalog entry
+## Add and configure software
 
 1. Open **Admin → Software & Versions → Add Software**.
-2. Enter a unique lowercase identifier and a name.
-3. Enter service type values exactly as used by NIMBUS (for example `minecraft`, `discord`, `website`, `backend`, `database`, or `docker`).
-4. Select an implemented source adapter and fill its repository/project fields.
-5. Optionally configure a Docker image template ending in `:{version}`, such as `example/application:{version}`. Use this only when the upstream project's published Docker tags actually match the version identifiers returned by the selected source. You may also supply installer environment overrides (for example `{"TYPE":"PAPER","EULA":"TRUE"}`); keys and values are validated and passed to the Node Agent, which merges them over the existing container environment.
-6. Choose auto-sync frequency and whether stable discoveries may be published automatically.
-7. Save the entry and select it in the catalog.
+2. Enter a unique lowercase identifier, name, description and official website.
+3. Enter service type values exactly as used by NIMBUS, for example `minecraft`, `discord`, `website`, `backend`, `nodejs`, `python`, `mongodb`, `database`, `docker`, `lavalink`, or `custom`.
+4. Choose the official source adapter and fill any required repository, project or release-channel fields.
+5. Configure a trusted Docker image-template adapter only if its version-tag convention is verified. Use `{version}` in the image tag or, for a compatible application, in an environment value with a supported version probe.
+6. Configure supported OSes, architectures and runtime metadata where relevant.
+7. Choose auto-sync frequency and whether eligible stable releases may be automatically published.
+8. Keep **Customer availability** disabled until the software and installer have been reviewed.
 
-Do not configure an image template unless the image is trusted and the tag convention has been verified. The adapter runs the image as a container; it does not install arbitrary host packages.
+The Admin form also accepts KVM/libvirt OS-image metadata. This is catalog metadata only; no VM reinstall action is available until a real virtualization provider and Node Agent are implemented and verified.
 
-## Fetch and publish versions
+## Fetch, import and publish versions
 
-- **Fetch versions** calls the configured official source and stages a preview of discovered releases.
-- Admins can import selected new versions or import all discovered versions in one operation. Existing versions are identified in the preview and are not duplicated.
-- Existing software/version pairs are detected by a unique database index and are not duplicated. Preview data expires after 24 hours.
-- New versions are pending approval by default.
-- If auto-publishing is enabled, only non-prerelease discoveries are published automatically. Prereleases remain pending.
-- Select individual versions to publish or disable them. The bulk actions support publishing, disabling, and deprecating selected versions.
-- Manual version entry remains available as a fallback and creates a pending version.
-- Existing versions are not deleted when a source request fails. Sync status and a bounded history are stored on the software record.
+- **Fetch Versions** calls the selected official source and stages a preview.
+- Preview results show newly discovered, already imported and incompatible versions.
+- Admins can select versions or import all eligible discoveries in one operation.
+- Duplicate software/version pairs are protected by a unique database index and are not re-created.
+- New versions are pending approval by default. Auto-publishing is an explicit per-software setting and excludes prereleases and incompatible/incomplete records.
+- Admins can manually add a version as a fallback, edit metadata, publish/disable/deprecate versions, set a recommended version and use bulk actions.
+- Version lists are paginated (50 per page in the Admin UI; API limits are capped at 100).
+- Preview data expires after 24 hours. Failed imports are counted and are not reported as successful.
 
 ## Automatic synchronization
 
-Automatic sync runs in the API process once per minute and checks each enabled catalog entry's configured interval (6 hours, 12 hours, 24 hours, or 7 days). A database lease prevents two API instances from synchronizing the same software entry at the same time. If a source fails, the existing catalog remains intact and the next interval can retry.
+Each software entry can use manual-only, 6-hour, 12-hour, 24-hour or 7-day synchronization. The API scheduler checks due entries every 15 seconds and enqueues jobs in the persistent MongoDB `software_sync_jobs` collection. Jobs have unique time-bucket keys, bounded retries, retry delays, worker leases and a retry action in the Admin UI. Job state survives an API restart; the scheduler/worker itself currently runs inside the API process rather than a separate worker service.
 
-This is an in-process scheduler, not a durable external job queue. For multi-region or high-availability deployments, move this work to a dedicated persistent worker before scaling the API horizontally.
+## Initial service provisioning from the catalog
+
+The Admin **Assign Service** wizard now selects an enabled catalog entry and a published compatible version for the chosen service type. It no longer asks the Admin to type an arbitrary Docker image for catalog-managed services. The backend resolves the image tag and version-bearing environment from the catalog, checks the service type and version publication state, and keeps VPS/VDS requests out of the Docker path. Admins can supply an optional startup argv as one argument per line (for example `npm` and `start`); it is passed directly to Docker rather than evaluated by a shell.
+
+The Node Agent verifies the initial container image, running state, configured environment and Docker health check when present. When the catalog configures a supported application version probe, the agent runs that fixed probe before returning success. If the probe does not confirm the requested version, the newly created container is removed and the service is left in an error state rather than being recorded as successfully installed. Only Owner/Admin accounts can use the initial catalog provisioning endpoint.
 
 ## Customer software changes
 
-Customers can view catalog entries matching their service type. A version is selectable only when it is published, not deprecated, and the catalog entry has a configured Docker image template adapter.
+The existing service page includes a **Software** tab. The API filters catalog options by the service's exact type and checks service ownership. Customers cannot access Admin catalog endpoints, import/publish versions or change another customer's service. VPS/VDS software changes are rejected by the backend as well as hidden from the customer selector.
 
-For a supported container change, NIMBUS:
+A version is selectable only when the software is enabled and customer-visible, the version is published, not deprecated, compatible, and the catalog entry has a configured Docker image-template adapter. Catalog-only entries remain visible to Admins but cannot be installed by customers.
 
-1. Verifies the customer's ownership of the service.
-2. Verifies the catalog entry, service type, version publication state, and image template.
-3. Creates a local pre-update backup through the existing Node Agent backup endpoint.
-4. Pulls the target image before stopping the existing container.
-5. Stops and renames the previous container while retaining the same service data directory.
-6. Starts the new image using the service resource limits and configured startup command, while retaining the previous stopped container.
-7. Checks that the running container reports the requested image and waits for a configured Docker health check to become healthy.
-8. Saves the service and operation records, then asks the Node Agent to remove the previous container in a separate commit step.
-9. If the database update fails after the new container starts, asks the Node Agent to restore the retained previous container. If final cleanup fails, the previous container is kept and an administrator warning is recorded.
+For supported container upgrades, NIMBUS:
 
-Operation history is available on the service's **Software** tab. The current verification is container-level: running state, configured image, and Docker health status when a health check exists. An application without a Docker health check cannot receive an application-specific health guarantee from this adapter.
+1. Checks ownership, service type, catalog state, version publication and compatibility.
+2. Creates a pre-update backup through the existing backup service.
+3. Pulls the target image before touching the existing container.
+4. Retains the previous container and reuses the existing service data directory.
+5. Starts the new container with the service's resource limits and preserved environment; explicit catalog overrides replace only matching keys.
+6. Verifies the new container is running with the requested image, configured environment and a healthy Docker health check when one exists.
+7. Runs an approved fixed application-version probe when configured (Minecraft startup log, Node.js, Python, PHP, Go, Java, .NET or MongoDB).
+8. Updates the service/version record only after verification, then performs previous-container cleanup as a separate commit step.
+9. Retains the previous container and records a warning if final cleanup fails. If saving the new service state fails, the agent attempts to restore the previous container.
 
-The current adapter is intentionally limited to Docker image-template upgrades. A catalog record without this adapter can be discovered and published, but cannot be installed through the customer workflow. The Admin catalog form exposes the image template and validated environment overrides so compatible containerized software can be configured without editing MongoDB manually.
+Operations are recorded with status, progress, backup reference, errors and verification details. The customer Software tab displays operation history. The adapter does not provide a universal HTTP/application health check for every software family; where no Docker health check or supported version probe exists, the UI and operation record must not claim that application-level health was verified.
 
 ## Node credential compatibility
 
-Control-plane-to-agent requests now use the per-node enrollment credential encrypted at rest by the API. Nodes enrolled before this field was added do not yet have the encrypted credential. For those nodes, an Owner/Admin must use **Admin → Nodes → Revoke Credentials**, then run the newly generated node installer command on that node to re-enroll it before agent-backed operations will work.
+Control-plane-to-agent requests use the per-node enrollment credential encrypted at rest by the API. Nodes enrolled before this field was added need credential re-enrollment before agent-backed operations work. Use **Admin → Nodes → Revoke Credentials**, then run the newly generated installer command on that node. The re-enrollment installer preserves service data and the TLS certificate.
 
 Never share enrollment tokens or node credentials in support tickets or public channels.
 
-## Security boundaries and current limitations
+## Explicit limitations
 
-- Catalog management endpoints are Owner/Admin-only.
-- Customer options and operation history call the existing service ownership check.
-- Customer software changes cannot target VPS/VDS services. Customer OS changes are rejected by the backend, not merely hidden in the UI.
-- The current work does **not** implement an Admin VPS/VDS OS-image management workflow.
-- Dedicated source adapters are not yet implemented for every software family in the master prompt (including MongoDB, arbitrary Docker registries, PHP, Go, Java, .NET, and Lavalink). Use an approved GitHub release source only when that project's official release metadata is authoritative; otherwise keep the entry manual until a proper adapter is added.
-- The complete catalog approval workflow, durable job queue, source-specific compatibility matrix, and application-level health probes remain follow-up work.
-- Do not use the existing **Reinstall** action to change software. Reinstall is destructive and removes the service data directory.
+- The verified installation adapter currently performs Docker image-template operations only. Dedicated native installers for every runtime and framework are not complete.
+- Catalog discovery is broader than installation support: a source adapter does not automatically make a software package installable. Admins must verify the official image/tag convention and configure the installer before enabling customer access.
+- VPS/VDS OS catalog metadata is Admin-managed, but the repository does not yet contain a KVM/libvirt virtualization Node Agent/provider. No OS reinstall or replacement is claimed to work. The Docker provisioning endpoint explicitly rejects VPS/VDS requests.
+- The sync queue is persisted in MongoDB, but its scheduler/worker runs in the API process; it is not a separate queue service.
+- Application-specific health checks are not available for every image. Runtime version probes are limited to the fixed commands supported by the Node Agent.
+- Per-service SFTP account provisioning is not part of this Software & Version Manager implementation.
 
-
-## Re-enrolling an existing node after credential revocation
-
-When an Owner/Admin revokes a node credential, the Nodes page generates an installer command containing `--force-reenroll`. Run that command on the existing node. The installer stops the agent, removes only the saved agent token and node ID, preserves service data and the TLS certificate, installs the current agent binary, and starts it with the fresh single-use enrollment token. Do not use `--force-reenroll` for a routine binary refresh when the node credential has not been revoked.
+Do not use the existing destructive **Reinstall** action to change software. Software upgrades must use the Software tab's backup-and-upgrade workflow.

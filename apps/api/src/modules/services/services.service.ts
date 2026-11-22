@@ -25,6 +25,8 @@ export interface CreateServiceDto {
   softwareVersion?: string;
   subdomain?: string;
   expiresAt?: string;
+  versionProbe?: string;
+  expectedVersion?: string;
 }
 
 @Injectable()
@@ -55,6 +57,7 @@ export class ServicesService {
 
   async create(dto: CreateServiceDto, actor: AuthUser) {
     if (dto.ramMb <= 0 || dto.diskGb <= 0) throw new BadRequestException("Invalid resource limits");
+    if (["vps", "vds"].includes(String(dto.type ?? "").toLowerCase())) throw new BadRequestException("VPS/VDS provisioning is unavailable until a KVM/libvirt provider and virtualization Node Agent are installed and verified. This endpoint provisions Docker workloads only.");
     const customer = await this.users.findById(dto.ownerId);
     if (!customer || customer.role !== "customer" || customer.suspended || customer.deletedAt) throw new BadRequestException("Choose an active customer account");
     const node = await this.nodes.get(dto.nodeId);
@@ -82,8 +85,10 @@ export class ServicesService {
         diskGb: dto.diskGb,
         startupCommand: dto.startupCommand ?? [],
         env: dto.envVars ?? {},
-      }, "POST", 120_000) as { status?: string; containerId?: string; installedImage?: string; running?: boolean };
-      if (installed.status !== "online" || installed.running !== true || installed.installedImage !== dto.dockerImage || !installed.containerId) {
+        versionProbe: dto.versionProbe ?? "",
+        expectedVersion: dto.expectedVersion ?? "",
+      }, "POST", 120_000) as { status?: string; containerId?: string; installedImage?: string; running?: boolean; environmentVerified?: boolean; versionVerified?: boolean };
+      if (installed.status !== "online" || installed.running !== true || installed.installedImage !== dto.dockerImage || !installed.containerId || (dto.versionProbe && installed.versionVerified !== true) || (Object.keys(dto.envVars ?? {}).length > 0 && installed.environmentVerified !== true)) {
         throw new BadRequestException("Node Agent did not verify the newly installed container");
       }
       service.containerId = installed.containerId;

@@ -1,0 +1,14 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "python",
+  "label": "Python Application Hosting",
+  "subdomainPattern": "api-{username}",
+  "requiresPort": true,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "python313", "label": "Python 3.13", "image": "python:3.13-slim", "versions": ["3.13"], "minRamMb": 256 },
+    { "id": "python314", "label": "Python 3.14", "image": "python:3.14-slim", "versions": ["3.14"], "minRamMb": 256 }
+  ],
+  "features": ["console", "files", "env-vars", "github-deploy", "build-logs", "health-checks", "auto-restart", "backups", "custom-domains"],
+  "notes": "Uses official Python container images. Only approved image templates are available to customers."
+}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,56 @@ func (s *AgentServer) servicePath(serviceID string) (string, error) {
 	return dir, nil
 }
 
+func hasContainerEnvironment(entries []string, key, value string) bool {
+	for _, entry := range entries {
+		if entry == key+"="+value { return true }
+	}
+	return false
+}
+
+func minecraftLogHasVersion(logs, expected string) bool {
+	if expected == "" || len(expected) > 100 { return false }
+	for _, line := range strings.Split(logs, "\n") {
+		lower := strings.ToLower(line)
+		for _, prefix := range []string{"starting minecraft server version ", "loading minecraft "} {
+			index := strings.Index(lower, prefix)
+			if index < 0 { continue }
+			rest := strings.TrimSpace(line[index+len(prefix):])
+			fields := strings.Fields(rest)
+			if len(fields) == 0 { continue }
+			version := strings.Trim(fields[0], "\"'[](){}:,.")
+			if version == expected { return true }
+		}
+	}
+	return false
+}
+
+func versionOutputHasExpected(output, expected string) bool {
+	expected = strings.TrimSpace(strings.TrimPrefix(expected, "v"))
+	if expected == "" || len(expected) > 100 { return false }
+	pattern := regexp.MustCompile(`(?i)(?:^|[^0-9])v?` + regexp.QuoteMeta(expected) + `(?:$|[^0-9])`)
+	return pattern.MatchString(output)
+}
+
+func runContainerVersionProbe(container, probe string) (string, error) {
+	var command []string
+	switch probe {
+	case "nodejs-version": command = []string{"node", "--version"}
+	case "python-version":
+		output, err := docker("exec", container, "python", "--version")
+		if err == nil { return output, nil }
+		return docker("exec", container, "python3", "--version")
+	case "php-version": command = []string{"php", "--version"}
+	case "go-version": command = []string{"go", "version"}
+	case "java-version": command = []string{"java", "-version"}
+	case "dotnet-version": command = []string{"dotnet", "--version"}
+	case "mongodb-version": command = []string{"mongod", "--version"}
+	default: return "", fmt.Errorf("unsupported application version probe")
+	}
+	args := append([]string{"exec", container}, command...)
+	return docker(args...)
+}
+
 func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/") // services/<id>/<op>
 	if len(parts) != 3 {
@@ -89,6 +140,8 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		DiskGb         int      `json:"diskGb"`
 		StartupCommand []string `json:"startupCommand"`
 		Env            map[string]string `json:"env"`
+		VersionProbe string `json:"versionProbe"`
+		ExpectedVersion string `json:"expectedVersion"`
 		PreviousContainerName string `json:"previousContainerName"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
@@ -128,9 +181,35 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "new container failed image/running/health verification", http.StatusBadGateway)
 		return
 	}
+	environmentVerified := true
+	for key, value := range req.Env { if !hasContainerEnvironment(inspected[0].Config.Env, key, value) { environmentVerified = false; break } }
+	if !environmentVerified {
+		_, _ = docker("rm", "-f", "nimbus-"+serviceID)
+		http.Error(w, "new container environment verification failed", http.StatusBadGateway)
+		return
+	}
+	versionVerified := req.VersionProbe == ""
+	if req.VersionProbe == "minecraft-log" {
+		for attempt := 0; attempt < 30; attempt++ {
+			logs, logErr := docker("logs", "--tail", "500", "nimbus-"+serviceID)
+			if logErr == nil && minecraftLogHasVersion(logs, req.ExpectedVersion) { versionVerified = true; break }
+			time.Sleep(2 * time.Second)
+		}
+	} else if req.VersionProbe != "" {
+		for attempt := 0; attempt < 5; attempt++ {
+			output, probeErr := runContainerVersionProbe("nimbus-"+serviceID, req.VersionProbe)
+			if probeErr == nil && versionOutputHasExpected(output, req.ExpectedVersion) { versionVerified = true; break }
+			time.Sleep(2 * time.Second)
+		}
+	}
+	if !versionVerified {
+		_, _ = docker("rm", "-f", "nimbus-"+serviceID)
+		http.Error(w, "new container failed application version verification", http.StatusBadGateway)
+		return
+	}
 	healthStatus := "not-configured"
 	if inspected[0].State.Health != nil { healthStatus = inspected[0].State.Health.Status }
-	writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "healthStatus": healthStatus})
+	writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "healthStatus": healthStatus, "environmentVerified": environmentVerified, "versionVerified": versionVerified})
 	case "start":
 		_, err := docker("start", "nimbus-"+serviceID)
 		reply(w, err, map[string]string{"status": "online"})
@@ -193,8 +272,34 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "new container did not pass image/running verification; previous container restored", http.StatusBadGateway)
 			return
 		}
+		environmentVerified := true
+		for key, value := range req.Env { if !hasContainerEnvironment(inspected[0].Config.Env, key, value) { environmentVerified = false; break } }
+		if !environmentVerified {
+			if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "environment verification failed and rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }
+			http.Error(w, "new container environment did not match requested version settings; previous container restored", http.StatusBadGateway)
+			return
+		}
+		versionVerified := req.VersionProbe == ""
+		if req.VersionProbe == "minecraft-log" {
+			for attempt := 0; attempt < 30; attempt++ {
+				logs, logErr := docker("logs", "--tail", "500", oldName)
+				if logErr == nil && minecraftLogHasVersion(logs, req.ExpectedVersion) { versionVerified = true; break }
+				time.Sleep(2 * time.Second)
+			}
+		} else if req.VersionProbe != "" {
+			for attempt := 0; attempt < 5; attempt++ {
+				output, probeErr := runContainerVersionProbe(oldName, req.VersionProbe)
+				if probeErr == nil && versionOutputHasExpected(output, req.ExpectedVersion) { versionVerified = true; break }
+				time.Sleep(2 * time.Second)
+			}
+		}
+		if !versionVerified {
+			if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "application version verification failed and rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }
+			http.Error(w, "requested application version was not confirmed by the configured runtime probe; previous container restored", http.StatusBadGateway)
+			return
+		}
 		// Keep the previous stopped container until the API commits its database update.
-		writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "previousContainerName": previousName, "healthStatus": func() string { if inspected[0].State.Health == nil { return "not-configured" }; return inspected[0].State.Health.Status }()})
+		writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "environmentVerified": environmentVerified, "versionVerified": versionVerified, "previousContainerName": previousName, "healthStatus": func() string { if inspected[0].State.Health == nil { return "not-configured" }; return inspected[0].State.Health.Status }()})
 	case "upgrade-commit":
 		if !strings.HasPrefix(req.PreviousContainerName, "nimbus-prev-"+serviceID+"-") { http.Error(w, "invalid previous container reference", http.StatusBadRequest); return }
 		currentJSON, currentErr := docker("inspect", "nimbus-"+serviceID)

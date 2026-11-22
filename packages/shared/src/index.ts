@@ -20,7 +20,8 @@ export type ServiceType =
   | "mongodb"
   | "database"
   | "docker"
-  | "custom";
+  | "custom"
+  | "lavalink";
 
 export type ServiceStatus =
   | "online"
