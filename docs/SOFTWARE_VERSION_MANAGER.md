@@ -8,18 +8,27 @@ The currently implemented official-source adapters are:
 
 - **GitHub Releases** — release metadata from a configured public `owner/repository`.
 - **Node.js releases** — the official Node.js distribution index.
+- **Go releases** — the official `go.dev` distribution index, including Linux archive checksums and architecture metadata.
+- **MongoDB current releases** — MongoDB's official `current.json` feed, limited to Community (`targeted`) Linux packages, with per-platform URLs and SHA-256 metadata. This feed reports current releases per series, not every historical patch.
+- **PaperMC builds** — the official PaperMC Fill v3 API for a configured Minecraft version, including stable/experimental channel and download metadata.
+- **Purpur builds** — the official Purpur API for a configured Minecraft version, including build identifiers and direct release URLs.
+- **Minecraft versions** — Mojang's official version manifest, including release/snapshot classification and manifest metadata.
+- **Fabric-compatible game versions** — Fabric's official metadata API, including stable-version status.
+- **Forge promotions** — the official Forge promotions index, grouping `latest` and `recommended` builds by Minecraft version.
 - **Modrinth** — versions from a configured Modrinth project ID.
 - **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
 - **Manual** — fallback for software without an implemented source adapter.
 
-GitHub discovery follows up to five pages of 100 releases. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
+GitHub discovery follows up to 20 pages of 100 releases (up to 2,000 releases); if a source still has more data at that safety limit, discovery fails explicitly instead of silently returning a partial catalog. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
+
+Catalog metadata also supports an HTTPS official website, HTTPS logo URL, supported operating systems, supported architectures, required runtime, and default version. The supported-operating-system list is enforced against the selected node's registered OS before a customer software upgrade starts; if the node OS is unknown, the upgrade is rejected rather than guessing. Supported-architecture and required-runtime values remain descriptive metadata until the node agent reports those capabilities and a matching installer can verify them. Metadata does not itself install host packages or prove compatibility. Release pages show upstream source URLs, compatibility labels, and available SHA-256 values from the official Go and MongoDB feeds.
 
 ## Add a catalog entry
 
 1. Open **Admin → Software & Versions → Add Software**.
 2. Enter a unique lowercase identifier and a name.
 3. Enter service type values exactly as used by NIMBUS (for example `minecraft`, `discord`, `website`, `backend`, `database`, or `docker`).
-4. Select an implemented source adapter and fill its repository/project fields.
+4. Select an implemented source adapter and fill its repository/project fields. PaperMC and Purpur adapters additionally require the exact Minecraft version (for example `1.21.11`) whose server builds should be discovered.
 5. Optionally configure a Docker image template ending in `:{version}`, such as `example/application:{version}`. Use this only when the upstream project's published Docker tags actually match the version identifiers returned by the selected source. You may also supply installer environment overrides (for example `{"TYPE":"PAPER","EULA":"TRUE"}`); keys and values are validated and passed to the Node Agent, which merges them over the existing container environment.
 6. Choose auto-sync frequency and whether stable discoveries may be published automatically.
 7. Save the entry and select it in the catalog.
@@ -33,7 +42,7 @@ Do not configure an image template unless the image is trusted and the tag conve
 - Existing software/version pairs are detected by a unique database index and are not duplicated. Preview data expires after 24 hours.
 - New versions are pending approval by default.
 - If auto-publishing is enabled, only non-prerelease discoveries are published automatically. Prereleases remain pending.
-- Select individual versions to publish or disable them. The bulk actions support publishing, disabling, and deprecating selected versions.
+- Select individual versions to publish or disable them. The bulk actions support publishing, disabling, and deprecating selected versions. A version can be marked recommended only after it is published and is not deprecated; this is enforced by the API for both single and bulk actions.
 - Manual version entry remains available as a fallback and creates a pending version.
 - Existing versions are not deleted when a source request fails. Sync status and a bounded history are stored on the software record.
 
@@ -68,6 +77,10 @@ The current adapter is intentionally limited to Docker image-template upgrades. 
 Control-plane-to-agent requests now use the per-node enrollment credential encrypted at rest by the API. Nodes enrolled before this field was added do not yet have the encrypted credential. For those nodes, an Owner/Admin must use **Admin → Nodes → Revoke Credentials**, then run the newly generated node installer command on that node to re-enroll it before agent-backed operations will work.
 
 Never share enrollment tokens or node credentials in support tickets or public channels.
+
+## Regression smoke coverage
+
+The main API smoke suite now also checks Owner-only catalog access, manual version creation and HTTPS source validation, publish-before-recommend rules, customer service ownership for software options, rejection of software changes without a real installer, and backend rejection of customer VPS operating-system changes. These checks run in the existing CI integration job; source-adapter network behavior and real agent-backed upgrades still require dedicated tests.
 
 ## Security boundaries and current limitations
 

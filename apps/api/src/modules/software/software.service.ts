@@ -143,7 +143,14 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     await this.audit.log({ actorId: actor.id, action: "software.sync.retry_requested", targetType: "software", targetId: job.softwareId.toString(), detail: job._id.toString(), sensitive: true });
     return job;
   }
-  list() { return this.catalog.find().sort({ name: 1 }).lean(); }
+  async list(): Promise<unknown[]> {
+    const [rows, counts] = await Promise.all([
+      this.catalog.find().sort({ name: 1 }).populate("recommendedVersionId", "version").lean(),
+      this.versions.aggregate([{ $group: { _id: "$softwareId", count: { $sum: 1 } } }]),
+    ]);
+    const versionCounts = new Map<string, number>(counts.map((row: { _id: Types.ObjectId; count: number }): [string, number] => [row._id.toString(), row.count]));
+    return rows.map(row => ({ ...row, versionCount: versionCounts.get(row._id.toString()) ?? 0 }));
+  }
 
   listOperations() {
     return this.operations.find().sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("softwareId", "name identifier").lean();
@@ -170,12 +177,16 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length) throw new BadRequestException("Choose at least one supported service type");
     this.validateSource(input.sourceType ?? "manual", input.sourceConfig ?? {});
     this.validateInstallation(input.installationConfig ?? {});
+    this.validateCatalogMetadata(input);
     const createFrequency = input.syncFrequency ?? "manual";
     if (!["manual", "6h", "12h", "24h", "7d"].includes(createFrequency)) throw new BadRequestException("Invalid sync frequency");
     if (input.autoSync && createFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
     const software = await this.catalog.create({
       name: input.name.trim(), identifier: input.identifier, description: input.description ?? "",
-      category: input.category ?? "runtime", serviceTypes: [...new Set(input.serviceTypes)],
+      category: input.category ?? "runtime", logoUrl: input.logoUrl ?? "", officialUrl: input.officialUrl ?? "",
+      supportedOperatingSystems: input.supportedOperatingSystems ?? [], supportedArchitectures: input.supportedArchitectures ?? [],
+      requiredRuntime: input.requiredRuntime ?? "", defaultVersion: input.defaultVersion ?? "",
+      serviceTypes: [...new Set(input.serviceTypes)],
       sourceType: input.sourceType ?? "manual", sourceConfig: input.sourceConfig ?? {}, installationConfig: input.installationConfig ?? {},
       enabled: input.enabled ?? true, customerAvailable: input.customerAvailable ?? true,
       autoSync: input.autoSync ?? false, syncFrequency: input.syncFrequency ?? "manual",
@@ -190,12 +201,13 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!software) throw new NotFoundException("Software not found");
     if (input.sourceType || input.sourceConfig) this.validateSource(input.sourceType ?? software.sourceType, input.sourceConfig ?? software.sourceConfig);
     if (input.installationConfig) this.validateInstallation(input.installationConfig);
+    this.validateCatalogMetadata(input);
     const nextFrequency = input.syncFrequency ?? software.syncFrequency;
     const nextAutoSync = input.autoSync ?? software.autoSync;
     if (!["manual", "6h", "12h", "24h", "7d"].includes(nextFrequency)) throw new BadRequestException("Invalid sync frequency");
     if (nextAutoSync && nextFrequency === "manual") throw new BadRequestException("Choose a sync frequency when automatic sync is enabled");
     if (input.serviceTypes !== undefined && (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length || input.serviceTypes.some(value => typeof value !== "string" || !/^[a-z0-9_-]{2,32}$/.test(value)))) throw new BadRequestException("Choose valid service types");
-    const allowed = ["name", "description", "category", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
+    const allowed = ["name", "description", "category", "logoUrl", "officialUrl", "supportedOperatingSystems", "supportedArchitectures", "requiredRuntime", "defaultVersion", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
     for (const key of allowed) if (input[key] !== undefined) (software as any)[key] = input[key];
     await software.save();
     await this.audit.log({ actorId: actor.id, action: "software.updated", targetType: "software", targetId: id, sensitive: true });
@@ -231,6 +243,17 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   async addVersion(id: string, input: Partial<SoftwareVersion>, actor: AuthUser) {
     const software = await this.getSoftware(id);
     if (!input.version?.trim() || input.version.length > 100) throw new BadRequestException("A version identifier is required");
+    if (input.releaseName !== undefined && (typeof input.releaseName !== "string" || input.releaseName.length > 200)) throw new BadRequestException("Release name must be 200 characters or fewer");
+    if (input.channel !== undefined && !["stable", "beta", "alpha", "prerelease"].includes(input.channel)) throw new BadRequestException("Invalid release channel");
+    if (input.releaseDate !== undefined && Number.isNaN(new Date(String(input.releaseDate)).getTime())) throw new BadRequestException("Invalid release date");
+    if (input.sourceUrl) {
+      let source: URL;
+      try { source = new URL(input.sourceUrl); } catch { throw new BadRequestException("Invalid release source URL"); }
+      if (source.protocol !== "https:" || source.username || source.password) throw new BadRequestException("Release source must be an HTTPS URL");
+    }
+    if (input.compatibility !== undefined && (!Array.isArray(input.compatibility) || input.compatibility.length > 50 || input.compatibility.some(value => typeof value !== "string" || value.length > 100))) {
+      throw new BadRequestException("Invalid compatibility metadata");
+    }
     const existing = await this.versions.findOne({ softwareId: software._id, version: input.version.trim() });
     if (existing) throw new BadRequestException("That version already exists");
     const version = await this.versions.create({
@@ -343,7 +366,15 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     else if (action === "pending") update.publicationStatus = "pending";
     else if (action === "deprecate") update.deprecated = true;
     else if (action === "undeprecate") update.deprecated = false;
-    else if (action === "recommend" && ids.length === 1) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: ids[0] } }); update.recommended = true; }
+    else if (action === "recommend" && ids.length === 1) {
+      const candidate = await this.versions.findOne({ softwareId: id, _id: ids[0] }).select("publicationStatus deprecated").lean();
+      if (!candidate || candidate.publicationStatus !== "published" || candidate.deprecated) {
+        throw new BadRequestException("Only published, non-deprecated versions can be recommended");
+      }
+      await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } });
+      await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: ids[0] } });
+      update.recommended = true;
+    }
     else throw new BadRequestException("Unsupported bulk action");
     const result = await this.versions.updateMany({ softwareId: id, _id: { $in: ids } }, { $set: update });
     await this.audit.log({ actorId: actor.id, action: "software.versions.bulk_updated", targetType: "software", targetId: id, detail: "action=" + action + " modified=" + result.modifiedCount, sensitive: true });
@@ -354,7 +385,15 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");
     const version = await this.versions.findById(versionId);
     if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
-    if (input.recommended) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: version._id } }); }
+    if (input.recommended === true) {
+      const resultingPublicationStatus = input.publicationStatus ?? version.publicationStatus;
+      const resultingDeprecated = input.deprecated ?? version.deprecated;
+      if (resultingPublicationStatus !== "published" || resultingDeprecated) {
+        throw new BadRequestException("Only published, non-deprecated versions can be recommended");
+      }
+      await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } });
+      await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: version._id } });
+    }
     else if (input.recommended === false) await this.catalog.updateOne({ _id: id, recommendedVersionId: version._id }, { $set: { recommendedVersionId: null } });
     if (input.publicationStatus !== undefined) version.publicationStatus = input.publicationStatus;
     if (input.deprecated !== undefined) version.deprecated = input.deprecated;
@@ -397,6 +436,18 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const [software, version] = await Promise.all([this.catalog.findById(softwareId), this.versions.findOne({ _id: versionId, softwareId })]);
     if (!software || !version) throw new NotFoundException("Software or version not found");
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
+    if (software.supportedOperatingSystems?.length) {
+      const targetNode = await this.nodes.get(service.nodeId.toString());
+      const actualOs = String(targetNode.os ?? "").trim().toLowerCase();
+      if (!actualOs) throw new BadRequestException("The hosting node operating system is unknown, so this software's OS compatibility cannot be verified");
+      const supported = software.supportedOperatingSystems.map(value => value.trim().toLowerCase());
+      const matchesOs = supported.some(value => {
+        const normalized = value.replace(/[_-]/g, " ");
+        if (normalized === "linux") return ["linux", "ubuntu", "debian"].includes(actualOs);
+        return normalized === actualOs || normalized.startsWith(actualOs + " ") || actualOs.startsWith(normalized + " ");
+      });
+      if (!matchesOs) throw new BadRequestException("This software does not support the operating system installed on the selected hosting node");
+    }
     if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
     const template = software.installationConfig?.imageTemplate;
     if (software.installationConfig?.method !== "docker-image-template" || typeof template !== "string" || !template.includes("{version}")) throw new BadRequestException("This catalog entry has no verified installation adapter yet");
@@ -470,7 +521,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (["vps", "vds"].includes(service.type.toLowerCase())) return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: [] };
     const options = await this.catalog.find({ enabled: true, customerAvailable: true, serviceTypes: service.type }).lean();
     const output = await Promise.all(options.map(async (software) => ({
-      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && software.installationConfig.imageTemplate.includes("{version}") },
+      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, logoUrl: software.logoUrl, officialUrl: software.officialUrl, requiredRuntime: software.requiredRuntime, defaultVersion: software.defaultVersion, supportedOperatingSystems: software.supportedOperatingSystems, supportedArchitectures: software.supportedArchitectures, installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && software.installationConfig.imageTemplate.includes("{version}") },
       versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false }).sort({ recommended: -1, releaseDate: -1 }).lean(),
     })));
     return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: output };
@@ -481,6 +532,23 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const software = await this.catalog.findById(id);
     if (!software) throw new NotFoundException("Software not found");
     return software;
+  }
+
+  private validateCatalogMetadata(input: Partial<Software>) {
+    for (const [label, value] of [["official website", input.officialUrl], ["logo URL", input.logoUrl]] as const) {
+      if (value === undefined || value === "") continue;
+      let parsed: URL;
+      try { parsed = new URL(value); } catch { throw new BadRequestException("Invalid " + label + " URL"); }
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new BadRequestException(label + " must be a valid HTTPS URL");
+    }
+    for (const [label, values] of [["supported operating systems", input.supportedOperatingSystems], ["supported architectures", input.supportedArchitectures]] as const) {
+      if (values === undefined) continue;
+      if (!Array.isArray(values) || values.length > 30 || values.some(value => typeof value !== "string" || !/^[A-Za-z0-9._ -]{1,64}$/.test(value))) {
+        throw new BadRequestException("Invalid " + label);
+      }
+    }
+    if (input.requiredRuntime !== undefined && (typeof input.requiredRuntime !== "string" || input.requiredRuntime.length > 120)) throw new BadRequestException("Runtime requirement must be 120 characters or fewer");
+    if (input.defaultVersion !== undefined && (typeof input.defaultVersion !== "string" || input.defaultVersion.length > 100)) throw new BadRequestException("Default version must be 100 characters or fewer");
   }
 
   private validateInstallation(config: Record<string, unknown>) {
@@ -502,26 +570,41 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   private validateSource(type: string, config: Record<string, string>) {
     if (type === "github-releases" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("GitHub source requires an owner/repository");
     if (type === "modrinth" && !/^[A-Za-z0-9_-]{1,64}$/.test(config.projectId ?? "")) throw new BadRequestException("Modrinth source requires a project ID");
+    if (["papermc-v3", "purpur-api"].includes(type) && !/^\d+\.\d+(?:\.\d+)?$/.test(config.minecraftVersion ?? "")) {
+      throw new BadRequestException("Minecraft build sources require a valid Minecraft version such as 1.21.11");
+    }
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
-    if (!["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "nodejs-index", "go-index", "mongodb-current", "papermc-v3", "purpur-api", "mojang-manifest", "fabric-meta", "forge-promotions", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
     if (software.sourceType === "github-releases") {
       const repo = software.sourceConfig.repository;
       const results: DiscoveredVersion[] = [];
-      for (let page = 1; page <= 5; page++) {
+      // GitHub's releases endpoint is page-based. Read a bounded number of
+      // pages so large projects are not silently truncated at the first 500
+      // releases, while keeping a single sync job within a predictable budget.
+      const maxPages = 20;
+      for (let page = 1; page <= maxPages; page++) {
         const response = await axios.get(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`, {
-          timeout: 15000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" },
+          timeout: 20000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" },
         });
+        if (!Array.isArray(response.data)) throw new BadRequestException("GitHub returned an invalid releases response");
         const rows = response.data as any[];
-        for (const release of rows.filter((item: any) => !item.draft)) results.push({
-          version: String(release.tag_name ?? ""), releaseName: String(release.name ?? ""),
-          releaseDate: release.published_at, prerelease: !!release.prerelease,
-          sourceUrl: String(release.html_url ?? ""), sourceId: String(release.id ?? ""),
-          metadata: { draft: !!release.draft },
-        });
-        if (rows.length < 100) break;
+        for (const release of rows.filter((item: any) => !item.draft)) {
+          const tag = typeof release.tag_name === "string" ? release.tag_name.trim() : "";
+          if (!tag || tag.length > 100) continue;
+          results.push({
+            version: tag, releaseName: String(release.name ?? ""),
+            releaseDate: release.published_at, prerelease: !!release.prerelease,
+            sourceUrl: String(release.html_url ?? ""), sourceId: String(release.id ?? ""),
+            metadata: { draft: !!release.draft, targetCommitish: String(release.target_commitish ?? "") },
+          });
+        }
+        if (rows.length < 100) return results;
+        if (page === maxPages) {
+          throw new BadRequestException("GitHub release discovery reached its 2,000-release safety limit. Narrow the source repository or use a dedicated release feed.");
+        }
       }
       return results;
     }
@@ -532,6 +615,190 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         sourceUrl: `https://nodejs.org/dist/${String(row.version ?? "").replace(/^v/, "")}/`,
         metadata: { lts: row.lts || false, npm: row.npm, v8: row.v8 },
       }));
+    }
+    if (software.sourceType === "go-index") {
+      // Official Go distribution metadata includes checksums and per-platform
+      // archives. Keep the full platform matrix in metadata so the admin can
+      // review architecture support without guessing from a version string.
+      const response = await axios.get("https://go.dev/dl/?mode=json&include=all", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager" },
+      });
+      if (!Array.isArray(response.data)) throw new BadRequestException("Go returned an invalid release index");
+      return (response.data as any[]).filter(row => typeof row.version === "string" && /^go[0-9]+\.[0-9]+(?:\.[0-9]+)?$/.test(row.version)).map(row => {
+        const files = Array.isArray(row.files) ? row.files : [];
+        const linuxArchives = files.filter((file: any) => file.os === "linux" && file.kind === "archive");
+        const supportedArchitectures = [...new Set<string>(linuxArchives.map((file: any) => String(file.arch ?? "")).filter(Boolean))];
+        const linuxAmd64 = linuxArchives.find((file: any) => file.arch === "amd64");
+        return {
+          version: row.version.replace(/^go/, ""),
+          releaseName: row.version,
+          prerelease: row.stable === false,
+          sourceUrl: linuxAmd64 ? "https://go.dev/dl/" + linuxAmd64.filename : "https://go.dev/dl/" + row.version + ".src.tar.gz",
+          sourceId: row.version,
+          compatibility: supportedArchitectures,
+          metadata: {
+            stable: row.stable === true,
+            architectures: supportedArchitectures,
+            files: files.filter((file: any) => file.os === "linux" && file.kind === "archive").map((file: any) => ({
+              filename: String(file.filename ?? ""), architecture: String(file.arch ?? ""),
+              sha256: String(file.sha256 ?? ""), size: Number(file.size ?? 0),
+            })),
+          },
+        } as DiscoveredVersion;
+      });
+    }
+    if (software.sourceType === "mojang-manifest") {
+      const response = await axios.get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      const rows = response.data?.versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("Mojang returned an invalid version manifest");
+      return rows.filter(row => typeof row.id === "string" && row.id.length <= 100).map(row => ({
+        version: row.id,
+        releaseName: "Minecraft " + row.id,
+        releaseDate: row.releaseTime,
+        prerelease: row.type !== "release",
+        sourceUrl: typeof row.url === "string" && row.url.startsWith("https://piston-meta.mojang.com/") ? row.url : "https://www.minecraft.net/",
+        sourceId: row.id,
+        compatibility: [row.id],
+        metadata: { type: String(row.type ?? "unknown"), complianceLevel: Number(row.complianceLevel ?? 0) },
+      }));
+    }
+    if (software.sourceType === "forge-promotions") {
+      const response = await axios.get("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      const promos = response.data?.promos;
+      if (!promos || typeof promos !== "object" || Array.isArray(promos)) throw new BadRequestException("Forge returned an invalid promotions index");
+      const grouped = new Map<string, { minecraftVersion: string; forgeVersion: string; promotions: Set<string> }>();
+      for (const [key, value] of Object.entries(promos as Record<string, unknown>)) {
+        const separator = key.lastIndexOf("-");
+        if (separator <= 0 || !["latest", "recommended"].includes(key.slice(separator + 1))) continue;
+        const minecraftVersion = key.slice(0, separator);
+        const forgeVersion = String(value ?? "");
+        if (!/^\d+\.\d+(?:\.\d+)?$/.test(minecraftVersion) || !/^\d+\.\d+(?:\.\d+)?$/.test(forgeVersion)) continue;
+        const id = minecraftVersion + "-" + forgeVersion;
+        const item = grouped.get(id) ?? { minecraftVersion, forgeVersion, promotions: new Set<string>() };
+        item.promotions.add(key.slice(separator + 1));
+        grouped.set(id, item);
+      }
+      return [...grouped.values()].map(item => {
+        const id = item.minecraftVersion + "-" + item.forgeVersion;
+        return {
+          version: id,
+          releaseName: "Forge " + item.minecraftVersion + " build " + item.forgeVersion,
+          prerelease: false,
+          sourceUrl: "https://maven.minecraftforge.net/net/minecraftforge/forge/" + id + "/forge-" + id + "-installer.jar",
+          sourceId: id,
+          compatibility: [item.minecraftVersion],
+          metadata: { minecraftVersion: item.minecraftVersion, forgeVersion: item.forgeVersion, promotions: [...item.promotions] },
+        } as DiscoveredVersion;
+      });
+    }
+    if (software.sourceType === "fabric-meta") {
+      const response = await axios.get("https://meta.fabricmc.net/v2/versions/game", {
+        timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" },
+      });
+      if (!Array.isArray(response.data)) throw new BadRequestException("Fabric returned an invalid game-version list");
+      return response.data.filter(row => typeof row.version === "string" && row.version.length <= 100).map(row => ({
+        version: row.version,
+        releaseName: "Fabric-compatible Minecraft " + row.version,
+        prerelease: row.stable !== true,
+        sourceUrl: "https://meta.fabricmc.net/v2/versions/game",
+        sourceId: row.version,
+        compatibility: [row.version],
+        metadata: { stable: row.stable === true },
+      }));
+    }
+    if (software.sourceType === "papermc-v3") {
+      const minecraftVersion = software.sourceConfig.minecraftVersion;
+      const response = await axios.get(
+        "https://fill.papermc.io/v3/projects/paper/versions/" + encodeURIComponent(minecraftVersion) + "/builds",
+        { timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" } },
+      );
+      if (!Array.isArray(response.data)) throw new BadRequestException("PaperMC returned an invalid build list");
+      return (response.data as any[]).map(build => {
+        const buildId = String(build.id ?? "");
+        const download = build.downloads?.["server:default"];
+        if (!/^\d+$/.test(buildId) || typeof download?.url !== "string" || !download.url.startsWith("https://")) return null;
+        return {
+          version: minecraftVersion + "-" + buildId,
+          releaseName: "Paper " + minecraftVersion + " build " + buildId,
+          releaseDate: build.time ?? build.createdAt,
+          prerelease: String(build.channel ?? "").toUpperCase() !== "STABLE",
+          sourceUrl: download.url,
+          sourceId: buildId,
+          compatibility: [minecraftVersion],
+          metadata: {
+            minecraftVersion, build: buildId, channel: String(build.channel ?? "UNKNOWN"),
+            checksums: download?.checksums ?? {},
+          },
+        } as DiscoveredVersion;
+      }).filter((item): item is DiscoveredVersion => item !== null);
+    }
+    if (software.sourceType === "purpur-api") {
+      const minecraftVersion = software.sourceConfig.minecraftVersion;
+      const response = await axios.get(
+        "https://api.purpurmc.org/v2/purpur/" + encodeURIComponent(minecraftVersion),
+        { timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" } },
+      );
+      const builds = response.data?.builds?.all;
+      if (!Array.isArray(builds)) throw new BadRequestException("Purpur returned an invalid build list");
+      const latest = String(response.data?.builds?.latest ?? "");
+      return builds.filter((value: unknown) => /^\d+$/.test(String(value))).map((value: unknown) => {
+        const buildId = String(value);
+        return {
+          version: minecraftVersion + "-" + buildId,
+          releaseName: "Purpur " + minecraftVersion + " build " + buildId,
+          prerelease: false,
+          sourceUrl: "https://api.purpurmc.org/v2/purpur/" + encodeURIComponent(minecraftVersion) + "/" + buildId + "/download",
+          sourceId: buildId,
+          compatibility: [minecraftVersion],
+          metadata: { minecraftVersion, build: buildId, latest: buildId === latest },
+        } as DiscoveredVersion;
+      });
+    }
+    if (software.sourceType === "mongodb-current") {
+      // MongoDB's official current.json feed lists the current supported
+      // release for each series. Keep Community (targeted) Linux packages only;
+      // never mix Enterprise builds into a customer-facing catalog.
+      const response = await axios.get("https://downloads.mongodb.org/current.json", {
+        timeout: 30000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager" },
+      });
+      const rows = (response.data as { versions?: any[] })?.versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("MongoDB returned an invalid current release index");
+      return rows
+        .filter(row => typeof row.version === "string" && /^\d+\.\d+\.\d+$/.test(row.version))
+        .map(row => {
+          const packages = (Array.isArray(row.downloads) ? row.downloads : []).filter((download: any) =>
+            download.edition === "targeted" &&
+            /^(ubuntu|debian)/.test(String(download.target ?? "")) &&
+            ["x86_64", "aarch64"].includes(String(download.arch ?? "")) &&
+            typeof download.archive?.url === "string" &&
+            download.archive.url.startsWith("https://fastdl.mongodb.org/"),
+          );
+          if (!packages.length) return null;
+          const preferred = packages.find((download: any) => download.target === "ubuntu2404" && download.arch === "x86_64")
+            ?? packages.find((download: any) => download.arch === "x86_64")
+            ?? packages[0];
+          return {
+            version: row.version,
+            releaseName: "MongoDB " + row.version,
+            releaseDate: row.date ? new Date(row.date).toISOString() : undefined,
+            prerelease: row.development_release === true,
+            sourceUrl: preferred.archive.url,
+            sourceId: row.version,
+            compatibility: [...new Set<string>(packages.map((download: any) => String(download.target) + "/" + String(download.arch)))],
+            metadata: {
+              developmentRelease: row.development_release === true,
+              platforms: packages.map((download: any) => ({
+                target: String(download.target), architecture: String(download.arch),
+                url: String(download.archive.url), sha256: String(download.archive.sha256 ?? ""),
+              })),
+            },
+          } as DiscoveredVersion;
+        })
+        .filter((item): item is DiscoveredVersion => item !== null);
     }
     if (software.sourceType === "dockerhub-tags") {
       const repository = software.sourceConfig.repository;

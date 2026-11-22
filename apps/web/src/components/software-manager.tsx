@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { GlassCard, useToast } from "@/components/glass";
 
-type VersionOption = { _id: string; version: string; releaseName?: string; recommended?: boolean; prerelease?: boolean; publicationStatus: string };
-type SoftwareOption = { software: { id: string; name: string; identifier: string; description: string; category: string; installable: boolean }; versions: VersionOption[] };
+type VersionOption = { _id: string; version: string; releaseName?: string; releaseDate?: string; recommended?: boolean; prerelease?: boolean; publicationStatus: string; compatibility?: string[]; sourceUrl?: string };
+type SoftwareOption = { software: { id: string; name: string; identifier: string; description: string; category: string; logoUrl?: string; officialUrl?: string; requiredRuntime?: string; defaultVersion?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; installable: boolean }; versions: VersionOption[] };
 type OptionsResponse = { serviceType: string; currentSoftware: string | null; currentVersion: string | null; options: SoftwareOption[] };
 type Operation = { _id: string; requestedSoftware: string; requestedVersion: string; previousSoftware: string; previousVersion: string; status: string; progress: number; error?: string; warning?: string; createdAt: string; completedAt?: string };
 
@@ -78,6 +78,14 @@ export function SoftwareManager({ serviceId, serviceType }: { serviceId: string;
               </select>
             </label>
           </div>
+          {selected ? <div className="mt-3 rounded-lg border border-white/10 p-3 text-xs text-muted">
+            <p>{selected.software.requiredRuntime ? "Required runtime: " + selected.software.requiredRuntime : "Runtime requirements not specified"}</p>
+            {selected.software.supportedOperatingSystems?.length ? <p className="mt-1">Operating systems: {selected.software.supportedOperatingSystems.join(", ")}</p> : null}
+            {selected.software.supportedArchitectures?.length ? <p className="mt-1">Architectures: {selected.software.supportedArchitectures.join(", ")}</p> : null}
+            {selected.software.officialUrl ? <a className="mt-1 inline-block text-cyan-300 hover:underline" href={selected.software.officialUrl} target="_blank" rel="noreferrer">Official software website</a> : null}
+            {selected.versions.find(version => version._id === versionId)?.compatibility?.length ? <p className="mt-1">Selected release compatibility: {selected.versions.find(version => version._id === versionId)?.compatibility?.join(", ")}</p> : null}
+            {selected.versions.find(version => version._id === versionId)?.releaseDate ? <p className="mt-1">Release date: {new Date(selected.versions.find(version => version._id === versionId)!.releaseDate!).toLocaleDateString()}</p> : null}
+          </div> : null}
           <button className="btn-primary mt-4" disabled={busy || !selected?.software.installable || !versionId} onClick={() => void change()}>{busy ? "Backing up and upgrading…" : "Back up & change version"}</button>
           {!data?.options.some(item => item.software.installable && item.versions.length) && <p className="mt-3 text-xs text-muted">No installable software versions have been published for this service type yet.</p>}
         </>

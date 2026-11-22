@@ -7,12 +7,28 @@ import { GlassCard, useToast } from "@/components/glass";
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
   serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>;
+  logoUrl?: string; officialUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
+  versionCount?: number; recommendedVersionId?: { version?: string } | string | null;
+  installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string> };
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
-type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
-type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
+type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; sourceUrl?: string; compatibility?: string[]; metadata?: Record<string, unknown> };
+type PreviewRow = { version: string; releaseName?: string; releaseDate?: string; sourceUrl?: string; compatibility?: string[]; prerelease?: boolean; alreadyImported: boolean };
 type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: string } | string; status: string; attempts: number; maxAttempts: number; runAt: string; lastError?: string; discovered?: number; imported?: number; failed?: number };
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
+
+function versionChecksum(metadata?: Record<string, unknown>): string | undefined {
+  const checksums = metadata?.checksums && typeof metadata.checksums === "object"
+    ? metadata.checksums as Record<string, unknown>
+    : {};
+  if (typeof checksums.sha256 === "string" && checksums.sha256.length > 0) return checksums.sha256;
+  const entries = [
+    ...(Array.isArray(metadata?.files) ? metadata.files : []),
+    ...(Array.isArray(metadata?.platforms) ? metadata.platforms : []),
+  ] as Array<Record<string, unknown>>;
+  const value = entries.find(entry => typeof entry.sha256 === "string" && entry.sha256.length > 0)?.sha256;
+  return typeof value === "string" ? value : undefined;
+}
 
 export default function AdminSoftwarePage() {
   const [items, setItems] = useState<SoftwareRow[]>([]);
@@ -57,10 +73,13 @@ export default function AdminSoftwarePage() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const serviceTypes = String(data.get("serviceTypes") ?? "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
+    const supportedOperatingSystems = String(data.get("supportedOperatingSystems") ?? "").split(",").map(v => v.trim()).filter(Boolean);
+    const supportedArchitectures = String(data.get("supportedArchitectures") ?? "").split(",").map(v => v.trim()).filter(Boolean);
     const sourceType = String(data.get("sourceType") ?? "manual");
     const sourceConfig: Record<string, string> = {};
     if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
     if (sourceType === "modrinth") sourceConfig.projectId = String(data.get("projectId") ?? "").trim();
+    if (sourceType === "papermc-v3" || sourceType === "purpur-api") sourceConfig.minecraftVersion = String(data.get("minecraftVersion") ?? "").trim();
     const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
     const environment: Record<string, string> = {};
     for (const line of String(data.get("environment") ?? "").split(/\r?\n/)) {
@@ -74,6 +93,9 @@ export default function AdminSoftwarePage() {
       await api.post("/software", {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
+        logoUrl: String(data.get("logoUrl") ?? "").trim(), officialUrl: String(data.get("officialUrl") ?? "").trim(),
+        supportedOperatingSystems, supportedArchitectures,
+        requiredRuntime: String(data.get("requiredRuntime") ?? "").trim(), defaultVersion: String(data.get("defaultVersion") ?? "").trim(),
         enabled: true, customerAvailable: true, autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
         installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate, environment } : {},
@@ -128,9 +150,59 @@ export default function AdminSoftwarePage() {
     if (name === null || !name.trim()) return;
     const description = window.prompt("Description", selected.description ?? "");
     if (description === null) return;
+    const officialUrl = window.prompt("Official website URL (HTTPS)", selected.officialUrl ?? "");
+    if (officialUrl === null) return;
+    const logoUrl = window.prompt("Logo URL (HTTPS)", selected.logoUrl ?? "");
+    if (logoUrl === null) return;
+    const requiredRuntime = window.prompt("Required runtime", selected.requiredRuntime ?? "");
+    if (requiredRuntime === null) return;
+    const defaultVersion = window.prompt("Default version", selected.defaultVersion ?? "");
+    if (defaultVersion === null) return;
+    const supportedOperatingSystems = window.prompt("Supported operating systems (comma-separated)", (selected.supportedOperatingSystems ?? []).join(", "));
+    if (supportedOperatingSystems === null) return;
+    const supportedArchitectures = window.prompt("Supported architectures (comma-separated)", (selected.supportedArchitectures ?? []).join(", "));
+    if (supportedArchitectures === null) return;
+    const sourceType = window.prompt("Source adapter (manual, github-releases, nodejs-index, go-index, mongodb-current, papermc-v3, purpur-api, mojang-manifest, fabric-meta, forge-promotions, modrinth, dockerhub-tags)", selected.sourceType);
+    if (sourceType === null) return;
+    const sourceConfig: Record<string, string> = {};
+    if (sourceType === "github-releases" || sourceType === "dockerhub-tags") {
+      const repository = window.prompt("Source repository (owner/repository)", selected.sourceConfig?.repository ?? "");
+      if (repository === null) return;
+      sourceConfig.repository = repository.trim();
+    } else if (sourceType === "modrinth") {
+      const projectId = window.prompt("Modrinth project ID", selected.sourceConfig?.projectId ?? "");
+      if (projectId === null) return;
+      sourceConfig.projectId = projectId.trim();
+    } else if (sourceType === "papermc-v3" || sourceType === "purpur-api") {
+      const minecraftVersion = window.prompt("Minecraft version", selected.sourceConfig?.minecraftVersion ?? "");
+      if (minecraftVersion === null) return;
+      sourceConfig.minecraftVersion = minecraftVersion.trim();
+    }
+    const imageTemplate = window.prompt("Docker image template ending in :{version} (blank disables the installer)", selected.installationConfig?.imageTemplate ?? "");
+    if (imageTemplate === null) return;
+    const environmentText = window.prompt("Installer environment overrides (KEY=VALUE, one per line)", Object.entries(selected.installationConfig?.environment ?? {}).map(([key, value]) => key + "=" + value).join("\n"));
+    if (environmentText === null) return;
+    const environment: Record<string, string> = {};
+    for (const line of environmentText.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const separator = trimmed.indexOf("=");
+      if (separator <= 0) { show("Environment entries must use KEY=VALUE.", "err"); return; }
+      environment[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1);
+    }
+    const installationConfig = imageTemplate.trim()
+      ? { method: "docker-image-template", imageTemplate: imageTemplate.trim(), environment }
+      : {};
+    const metadata = {
+      name: name.trim(), description, officialUrl: officialUrl.trim(), logoUrl: logoUrl.trim(),
+      requiredRuntime: requiredRuntime.trim(), defaultVersion: defaultVersion.trim(),
+      supportedOperatingSystems: supportedOperatingSystems.split(",").map(value => value.trim()).filter(Boolean),
+      supportedArchitectures: supportedArchitectures.split(",").map(value => value.trim()).filter(Boolean),
+      sourceType, sourceConfig, installationConfig,
+    };
     try {
-      await api.patch("/software/" + selected._id, { name: name.trim(), description });
-      const updated = { ...selected, name: name.trim(), description };
+      await api.patch("/software/" + selected._id, metadata);
+      const updated = { ...selected, ...metadata };
       setSelected(updated); setItems(current => current.map(item => item._id === updated._id ? updated : item));
       show("Software details updated", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Could not update software", "err"); }
@@ -158,8 +230,19 @@ export default function AdminSoftwarePage() {
   const addManualVersion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || !manualVersion.trim()) return;
+    const data = new FormData(event.currentTarget);
+    const compatibility = String(data.get("compatibility") ?? "").split(",").map(value => value.trim()).filter(Boolean);
+    const releaseDate = String(data.get("releaseDate") ?? "").trim();
     try {
-      await api.post("/software/" + selected._id + "/versions", { version: manualVersion.trim() });
+      await api.post("/software/" + selected._id + "/versions", {
+        version: manualVersion.trim(),
+        releaseName: String(data.get("releaseName") ?? "").trim(),
+        releaseDate: releaseDate || undefined,
+        channel: String(data.get("channel") ?? "stable"),
+        prerelease: data.get("prerelease") === "on",
+        sourceUrl: String(data.get("sourceUrl") ?? "").trim(),
+        compatibility,
+      });
       setManualVersion(""); await openSoftware(selected); show("Version added as pending approval", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Could not add version", "err"); }
   };
@@ -191,9 +274,16 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">Identifier<input name="identifier" required pattern="[a-z0-9][a-z0-9._-]{1,63}" className="input w-full" placeholder="nodejs" /></label>
         <label className="space-y-1 text-sm">Category<input name="category" className="input w-full" defaultValue="runtime" /></label>
         <label className="space-y-1 text-sm">Service types<input name="serviceTypes" required className="input w-full" placeholder="discord,website,backend" /></label>
-        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
+        <label className="space-y-1 text-sm">Official website (HTTPS)<input name="officialUrl" type="url" className="input w-full" placeholder="https://example.com" /></label>
+        <label className="space-y-1 text-sm">Logo URL (HTTPS)<input name="logoUrl" type="url" className="input w-full" placeholder="https://example.com/logo.png" /></label>
+        <label className="space-y-1 text-sm">Required runtime<input name="requiredRuntime" className="input w-full" placeholder="Java 21 / Node.js 22" /></label>
+        <label className="space-y-1 text-sm">Default version<input name="defaultVersion" className="input w-full" placeholder="Optional" /></label>
+        <label className="space-y-1 text-sm">Supported operating systems<input name="supportedOperatingSystems" className="input w-full" placeholder="linux,windows" /></label>
+        <label className="space-y-1 text-sm">Supported architectures<input name="supportedArchitectures" className="input w-full" placeholder="amd64,arm64" /></label>
+        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="go-index">Official Go releases</option><option value="mongodb-current">Official MongoDB current releases</option><option value="papermc-v3">PaperMC builds (v3)</option><option value="purpur-api">Purpur builds</option><option value="mojang-manifest">Official Minecraft versions</option><option value="fabric-meta">Fabric-compatible game versions</option><option value="forge-promotions">Official Forge promotions</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
         <label className="space-y-1 text-sm">GitHub / Docker Hub repository<input name="repository" className="input w-full" placeholder="owner/repository or namespace/repository" /></label>
         <label className="space-y-1 text-sm">Modrinth project ID<input name="projectId" className="input w-full" /></label>
+        <label className="space-y-1 text-sm">Minecraft version for Paper/Purpur<input name="minecraftVersion" className="input w-full" placeholder="1.21.11" /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Docker image template (optional)<input name="imageTemplate" className="input w-full" placeholder="itzg/minecraft-server:{version}" /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" /></label>
@@ -206,7 +296,7 @@ export default function AdminSoftwarePage() {
         <div className="border-b border-white/10 px-5 py-4 font-semibold">Catalog</div>
         {items.map(item => <button key={item._id} onClick={() => void openSoftware(item)} className={`block w-full border-b border-white/5 px-5 py-4 text-left hover:bg-white/5 ${selected?._id === item._id ? "bg-white/5" : ""}`}>
           <span className="flex items-center justify-between gap-2"><strong>{item.name}</strong><span className="text-xs text-muted">{item.enabled ? "Enabled" : "Disabled"}</span></span>
-          <span className="mt-1 block text-xs text-muted">{item.identifier} · {item.serviceTypes.join(", ")}</span>
+          <span className="mt-1 block text-xs text-muted">{item.identifier} · {item.serviceTypes.join(", ")}</span><span className="mt-1 block text-[11px] text-muted">{item.versionCount ?? 0} versions · Recommended: {typeof item.recommendedVersionId === "object" ? item.recommendedVersionId?.version ?? "Not set" : "Not set"}</span>
         </button>)}
         {!items.length && <p className="p-5 text-sm text-muted">No software entries yet.</p>}
       </GlassCard>
@@ -218,13 +308,20 @@ export default function AdminSoftwarePage() {
             <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
               {preview.map(item => <label key={item.version} className="flex items-center gap-2 text-xs">
                 <input type="checkbox" checked={selectedPreview.includes(item.version)} disabled={item.alreadyImported} onChange={e => setSelectedPreview(current => e.target.checked ? [...current, item.version] : current.filter(version => version !== item.version))} />
-                <span className="font-mono">{item.version}</span><span className="text-muted">{item.releaseName ?? ""} {item.prerelease ? "· Prerelease" : ""}</span>{item.alreadyImported ? <span className="ml-auto text-muted">Already imported</span> : null}
+                <span className="font-mono">{item.version}</span><span className="min-w-0 flex-1 text-muted">{item.releaseName ?? ""}{item.releaseDate ? " · " + new Date(item.releaseDate).toLocaleDateString() : ""}{item.prerelease ? " · Prerelease" : ""}{item.compatibility?.length ? " · " + item.compatibility.slice(0, 4).join(", ") : ""}</span>{item.sourceUrl ? <a className="text-cyan-300 hover:underline" href={item.sourceUrl} target="_blank" rel="noreferrer">Source</a> : null}{item.alreadyImported ? <span className="ml-auto text-muted">Already imported</span> : null}
               </label>)}
             </div>
           </div>}
-          <form onSubmit={addManualVersion} className="mt-4 flex gap-2">
-            <input className="input min-w-0 flex-1" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Add version manually" aria-label="Version number" />
-            <button className="btn-ghost" type="submit">Add version</button>
+          <form onSubmit={addManualVersion} className="mt-4 grid gap-2 rounded-lg border border-white/10 p-3 sm:grid-cols-2">
+            <strong className="text-sm sm:col-span-2">Add version manually</strong>
+            <input name="version" required className="input min-w-0" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Version identifier" aria-label="Version number" />
+            <input name="releaseName" className="input min-w-0" placeholder="Release name (optional)" />
+            <input name="releaseDate" type="date" className="input min-w-0" aria-label="Release date" />
+            <select name="channel" className="input min-w-0" defaultValue="stable"><option value="stable">Stable</option><option value="beta">Beta</option><option value="alpha">Alpha</option><option value="prerelease">Prerelease</option></select>
+            <input name="sourceUrl" type="url" className="input min-w-0 sm:col-span-2" placeholder="Official release URL (HTTPS)" />
+            <input name="compatibility" className="input min-w-0 sm:col-span-2" placeholder="Compatibility labels (comma-separated)" />
+            <label className="flex items-center gap-2 text-xs text-muted"><input name="prerelease" type="checkbox" /> Mark as prerelease</label>
+            <button className="btn-ghost sm:justify-self-end" type="submit">Add pending version</button>
           </form>
           {selectedVersionIds.length > 0 && <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-white/10 p-3">
             <span className="self-center text-xs text-muted">{selectedVersionIds.length} selected</span>
@@ -244,7 +341,7 @@ export default function AdminSoftwarePage() {
           <div className="mt-4 space-y-2">
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
               <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />
-              <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p></div>
+              <div className="min-w-0"><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.releaseDate ? new Date(version.releaseDate).toLocaleDateString() + " · " : ""}{version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p>{version.compatibility?.length ? <p className="mt-1 text-[11px] text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}{versionChecksum(version.metadata) ? <p className="mt-1 break-all text-[11px] text-muted">SHA-256: {versionChecksum(version.metadata)}</p> : null}{version.sourceUrl ? <a className="mt-1 inline-block text-[11px] text-cyan-300 hover:underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}</div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
             {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually through the API.</p>}
