@@ -399,7 +399,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
     if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
     const template = software.installationConfig?.imageTemplate;
-    if (software.installationConfig?.method !== "docker-image-template" || !template?.includes("{version}")) throw new BadRequestException("This catalog entry has no verified installation adapter yet");
+    if (software.installationConfig?.method !== "docker-image-template" || typeof template !== "string" || !template.includes("{version}")) throw new BadRequestException("This catalog entry has no verified installation adapter yet");
     const safeVersion = version.version.replace(/[^A-Za-z0-9_.-]/g, "");
     if (!safeVersion || safeVersion !== version.version) throw new BadRequestException("The selected version cannot be safely used as a container tag");
     const dockerImage = template.replaceAll("{version}", safeVersion);
@@ -470,7 +470,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (["vps", "vds"].includes(service.type.toLowerCase())) return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: [] };
     const options = await this.catalog.find({ enabled: true, customerAvailable: true, serviceTypes: service.type }).lean();
     const output = await Promise.all(options.map(async (software) => ({
-      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, installable: software.installationConfig?.method === "docker-image-template" && !!software.installationConfig?.imageTemplate?.includes("{version}") },
+      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && software.installationConfig.imageTemplate.includes("{version}") },
       versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false }).sort({ recommended: -1, releaseDate: -1 }).lean(),
     })));
     return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: output };
