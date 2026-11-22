@@ -64,7 +64,8 @@ func runUpgradeRequest(t *testing.T, server *AgentServer) *httptest.ResponseReco
 
 func TestSoftwareUpgradePullsAndVerifiesReplacement(t *testing.T) {
 	logPath := installFakeDocker(t)
-	server := NewAgentServer(&Config{DataDir: t.TempDir(), AgentToken: "test-token", NodeID: "node-test"})
+	dataDir := t.TempDir()
+	server := NewAgentServer(&Config{DataDir: dataDir, AgentToken: "test-token", NodeID: "node-test"})
 	rec := runUpgradeRequest(t, server)
 	if rec.Code != http.StatusOK { t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String()) }
 	var result map[string]any
@@ -80,6 +81,10 @@ func TestSoftwareUpgradePullsAndVerifiesReplacement(t *testing.T) {
 	}
 	if !strings.Contains(commands, "rm nimbus-prev-") {
 		t.Fatalf("expected old container cleanup after verification; commands: %s", commands)
+	}
+	expectedMount := "-v " + filepath.Join(dataDir, "services", "svc-test") + ":/data"
+	if !strings.Contains(commands, expectedMount) {
+		t.Fatalf("expected existing service data directory to be reused; commands: %s", commands)
 	}
 }
 
