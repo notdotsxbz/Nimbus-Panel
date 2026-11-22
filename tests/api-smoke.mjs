@@ -375,7 +375,7 @@ async function call(path, { method = "GET", token, body } = {}) {
     { name: "Forge source", identifier: "smoke-forge-" + suffix, sourceType: "forge-maven", sourceConfig: {} },
     { name: "NeoForge source", identifier: "smoke-neoforge-" + suffix, sourceType: "neoforge-maven", sourceConfig: {} },
     { name: "Python source", identifier: "smoke-python-" + suffix, sourceType: "python-releases", sourceConfig: {} },
-    { name: "PHP source", identifier: "smoke-php-" + suffix, sourceType: "php-releases", sourceConfig: { majorVersion: "8" } },
+    { name: "PHP source", identifier: "smoke-php-" + suffix, sourceType: "php-releases", sourceConfig: { majorVersion: "8.4" } },
     { name: "Lavalink source", identifier: "smoke-lavalink-" + suffix, sourceType: "lavalink-releases", sourceConfig: {} },
     { name: "MongoDB source", identifier: "smoke-mongodb-" + suffix, sourceType: "mongodb-releases", sourceConfig: {} },
   ];
@@ -387,7 +387,7 @@ async function call(path, { method = "GET", token, body } = {}) {
   const invalidDotnet = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid .NET source", identifier: "smoke-dotnet-invalid-" + suffix, serviceTypes: ["backend"], sourceType: "dotnet-index", sourceConfig: { channelVersion: "latest" } } });
   check(".NET source rejects an invalid channel", invalidDotnet.status === 400, "status=" + invalidDotnet.status);
   const invalidPhp = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid PHP source", identifier: "smoke-php-invalid-" + suffix, serviceTypes: ["backend"], sourceType: "php-releases", sourceConfig: { majorVersion: "latest" } } });
-  check("PHP source rejects an invalid major version", invalidPhp.status === 400, "status=" + invalidPhp.status);
+  check("PHP source rejects an invalid release line", invalidPhp.status === 400, "status=" + invalidPhp.status);
 
   const osCatalog = await call("/software", { method: "POST", token: ownerToken, body: { name: "Ubuntu 24.04 OS Image", identifier: "smoke-ubuntu-os-" + suffix, category: "operating-system", serviceTypes: ["vps", "vds"], customerAvailable: false, sourceType: "manual", installationConfig: { method: "virtualization-image", provider: "kvm-libvirt", imageId: "kvm/ubuntu-2404", minRamMb: 1024, architecture: "amd64" } } });
   check("admin can manage metadata for a KVM OS image", osCatalog.status === 201 && osCatalog.body?.installationConfig?.imageId === "kvm/ubuntu-2404", "status=" + osCatalog.status);
