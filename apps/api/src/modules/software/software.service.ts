@@ -760,10 +760,12 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (software.sourceType === "github-releases") {
       const repo = software.sourceConfig.repository;
       const results: DiscoveredVersion[] = [];
-      for (let page = 1; page <= 5; page++) {
+      const maxPages = 20;
+      for (let page = 1; page <= maxPages; page++) {
         const response = await axios.get(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`, {
-          timeout: 15000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" },
+          timeout: 20000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" },
         });
+        if (!Array.isArray(response.data)) throw new BadRequestException("GitHub returned an invalid releases response");
         const rows = response.data as any[];
         for (const release of rows.filter((item: any) => !item.draft)) results.push({
           version: String(release.tag_name ?? ""), releaseName: String(release.name ?? ""),
@@ -771,9 +773,9 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           sourceUrl: String(release.html_url ?? ""), sourceId: String(release.id ?? ""),
           metadata: { draft: !!release.draft },
         });
-        if (rows.length < 100) break;
+        if (rows.length < 100) return results;
       }
-      return results;
+      throw new BadRequestException("GitHub release history exceeds the 2,000-release safety limit; narrow the source or use a more specific repository");
     }
     if (software.sourceType === "minecraft-manifest") {
       const response = await axios.get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", { timeout: 20000, headers: { Accept: "application/json" } });
