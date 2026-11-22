@@ -62,13 +62,21 @@ export default function AdminSoftwarePage() {
     if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
     if (sourceType === "modrinth") sourceConfig.projectId = String(data.get("projectId") ?? "").trim();
     const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
+    const environment: Record<string, string> = {};
+    for (const line of String(data.get("environment") ?? "").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const separator = trimmed.indexOf("=");
+      if (separator <= 0) { show("Environment entries must use KEY=VALUE, one per line.", "err"); return; }
+      environment[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1);
+    }
     try {
       await api.post("/software", {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
         enabled: true, customerAvailable: true, autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
-        installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate } : {},
+        installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate, environment } : {},
       });
       setFormOpen(false); show("Software added to catalog", "ok"); await load();
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }
@@ -186,6 +194,8 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
         <label className="space-y-1 text-sm">GitHub / Docker Hub repository<input name="repository" className="input w-full" placeholder="owner/repository or namespace/repository" /></label>
         <label className="space-y-1 text-sm">Modrinth project ID<input name="projectId" className="input w-full" /></label>
+        <label className="space-y-1 text-sm sm:col-span-2">Docker image template (optional)<input name="imageTemplate" className="input w-full" placeholder="itzg/minecraft-server:{version}" /></label>
+        <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" /></label>
         <div className="flex gap-2 sm:col-span-2"><button className="btn-primary" type="submit">Save software</button><button className="btn-ghost" type="button" onClick={() => setFormOpen(false)}>Cancel</button></div>
       </form>
