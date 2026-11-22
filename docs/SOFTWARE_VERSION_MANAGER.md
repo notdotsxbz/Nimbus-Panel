@@ -78,3 +78,8 @@ Never share enrollment tokens or node credentials in support tickets or public c
 - Dedicated source adapters are not yet implemented for every software family in the master prompt (including MongoDB, arbitrary Docker registries, PHP, Go, Java, .NET, and Lavalink). Use an approved GitHub release source only when that project's official release metadata is authoritative; otherwise keep the entry manual until a proper adapter is added.
 - The complete catalog approval workflow, durable job queue, source-specific compatibility matrix, and application-level health probes remain follow-up work.
 - Do not use the existing **Reinstall** action to change software. Reinstall is destructive and removes the service data directory.
+
+
+## Re-enrolling an existing node after credential revocation
+
+When an Owner/Admin revokes a node credential, the Nodes page generates an installer command containing `--force-reenroll`. Run that command on the existing node. The installer stops the agent, removes only the saved agent token and node ID, preserves service data and the TLS certificate, installs the current agent binary, and starts it with the fresh single-use enrollment token. Do not use `--force-reenroll` for a routine binary refresh when the node credential has not been revoked.

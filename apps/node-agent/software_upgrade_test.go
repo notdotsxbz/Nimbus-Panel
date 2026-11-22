@@ -154,3 +154,22 @@ func TestSoftwareUpgradeRollsBackUnhealthyReplacement(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if !strings.Contains(string(log), "start nimbus-svc-test") { t.Fatalf("expected rollback restart, commands: %s", string(log)) }
 }
+
+func TestServiceInstallCreatesAndVerifiesContainer(t *testing.T) {
+	logPath := installFakeDocker(t)
+	server := NewAgentServer(&Config{DataDir: t.TempDir(), AgentToken: "test-token", NodeID: "node-test"})
+	body := []byte(`{"dockerImage":"new:1","cpuPercent":50,"ramMb":512,"diskGb":5,"startupCommand":[],"env":{"APP_ENV":"production"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/services/svc-test/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.handleService(rec, req)
+	if rec.Code != http.StatusOK { t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String()) }
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil { t.Fatal(err) }
+	if result["status"] != "online" || result["running"] != true || result["installedImage"] != "new:1" || result["containerId"] != "new-container-id" {
+		t.Fatalf("unexpected install verification response: %#v", result)
+	}
+	log, err := os.ReadFile(logPath); if err != nil { t.Fatal(err) }
+	if !strings.Contains(string(log), "run -d --name nimbus-svc-test") || !strings.Contains(string(log), "-e APP_ENV=production") || !strings.Contains(string(log), "inspect nimbus-svc-test") {
+		t.Fatalf("expected create, environment and inspect verification commands: %s", string(log))
+	}
+}
