@@ -113,6 +113,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const inUse = await this.serviceRecords.countDocuments({ software: software.identifier, softwareVersion: version.version });
     if (inUse > 0) throw new BadRequestException("This version is currently used by " + inUse + " service(s) and cannot be deleted.");
     await version.deleteOne();
+    if (software.recommendedVersionId?.toString() === version._id.toString()) { software.recommendedVersionId = null as never; await software.save(); }
     await this.audit.log({ actorId: actor.id, action: "software.version.deleted", targetType: "software-version", targetId: versionId, sensitive: true });
     return { deleted: true };
   }
