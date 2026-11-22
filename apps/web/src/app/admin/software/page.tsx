@@ -260,7 +260,13 @@ export default function AdminSoftwarePage() {
           <div className="mt-4 space-y-2">
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
               <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />
-              <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p></div>
+              <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p>
+              {version.releaseDate ? <p className="text-xs text-muted">Released {new Date(version.releaseDate).toLocaleDateString()}</p> : null}
+              {version.architectures?.length ? <p className="text-xs text-muted">Architectures: {version.architectures.join(", ")}</p> : null}
+              {version.compatibility?.length ? <p className="text-xs text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}
+              {version.runtimeRequirements && Object.keys(version.runtimeRequirements).length ? <p className="text-xs text-muted">Runtime: {JSON.stringify(version.runtimeRequirements)}</p> : null}
+              {version.checksum ? <p className="break-all text-xs text-muted">Checksum: {version.checksum}</p> : null}
+              {version.sourceUrl ? <a className="text-xs text-sky-300 underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}</div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
             {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually through the API.</p>}
