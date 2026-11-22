@@ -375,7 +375,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (software.sourceType === "nodejs-index") {
       const response = await axios.get("https://nodejs.org/dist/index.json", { timeout: 15000 });
       return (response.data as any[]).map((row) => ({
-        version: String(row.version ?? ""), releaseDate: row.date, prerelease: !!row.lts === false && /-/.test(String(row.version)),
+        version: String(row.version ?? "").replace(/^v/, ""), releaseDate: row.date, prerelease: !!row.lts === false && /-/.test(String(row.version)),
         sourceUrl: `https://nodejs.org/dist/${String(row.version ?? "").replace(/^v/, "")}/`,
         metadata: { lts: row.lts || false, npm: row.npm, v8: row.v8 },
       }));
