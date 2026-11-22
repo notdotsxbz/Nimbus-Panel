@@ -500,8 +500,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const serviceType = String(input.type ?? "").toLowerCase();
     if (["vps", "vds"].includes(serviceType)) throw new BadRequestException("VPS/VDS OS provisioning requires the unavailable KVM/libvirt provider");
     if (!Types.ObjectId.isValid(input.softwareId) || !Types.ObjectId.isValid(input.versionId)) throw new BadRequestException("Choose a valid catalog software and version");
-    const [software, version] = await Promise.all([this.catalog.findById(input.softwareId), this.versions.findOne({ _id: input.versionId, softwareId: input.softwareId })]);
-    if (!software || !version) throw new NotFoundException("Software or version not found");
+    const [software, version] = await Promise.all([this.catalog.findById(input.softwareId), this.versions.findById(input.versionId)]);
+    if (!software || !version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Software or version not found");
     if (!software.enabled || !software.serviceTypes.includes(serviceType)) throw new BadRequestException("This software is not enabled for the selected service type");
     if (version.publicationStatus !== "published" || version.deprecated || version.compatible === false) throw new BadRequestException("Choose a published, non-deprecated and compatible version");
     const config = software.installationConfig ?? {};
