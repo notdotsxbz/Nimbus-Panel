@@ -61,6 +61,8 @@ export default function AdminSoftwarePage() {
     const sourceConfig: Record<string, string> = {};
     if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
     if (sourceType === "modrinth") sourceConfig.projectId = String(data.get("projectId") ?? "").trim();
+    if (sourceType === "dotnet-index") sourceConfig.channelVersion = String(data.get("channelVersion") ?? "").trim();
+    if (sourceType === "papermc") sourceConfig.project = String(data.get("paperProject") ?? "paper");
     const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
     const environment: Record<string, string> = {};
     for (const line of String(data.get("environment") ?? "").split(/\r?\n/)) {
@@ -191,9 +193,11 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">Identifier<input name="identifier" required pattern="[a-z0-9][a-z0-9._-]{1,63}" className="input w-full" placeholder="nodejs" /></label>
         <label className="space-y-1 text-sm">Category<input name="category" className="input w-full" defaultValue="runtime" /></label>
         <label className="space-y-1 text-sm">Service types<input name="serviceTypes" required className="input w-full" placeholder="discord,website,backend" /></label>
-        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
+        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option><option value="go-index">Official Go releases</option><option value="dotnet-index">Official .NET channel</option><option value="papermc">PaperMC project versions</option><option value="purpur">Purpur Minecraft versions</option><option value="fabric-meta">Fabric Minecraft versions</option><option value="quilt-meta">Quilt Minecraft versions</option><option value="java-adoptium">Eclipse Temurin Java</option><option value="forge-maven">Minecraft Forge</option><option value="neoforge-maven">Minecraft NeoForge</option></select></label>
         <label className="space-y-1 text-sm">GitHub / Docker Hub repository<input name="repository" className="input w-full" placeholder="owner/repository or namespace/repository" /></label>
         <label className="space-y-1 text-sm">Modrinth project ID<input name="projectId" className="input w-full" /></label>
+        <label className="space-y-1 text-sm">.NET channel version<input name="channelVersion" className="input w-full" placeholder="8.0 or 10.0" /></label>
+        <label className="space-y-1 text-sm">PaperMC project<select name="paperProject" className="input w-full"><option value="paper">Paper</option><option value="folia">Folia</option><option value="velocity">Velocity</option><option value="waterfall">Waterfall</option></select></label>
         <label className="space-y-1 text-sm sm:col-span-2">Docker image template (optional)<input name="imageTemplate" className="input w-full" placeholder="itzg/minecraft-server:{version}" /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" /></label>

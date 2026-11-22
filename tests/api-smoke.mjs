@@ -347,6 +347,25 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("admin can configure validated image installer environment", configuredInstaller.status === 201 && configuredInstaller.body?.installationConfig?.environment?.NODE_ENV === "production", "status=" + configuredInstaller.status);
   if (configuredInstaller.body?._id) await call("/software/" + configuredInstaller.body._id, { method: "DELETE", token: ownerToken });
 
+  const sourceCases = [
+    { name: "Go source", identifier: "smoke-go-" + suffix, sourceType: "go-index", sourceConfig: {} },
+    { name: ".NET source", identifier: "smoke-dotnet-" + suffix, sourceType: "dotnet-index", sourceConfig: { channelVersion: "8.0" } },
+    { name: "Paper source", identifier: "smoke-paper-" + suffix, sourceType: "papermc", sourceConfig: { project: "paper" } },
+    { name: "Purpur source", identifier: "smoke-purpur-" + suffix, sourceType: "purpur", sourceConfig: {} },
+    { name: "Fabric source", identifier: "smoke-fabric-" + suffix, sourceType: "fabric-meta", sourceConfig: {} },
+    { name: "Quilt source", identifier: "smoke-quilt-" + suffix, sourceType: "quilt-meta", sourceConfig: {} },
+    { name: "Java source", identifier: "smoke-java-" + suffix, sourceType: "java-adoptium", sourceConfig: {} },
+    { name: "Forge source", identifier: "smoke-forge-" + suffix, sourceType: "forge-maven", sourceConfig: {} },
+    { name: "NeoForge source", identifier: "smoke-neoforge-" + suffix, sourceType: "neoforge-maven", sourceConfig: {} },
+  ];
+  for (const item of sourceCases) {
+    const created = await call("/software", { method: "POST", token: ownerToken, body: { name: item.name, identifier: item.identifier, serviceTypes: ["minecraft"], sourceType: item.sourceType, sourceConfig: item.sourceConfig } });
+    check("admin can configure " + item.sourceType + " source", created.status === 201 && !!created.body?._id, "status=" + created.status + " body=" + JSON.stringify(created.body).slice(0, 200));
+    if (created.body?._id) await call("/software/" + created.body._id, { method: "DELETE", token: ownerToken });
+  }
+  const invalidDotnet = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid .NET source", identifier: "smoke-dotnet-invalid-" + suffix, serviceTypes: ["backend"], sourceType: "dotnet-index", sourceConfig: { channelVersion: "latest" } } });
+  check(".NET source rejects an invalid channel", invalidDotnet.status === 400, "status=" + invalidDotnet.status);
+
   const softwareId = software.body?._id;
   const adminSyncJobs = await call("/software/sync-jobs", { token: ownerToken });
   check("admin can inspect durable software sync queue", adminSyncJobs.status === 200 && Array.isArray(adminSyncJobs.body), "status=" + adminSyncJobs.status);
