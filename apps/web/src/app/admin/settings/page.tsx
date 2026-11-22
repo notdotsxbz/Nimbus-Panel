@@ -226,7 +226,7 @@ export default function AdminSettings() {
         </GlassCard>
       </div>
 
-      <Modal open={firebaseOpen title="Connect Firebase Authentication" onClose={() => !busy && setFirebaseOpen(false)} footer={<div className="flex justify-end gap-2"><button className="btn-ghost" disabled={busy} onClick={() => setFirebaseOpen(false)}>Cancel</button><button className="btn-primary" disabled={busy || !firebaseJson.trim() || !firebaseWeb.apiKey || !firebaseWeb.authDomain || !firebaseWeb.projectId || !firebaseWeb.appId} onClick={() => void connectFirebase()}>{busy ? "Connecting…" : "Validate & connect"}</button></div>}>
+      <Modal open={firebaseOpen} title="Connect Firebase Authentication" onClose={() => !busy && setFirebaseOpen(false)} footer={<div className="flex justify-end gap-2"><button className="btn-ghost" disabled={busy} onClick={() => setFirebaseOpen(false)}>Cancel</button><button className="btn-primary" disabled={busy || !firebaseJson.trim() || !firebaseWeb.apiKey || !firebaseWeb.authDomain || !firebaseWeb.projectId || !firebaseWeb.appId} onClick={() => void connectFirebase()}>{busy ? "Connecting…" : "Validate & connect"}</button></div>}>
         <div className="space-y-3">
           <p className="text-sm text-muted">Paste the Firebase Admin service-account JSON and the Firebase Web App configuration from the same project. Enable Email/Password under Firebase Authentication → Sign-in method.</p>
           <label className="label">Firebase Web App API key</label><input className="input w-full" value={firebaseWeb.apiKey} onChange={e => setFirebaseWeb(v => ({ ...v, apiKey: e.target.value }))} />
