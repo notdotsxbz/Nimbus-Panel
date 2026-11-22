@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import axios from "axios";
 import { Model, Types } from "mongoose";
@@ -20,7 +20,8 @@ type DiscoveredVersion = {
 };
 
 @Injectable()
-export class SoftwareService {
+export class SoftwareService implements OnModuleInit, OnModuleDestroy {
+  private syncTimer?: NodeJS.Timeout;
   constructor(
     @InjectModel(Software.name) private readonly catalog: Model<SoftwareDocument>,
     @InjectModel(SoftwareVersion.name) private readonly versions: Model<SoftwareVersionDocument>,
@@ -28,7 +29,25 @@ export class SoftwareService {
     private readonly audit: AuditService,
   ) {}
 
+  onModuleInit() {
+    this.syncTimer = setInterval(() => { void this.runDueSyncs(); }, 60_000);
+    this.syncTimer.unref?.();
+  }
+  onModuleDestroy() { if (this.syncTimer) clearInterval(this.syncTimer); }
   list() { return this.catalog.find().sort({ name: 1 }).lean(); }
+  private async runDueSyncs() {
+    const rows = await this.catalog.find({ autoSync: true, syncFrequency: { $in: ["6h", "12h", "24h", "7d"] } }).select("_id syncFrequency lastSyncedAt").lean();
+    const intervals: Record<string, number> = { "6h": 21600000, "12h": 43200000, "24h": 86400000, "7d": 604800000 };
+    for (const row of rows) {
+      const interval = intervals[row.syncFrequency] ?? 0;
+      if (!interval || (row.lastSyncedAt && Date.now() - new Date(row.lastSyncedAt).getTime() < interval)) continue;
+      const lease = await this.catalog.findOneAndUpdate({ _id: row._id, $or: [{ syncLeaseUntil: null }, { syncLeaseUntil: { $lt: new Date() } }] }, { $set: { syncLeaseUntil: new Date(Date.now() + 300000) } }, { new: true });
+      if (!lease) continue;
+      try { await this.discover(row._id.toString(), { id: "system", role: "owner" } as AuthUser); }
+      catch { /* sync history records failure; retry next interval */ }
+      finally { await this.catalog.updateOne({ _id: row._id }, { $set: { syncLeaseUntil: null } }); }
+    }
+  }
 
   async create(input: Partial<Software>, actor: AuthUser) {
     if (!input.name?.trim() || !/^[a-z0-9][a-z0-9._-]{1,63}$/.test(input.identifier ?? "")) {
@@ -94,7 +113,7 @@ export class SoftwareService {
               softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "",
               releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
               channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease,
-              publicationStatus: software.autoPublish ? "published" : "pending",
+              publicationStatus: software.autoPublish && !item.prerelease ? "published" : "pending",
               sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "",
               compatibility: item.compatibility ?? [], metadata: item.metadata ?? {}, importedAt: new Date(),
             } },
@@ -104,6 +123,8 @@ export class SoftwareService {
         } catch { failed++; }
       }
       software.lastSyncedAt = new Date();
+      const intervals: Record<string, number> = { "6h": 21600000, "12h": 43200000, "24h": 86400000, "7d": 604800000 };
+      software.nextSyncAt = software.autoSync && intervals[software.syncFrequency] ? new Date(Date.now() + intervals[software.syncFrequency]) : undefined;
       software.lastSyncStatus = failed ? "partial" : "success";
       software.syncHistory.push({ startedAt, completedAt: new Date(), status: software.lastSyncStatus, discovered: discovered.length, imported, skipped, failed });
       software.syncHistory = software.syncHistory.slice(-50);
@@ -119,6 +140,22 @@ export class SoftwareService {
     }
   }
 
+  async bulkUpdateVersions(id: string, versionIds: string[], action: string, actor: AuthUser) {
+    await this.getSoftware(id);
+    if (!Array.isArray(versionIds) || versionIds.length < 1 || versionIds.length > 200 || versionIds.some(v => !Types.ObjectId.isValid(v))) throw new BadRequestException("Select between 1 and 200 valid versions");
+    const ids = versionIds.map(v => new Types.ObjectId(v));
+    const update: Record<string, unknown> = {};
+    if (action === "publish") update.publicationStatus = "published";
+    else if (action === "disable") update.publicationStatus = "disabled";
+    else if (action === "pending") update.publicationStatus = "pending";
+    else if (action === "deprecate") update.deprecated = true;
+    else if (action === "undeprecate") update.deprecated = false;
+    else if (action === "recommend" && ids.length === 1) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); update.recommended = true; }
+    else throw new BadRequestException("Unsupported bulk action");
+    const result = await this.versions.updateMany({ softwareId: id, _id: { $in: ids } }, { $set: update });
+    await this.audit.log({ actorId: actor.id, action: "software.versions.bulk_updated", targetType: "software", targetId: id, detail: "action=" + action + " modified=" + result.modifiedCount, sensitive: true });
+    return { matched: result.matchedCount, modified: result.modifiedCount };
+  }
   async setVersion(id: string, versionId: string, input: { publicationStatus?: string; deprecated?: boolean; recommended?: boolean }, actor: AuthUser) {
     await this.getSoftware(id);
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");

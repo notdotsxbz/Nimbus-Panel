@@ -38,6 +38,12 @@ export class SoftwareController {
     return this.software.discover(id, actor);
   }
 
+  @Post(":id/versions/bulk")
+  @Roles("owner", "admin")
+  bulkVersions(@Param("id") id: string, @Body() body: { versionIds: string[]; action: string }, @CurrentUser() actor: AuthUser) {
+    return this.software.bulkUpdateVersions(id, body.versionIds, body.action, actor);
+  }
+
   @Patch(":id/versions/:versionId")
   @Roles("owner", "admin")
   updateVersion(@Param("id") id: string, @Param("versionId") versionId: string, @Body() body: { publicationStatus?: string; deprecated?: boolean; recommended?: boolean }, @CurrentUser() actor: AuthUser) {
