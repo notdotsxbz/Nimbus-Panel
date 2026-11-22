@@ -19,6 +19,7 @@ import { MigrationsModule } from "./modules/migrations/migrations.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { ConsoleFilesModule } from "./modules/console-files/console-files.module";
 import { IntegrationsModule } from "./modules/integrations/integrations.module";
+import { SoftwareModule } from "./modules/software/software.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { IntegrationsModule } from "./modules/integrations/integrations.module";
     MigrationsModule,
     NotificationsModule,
     IntegrationsModule,
+    SoftwareModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
