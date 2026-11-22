@@ -407,6 +407,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("customer cannot create software catalog entries", customerCreate.status === 403, "status=" + customerCreate.status);
   const manualVersion = await call("/software/" + softwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0", architectures: ["amd64"], runtimeRequirements: { java: "21" }, checksum: "sha256:test" } });
   check("admin adds manual fallback version with compatibility metadata", manualVersion.status === 201 && !!manualVersion.body?._id && manualVersion.body?.architectures?.includes("amd64") && manualVersion.body?.checksum === "sha256:test", "status=" + manualVersion.status);
+  const versionPage = await call("/software/" + softwareId + "/versions?page=1&limit=10", { token: ownerToken });
+  check("admin can read paginated software versions", versionPage.status === 200 && Array.isArray(versionPage.body?.items) && versionPage.body?.page === 1 && versionPage.body?.limit === 10 && versionPage.body?.total >= 1, "status=" + versionPage.status);
+  const cappedVersionPage = await call("/software/" + softwareId + "/versions?page=1&limit=500", { token: ownerToken });
+  check("software version page size is capped", cappedVersionPage.status === 200 && cappedVersionPage.body?.limit === 100, "status=" + cappedVersionPage.status);
   const publishedVersion = await call("/software/" + softwareId + "/versions/" + manualVersion.body?._id, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published", recommended: true } });
   check("admin publishes and recommends a version", publishedVersion.status === 200 && publishedVersion.body?.publicationStatus === "published", "status=" + publishedVersion.status + " body=" + JSON.stringify(publishedVersion.body).slice(0, 180));
   if (svcId && softwareId) {
