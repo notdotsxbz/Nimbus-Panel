@@ -27,13 +27,13 @@ case "$1" in
       if [ "${UNHEALTHY:-0}" = "1" ]; then
         echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production","APP_ENV=production"]},"State":{"Running":true,"Health":{"Status":"unhealthy"}}}]'
       else
-        echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production"]},"State":{"Running":true}}]'
+        echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production","APP_ENV=production"]},"State":{"Running":true}}]'
       fi
     else
       if [ "${UNHEALTHY:-0}" = "1" ]; then
         echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production","APP_ENV=production","VERSION=1.21.11"]},"State":{"Running":true,"Health":{"Status":"unhealthy"}}}]'
       else
-        echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production","VERSION=1.21.11"]},"State":{"Running":true}}]'
+        echo '[{"Config":{"Image":"new:1","Env":["TOKEN=existing-secret","MODE=production","APP_ENV=production","VERSION=1.21.11"]},"State":{"Running":true}}]'
       fi
     fi
     exit 0
