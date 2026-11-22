@@ -56,6 +56,8 @@ export default function AdminSoftwarePage() {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
         enabled: true, customerAvailable: true, autoPublish: false,
+        autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
+        installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate } : {},
       });
       setFormOpen(false); show("Software added to catalog", "ok"); await load();
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }

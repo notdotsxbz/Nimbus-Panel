@@ -22,6 +22,16 @@ export class SoftwareController {
     return this.software.update(id, body as never, actor);
   }
 
+  @Post("services/:serviceId/change")
+  changeServiceSoftware(@Param("serviceId") serviceId: string, @Body() body: { softwareId: string; versionId: string }, @CurrentUser() actor: AuthUser) {
+    return this.software.changeServiceSoftware(serviceId, body.softwareId, body.versionId, actor);
+  }
+
+  @Get("services/:serviceId/operations")
+  operations(@Param("serviceId") serviceId: string, @CurrentUser() actor: AuthUser) {
+    return this.software.listServiceOperations(serviceId, actor);
+  }
+
   @Get(":id/versions")
   @Roles("owner", "admin")
   versions(@Param("id") id: string) { return this.software.listVersions(id); }
@@ -36,6 +46,12 @@ export class SoftwareController {
   @Roles("owner", "admin")
   discover(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
     return this.software.discover(id, actor);
+  }
+
+  @Post(":id/versions/bulk")
+  @Roles("owner", "admin")
+  bulkVersions(@Param("id") id: string, @Body() body: { versionIds: string[]; action: string }, @CurrentUser() actor: AuthUser) {
+    return this.software.bulkUpdateVersions(id, body.versionIds, body.action, actor);
   }
 
   @Post(":id/versions/bulk")

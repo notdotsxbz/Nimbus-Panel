@@ -12,7 +12,8 @@ export class Node {
   @Prop() os?: string; // ubuntu | debian
   @Prop() location?: string;
   @Prop({ required: true }) agentUrl!: string; // https://node-ip:7443
-  @Prop({ select: false }) agentTokenHash?: string; // sha256 of per-node credential
+  @Prop({ select: false }) agentTokenHash?: string; // HMAC of per-node credential
+  @Prop({ select: false }) agentTokenEncrypted?: string; // AES-GCM encrypted credential for control-plane to agent calls
   @Prop({ required: true }) cpuCores!: number;
   @Prop({ required: true }) ramTotalMb!: number;
   @Prop({ required: true }) diskTotalGb!: number;

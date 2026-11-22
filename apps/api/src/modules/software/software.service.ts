@@ -4,9 +4,12 @@ import axios from "axios";
 import { Model, Types } from "mongoose";
 import { AuditService } from "../audit/audit.service";
 import { ServicesService } from "../services/services.service";
+import { NodesService } from "../nodes/nodes.service";
+import { BackupsService } from "../backups/backups.service";
 import { AuthUser } from "../../common/auth.decorators";
 import { Software, SoftwareDocument } from "./software.schema";
 import { SoftwareVersion, SoftwareVersionDocument } from "./software-version.schema";
+import { SoftwareOperation, SoftwareOperationDocument } from "./software-operation.schema";
 
 type DiscoveredVersion = {
   version: string;
@@ -25,7 +28,10 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectModel(Software.name) private readonly catalog: Model<SoftwareDocument>,
     @InjectModel(SoftwareVersion.name) private readonly versions: Model<SoftwareVersionDocument>,
+    @InjectModel(SoftwareOperation.name) private readonly operations: Model<SoftwareOperationDocument>,
     private readonly services: ServicesService,
+    private readonly nodes: NodesService,
+    private readonly backups: BackupsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -55,10 +61,11 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     }
     if (!Array.isArray(input.serviceTypes) || !input.serviceTypes.length) throw new BadRequestException("Choose at least one supported service type");
     this.validateSource(input.sourceType ?? "manual", input.sourceConfig ?? {});
+    this.validateInstallation(input.installationConfig ?? {});
     const software = await this.catalog.create({
       name: input.name.trim(), identifier: input.identifier, description: input.description ?? "",
       category: input.category ?? "runtime", serviceTypes: [...new Set(input.serviceTypes)],
-      sourceType: input.sourceType ?? "manual", sourceConfig: input.sourceConfig ?? {},
+      sourceType: input.sourceType ?? "manual", sourceConfig: input.sourceConfig ?? {}, installationConfig: input.installationConfig ?? {},
       enabled: input.enabled ?? true, customerAvailable: input.customerAvailable ?? true,
       autoSync: input.autoSync ?? false, syncFrequency: input.syncFrequency ?? "manual",
       autoPublish: input.autoPublish ?? false,
@@ -71,7 +78,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const software = await this.catalog.findById(id);
     if (!software) throw new NotFoundException("Software not found");
     if (input.sourceType || input.sourceConfig) this.validateSource(input.sourceType ?? software.sourceType, input.sourceConfig ?? software.sourceConfig);
-    const allowed = ["name", "description", "category", "serviceTypes", "sourceType", "sourceConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
+    if (input.installationConfig) this.validateInstallation(input.installationConfig);
+    const allowed = ["name", "description", "category", "serviceTypes", "sourceType", "sourceConfig", "installationConfig", "enabled", "customerAvailable", "autoSync", "syncFrequency", "autoPublish"] as const;
     for (const key of allowed) if (input[key] !== undefined) (software as any)[key] = input[key];
     await software.save();
     await this.audit.log({ actorId: actor.id, action: "software.updated", targetType: "software", targetId: id, sensitive: true });
@@ -170,12 +178,65 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     return version;
   }
 
+  async listServiceOperations(serviceId: string, actor: AuthUser) {
+    await this.services.get(serviceId, actor);
+    return this.operations.find({ serviceId }).sort({ createdAt: -1 }).limit(50).lean();
+  }
+
+  async changeServiceSoftware(serviceId: string, softwareId: string, versionId: string, actor: AuthUser) {
+    const service = await this.services.get(serviceId, actor);
+    if (["vps", "vds"].includes(service.type.toLowerCase())) throw new BadRequestException("VPS/VDS operating systems can only be changed by an authorized administrator through the OS management workflow");
+    if (!Types.ObjectId.isValid(softwareId) || !Types.ObjectId.isValid(versionId)) throw new BadRequestException("Invalid software or version");
+    const [software, version] = await Promise.all([this.catalog.findById(softwareId), this.versions.findOne({ _id: versionId, softwareId })]);
+    if (!software || !version) throw new NotFoundException("Software or version not found");
+    if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
+    if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
+    const template = software.installationConfig?.imageTemplate;
+    if (software.installationConfig?.method !== "docker-image-template" || !template?.includes("{version}")) throw new BadRequestException("This catalog entry has no verified installation adapter yet");
+    const safeVersion = version.version.replace(/[^A-Za-z0-9_.-]/g, "");
+    if (!safeVersion || safeVersion !== version.version) throw new BadRequestException("The selected version cannot be safely used as a container tag");
+    const dockerImage = template.replaceAll("{version}", safeVersion);
+    if (!/^[A-Za-z0-9._:/@-]+$/.test(dockerImage)) throw new BadRequestException("Configured container image is invalid");
+    const beforeStatus = service.status;
+    const operation = await this.operations.create({
+      serviceId: service._id, requestedBy: new Types.ObjectId(actor.id), softwareId: software._id, versionId: version._id,
+      previousSoftware: service.software ?? "", previousVersion: service.softwareVersion ?? "",
+      requestedSoftware: software.identifier, requestedVersion: version.version, status: "backing-up", progress: 5, startedAt: new Date(),
+    });
+    try {
+      const backup = await this.backups.create(serviceId, actor, "pre-update", "local");
+      if (backup.status !== "completed") throw new BadRequestException("Pre-update backup failed; the existing service was not changed");
+      operation.backupId = backup._id.toString();
+      service.status = "updating"; await service.save();
+      operation.status = "updating"; operation.progress = 25; await operation.save();
+      const node = await this.nodes.get(service.nodeId.toString());
+      const result = await this.nodes.agentCall(node, "/services/" + service._id.toString() + "/upgrade", {
+        dockerImage, cpuPercent: service.cpuPercent, ramMb: service.ramMb, diskGb: service.diskGb,
+        startupCommand: service.startupCommand ?? [], env: {},
+      }, "POST", 10 * 60 * 1000) as { status?: string; containerId?: string; installedImage?: string; running?: boolean };
+      operation.status = "verifying"; operation.progress = 85; await operation.save();
+      if (result.status !== "online" || !result.running || result.installedImage !== dockerImage || !result.containerId) throw new BadRequestException("Node Agent did not verify the requested image and running container");
+      service.dockerImage = dockerImage; service.software = software.identifier; service.softwareVersion = version.version;
+      service.containerId = result.containerId; service.status = "online";
+      service.activity.push({ at: new Date(), action: "software.upgrade", ok: true, detail: software.identifier + "@" + version.version });
+      await service.save();
+      operation.status = "completed"; operation.progress = 100; operation.verification = { running: true, installedImage: result.installedImage, containerId: result.containerId }; operation.completedAt = new Date(); await operation.save();
+      await this.audit.log({ actorId: actor.id, action: "software.service.upgraded", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
+      return operation;
+    } catch (error) {
+      service.status = beforeStatus;
+      service.activity.push({ at: new Date(), action: "software.upgrade.failed", ok: false, detail: error instanceof Error ? error.message.slice(0, 300) : "Upgrade failed" });
+      await service.save();
+      operation.status = "failed"; operation.error = error instanceof Error ? error.message.slice(0, 500) : "Upgrade failed"; operation.completedAt = new Date(); await operation.save();
+      throw error instanceof BadRequestException ? error : new BadRequestException("Software upgrade failed. The previous confirmed software/version was retained.");
+    }
+  }
   async customerOptions(serviceId: string, actor: AuthUser) {
     const service = await this.services.get(serviceId, actor);
     if (["vps", "vds"].includes(service.type.toLowerCase())) return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: [] };
     const options = await this.catalog.find({ enabled: true, customerAvailable: true, serviceTypes: service.type }).lean();
     const output = await Promise.all(options.map(async (software) => ({
-      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category },
+      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, installable: software.installationConfig?.method === "docker-image-template" && !!software.installationConfig?.imageTemplate?.includes("{version}") },
       versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false }).sort({ recommended: -1, releaseDate: -1 }).lean(),
     })));
     return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: output };
@@ -186,6 +247,13 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const software = await this.catalog.findById(id);
     if (!software) throw new NotFoundException("Software not found");
     return software;
+  }
+
+  private validateInstallation(config: Record<string, string>) {
+    if (!config.method && !config.imageTemplate) return;
+    const template = config.imageTemplate ?? "";
+    const prefix = template.endsWith(":{version}") ? template.slice(0, -10) : "";
+    if (config.method !== "docker-image-template" || !prefix || !/^[A-Za-z0-9._:/-]+$/.test(prefix)) throw new BadRequestException("Installation adapter must be a safe Docker image template ending in :{version}");
   }
 
   private validateSource(type: string, config: Record<string, string>) {
