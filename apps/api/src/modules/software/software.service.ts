@@ -240,7 +240,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       try { const source = new URL(input.sourceUrl); if (source.protocol !== "https:") throw new Error("https required"); }
       catch { throw new BadRequestException("Version source URL must use HTTPS"); }
     }
-    for (const key of ["architectures", "compatibility"] as const) {
+    for (const key of ["architectures", "operatingSystems", "compatibility"] as const) {
       const values = input[key];
       if (values !== undefined && (!Array.isArray(values) || values.length > 20 || values.some(value => typeof value !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(value)))) throw new BadRequestException("Version compatibility metadata is invalid");
     }
@@ -528,7 +528,13 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
 
   private assessCompatibility(software: Software, item: { architectures?: string[]; operatingSystems?: string[]; runtimeRequirements?: Record<string, unknown> }) {
     const reasons: string[] = [];
-    const normalize = (value: string) => value.toLowerCase().replace("x86_64", "amd64").replace("x64", "amd64").replace("aarch64", "arm64");
+    const normalize = (value: string) => {
+      const lower = value.toLowerCase().replace("x86_64", "amd64").replace("x64", "amd64").replace("aarch64", "arm64");
+      if (["ubuntu", "debian", "fedora", "centos", "rhel", "alpine", "linux"].some(os => lower.startsWith(os))) return "linux";
+      if (lower.startsWith("win")) return "windows";
+      if (lower.startsWith("darwin") || lower.startsWith("mac")) return "macos";
+      return lower;
+    };
     const supportedArchitectures = (software.supportedArchitectures ?? []).map(normalize);
     const availableArchitectures = (item.architectures ?? []).map(normalize);
     if (supportedArchitectures.length && availableArchitectures.length && !availableArchitectures.some(value => supportedArchitectures.includes(value))) reasons.push("No matching supported CPU architecture");
@@ -536,8 +542,10 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const availableOS = (item.operatingSystems ?? []).map(normalize);
     if (supportedOS.length && availableOS.length && !availableOS.some(value => supportedOS.some(supported => value === supported || value.startsWith(supported) || supported.startsWith(value)))) reasons.push("No matching supported operating system");
     if (software.requiredRuntime && item.runtimeRequirements) {
-      const values = Object.values(item.runtimeRequirements).map(value => String(value).toLowerCase());
-      if (values.length && !values.some(value => value.includes(software.requiredRuntime.toLowerCase()))) reasons.push("Runtime requirements do not match the configured runtime");
+      const compact = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const required = compact(software.requiredRuntime);
+      const values = Object.entries(item.runtimeRequirements).map(([key, value]) => compact(key + String(value)));
+      if (values.length && !values.some(value => value.includes(required))) reasons.push("Runtime requirements do not match the configured runtime");
     }
     return { compatible: reasons.length === 0, incompatibilityReasons: reasons };
   }
