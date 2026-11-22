@@ -365,7 +365,11 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const validCount = await this.versions.countDocuments({ softwareId: id, _id: { $in: ids } });
     if (validCount !== ids.length) throw new BadRequestException("One or more selected versions do not belong to this software entry");
     const update: Record<string, unknown> = {};
-    if (action === "publish") update.publicationStatus = "published";
+    if (action === "publish") {
+      const incompatibleCount = await this.versions.countDocuments({ softwareId: id, _id: { $in: ids }, compatible: false });
+      if (incompatibleCount) throw new BadRequestException("Incompatible versions cannot be published to customers");
+      update.publicationStatus = "published";
+    }
     else if (action === "disable") update.publicationStatus = "disabled";
     else if (action === "pending") update.publicationStatus = "pending";
     else if (action === "deprecate") update.deprecated = true;
@@ -381,6 +385,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");
     const version = await this.versions.findById(versionId);
     if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
+    if (input.publicationStatus === "published" && version.compatible === false) throw new BadRequestException("Incompatible versions cannot be published to customers");
     if (input.recommended) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: version._id } }); }
     else if (input.recommended === false) await this.catalog.updateOne({ _id: id, recommendedVersionId: version._id }, { $set: { recommendedVersionId: null } });
     if (input.publicationStatus !== undefined) version.publicationStatus = input.publicationStatus;
