@@ -10,6 +10,12 @@ export class Software {
   @Prop({ required: true, unique: true, lowercase: true, trim: true, index: true }) identifier!: string;
   @Prop({ default: "" }) description!: string;
   @Prop({ default: "runtime" }) category!: string;
+  @Prop({ default: "" }) logoUrl!: string;
+  @Prop({ default: "" }) officialUrl!: string;
+  @Prop({ type: [String], default: [] }) supportedOperatingSystems!: string[];
+  @Prop({ type: [String], default: [] }) supportedArchitectures!: string[];
+  @Prop({ default: "" }) requiredRuntime!: string;
+  @Prop({ default: "" }) defaultVersion!: string;
   @Prop({ type: [String], required: true, index: true }) serviceTypes!: string[];
   @Prop({ enum: SOFTWARE_SOURCE_TYPES, default: "manual" }) sourceType!: SoftwareSourceType;
   @Prop({ type: Object, default: {} }) sourceConfig!: Record<string, string>;
