@@ -207,6 +207,7 @@ export default function AdminSoftwarePage() {
         sourceUrl: String(data.get("sourceUrl") ?? "").trim() || undefined,
         compatibility: String(data.get("compatibility") ?? "").split(",").map(value => value.trim()).filter(Boolean),
         architectures: String(data.get("architectures") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+        operatingSystems: String(data.get("operatingSystems") ?? "").split(",").map(value => value.trim()).filter(Boolean),
         checksum: String(data.get("checksum") ?? "").trim(),
         signature: String(data.get("signature") ?? "").trim(),
         runtimeRequirements,
@@ -348,6 +349,7 @@ export default function AdminSoftwarePage() {
             <select name="channel" className="input min-w-0" defaultValue="stable"><option value="stable">Stable</option><option value="lts">LTS</option><option value="prerelease">Prerelease</option><option value="nightly">Nightly</option></select>
             <input name="sourceUrl" type="url" className="input min-w-0 sm:col-span-2" placeholder="HTTPS release source URL" />
             <input name="architectures" className="input min-w-0" placeholder="Architectures: amd64,arm64" />
+            <input name="operatingSystems" className="input min-w-0" placeholder="Operating systems: linux,windows" />
             <input name="compatibility" className="input min-w-0" placeholder="Compatibility: 1.21,1.21.1" />
             <input name="checksum" className="input min-w-0 sm:col-span-2" placeholder="Checksum (SHA-256 where available)" />
             <input name="signature" className="input min-w-0 sm:col-span-2" placeholder="Signature / verification reference" />
