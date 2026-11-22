@@ -59,7 +59,7 @@ Each software entry can use manual-only, 6-hour, 12-hour, 24-hour or 7-day synch
 
 ## Initial service provisioning from the catalog
 
-The Admin **Assign Service** wizard now selects an enabled catalog entry and a published compatible version for the chosen service type. It no longer asks the Admin to type an arbitrary Docker image for catalog-managed services. The backend resolves the image tag and version-bearing environment from the catalog, checks the service type and version publication state, and keeps VPS/VDS requests out of the Docker path.
+The Admin **Assign Service** wizard now selects an enabled catalog entry and a published compatible version for the chosen service type. It no longer asks the Admin to type an arbitrary Docker image for catalog-managed services. The backend resolves the image tag and version-bearing environment from the catalog, checks the service type and version publication state, and keeps VPS/VDS requests out of the Docker path. Admins can supply an optional startup argv as one argument per line (for example `npm` and `start`); it is passed directly to Docker rather than evaluated by a shell.
 
 The Node Agent verifies the initial container image, running state, configured environment and Docker health check when present. When the catalog configures a supported application version probe, the agent runs that fixed probe before returning success. If the probe does not confirm the requested version, the newly created container is removed and the service is left in an error state rather than being recorded as successfully installed. Only Owner/Admin accounts can use the initial catalog provisioning endpoint.
 
