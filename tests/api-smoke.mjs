@@ -356,6 +356,7 @@ async function call(path, { method = "GET", token, body } = {}) {
 
 
   const sourceCases = [
+    { name: "Minecraft Vanilla source", identifier: "smoke-minecraft-manifest-" + suffix, sourceType: "minecraft-manifest", sourceConfig: {} },
     { name: "Go source", identifier: "smoke-go-" + suffix, sourceType: "go-index", sourceConfig: {} },
     { name: ".NET source", identifier: "smoke-dotnet-" + suffix, sourceType: "dotnet-index", sourceConfig: { channelVersion: "8.0" } },
     { name: "Paper source", identifier: "smoke-paper-" + suffix, sourceType: "papermc", sourceConfig: { project: "paper" } },
