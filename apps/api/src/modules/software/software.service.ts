@@ -11,6 +11,7 @@ import { AuthUser } from "../../common/auth.decorators";
 import { Software, SoftwareDocument } from "./software.schema";
 import { SoftwareVersion, SoftwareVersionDocument } from "./software-version.schema";
 import { SoftwareOperation, SoftwareOperationDocument } from "./software-operation.schema";
+import { SoftwareSyncJob, SoftwareSyncJobDocument } from "./software-sync-job.schema";
 
 type DiscoveredVersion = {
   version: string;
@@ -31,17 +32,113 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     @InjectModel(Service.name) private readonly serviceRecords: Model<ServiceDocument>,
     @InjectModel(SoftwareVersion.name) private readonly versions: Model<SoftwareVersionDocument>,
     @InjectModel(SoftwareOperation.name) private readonly operations: Model<SoftwareOperationDocument>,
+    @InjectModel(SoftwareSyncJob.name) private readonly syncJobs: Model<SoftwareSyncJobDocument>,
     private readonly services: ServicesService,
     private readonly nodes: NodesService,
     private readonly backups: BackupsService,
     private readonly audit: AuditService,
   ) {}
 
+  private syncWorkerRunning = false;
+
   onModuleInit() {
-    this.syncTimer = setInterval(() => { void this.runDueSyncs(); }, 60_000);
+    // MongoDB-backed jobs survive API restarts. The timer only wakes the
+    // scheduler/worker; job state, retries and leases are persisted.
+    this.syncTimer = setInterval(() => { void this.runSyncQueue(); }, 15_000);
     this.syncTimer.unref?.();
+    void this.runSyncQueue();
   }
   onModuleDestroy() { if (this.syncTimer) clearInterval(this.syncTimer); }
+
+  private async runSyncQueue() {
+    if (this.syncWorkerRunning) return;
+    this.syncWorkerRunning = true;
+    try {
+      await this.enqueueDueSyncs();
+      await this.processOneSyncJob();
+    } catch (error) {
+      console.error("[software-sync-queue] worker tick failed:", error instanceof Error ? error.message : "unknown error");
+    } finally {
+      this.syncWorkerRunning = false;
+    }
+  }
+
+  private async enqueueDueSyncs() {
+    const now = new Date();
+    const rows = await this.catalog.find({ autoSync: true, enabled: true, syncFrequency: { $in: ["6h", "12h", "24h", "7d"] } })
+      .select("_id syncFrequency nextSyncAt lastSyncAttemptAt").lean();
+    const intervals: Record<string, number> = { "6h": 21_600_000, "12h": 43_200_000, "24h": 86_400_000, "7d": 604_800_000 };
+    for (const row of rows) {
+      const interval = intervals[row.syncFrequency] ?? 0;
+      if (!interval) continue;
+      const dueAt = row.nextSyncAt
+        ? new Date(row.nextSyncAt)
+        : row.lastSyncAttemptAt
+          ? new Date(new Date(row.lastSyncAttemptAt).getTime() + interval)
+          : now;
+      if (dueAt > now) continue;
+      const bucket = Math.floor(now.getTime() / interval);
+      const jobKey = `software-sync:${row._id.toString()}:${bucket}`;
+      await this.syncJobs.updateOne(
+        { jobKey },
+        { $setOnInsert: { softwareId: row._id, jobKey, status: "queued", attempts: 0, maxAttempts: 5, runAt: now, leaseUntil: null } },
+        { upsert: true },
+      );
+    }
+  }
+
+  private async processOneSyncJob() {
+    const now = new Date();
+    const job = await this.syncJobs.findOneAndUpdate(
+      {
+        attempts: { $lt: 5 },
+        $or: [
+          { status: { $in: ["queued", "retry"] }, runAt: { $lte: now } },
+          { status: "running", leaseUntil: { $lte: now } },
+        ],
+      },
+      { $set: { status: "running", leaseUntil: new Date(now.getTime() + 10 * 60_000), startedAt: now }, $inc: { attempts: 1 } },
+      { new: true, sort: { runAt: 1, createdAt: 1 } },
+    );
+    if (!job) return;
+    try {
+      const result = await this.discover(job.softwareId.toString(), { id: "system", role: "owner" } as AuthUser);
+      await this.syncJobs.updateOne({ _id: job._id }, { $set: {
+        status: "completed", leaseUntil: null, completedAt: new Date(), lastError: "",
+        discovered: result.discovered, imported: result.imported, skipped: result.skipped, failed: result.failed,
+      } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 500) : "Version synchronization failed";
+      const retryDelays = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 0];
+      const delay = retryDelays[Math.min(job.attempts - 1, retryDelays.length - 1)];
+      const terminal = job.attempts >= 5 || delay === 0;
+      await this.syncJobs.updateOne({ _id: job._id }, { $set: {
+        status: terminal ? "failed" : "retry", leaseUntil: null,
+        runAt: new Date(Date.now() + delay), lastError: message,
+        ...(terminal ? { completedAt: new Date() } : {}),
+      } });
+    }
+  }
+
+  async listSyncJobs() {
+    return this.syncJobs.find().sort({ createdAt: -1 }).limit(100).populate("softwareId", "name identifier").lean();
+  }
+
+  async retrySyncJob(jobId: string, actor: AuthUser) {
+    if (!Types.ObjectId.isValid(jobId)) throw new BadRequestException("Invalid sync job ID");
+    const job = await this.syncJobs.findById(jobId);
+    if (!job) throw new NotFoundException("Sync job not found");
+    if (job.status === "running" || job.status === "completed") throw new BadRequestException("Only failed or waiting jobs can be retried");
+    job.status = "queued";
+    job.attempts = 0;
+    job.runAt = new Date();
+    job.leaseUntil = null;
+    job.lastError = "";
+    job.completedAt = undefined;
+    await job.save();
+    await this.audit.log({ actorId: actor.id, action: "software.sync.retry_requested", targetType: "software", targetId: job.softwareId.toString(), detail: job._id.toString(), sensitive: true });
+    return job;
+  }
   list() { return this.catalog.find().sort({ name: 1 }).lean(); }
 
   listOperations() {
