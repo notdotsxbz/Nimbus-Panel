@@ -4,6 +4,7 @@ import axios from "axios";
 import { Model, Types } from "mongoose";
 import { AuditService } from "../audit/audit.service";
 import { ServicesService } from "../services/services.service";
+import type { CreateServiceDto } from "../services/services.service";
 import { Service, ServiceDocument } from "../services/service.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { BackupsService } from "../backups/backups.service";
@@ -493,6 +494,31 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     await operation.save();
     await this.audit.log({ actorId: actor.id, action: "software.service.upgrade_cleanup_completed", targetType: "service", targetId: operation.serviceId.toString(), detail: operationId, sensitive: true });
     return operation;
+  }
+  async createServiceFromCatalog(input: Omit<CreateServiceDto, "dockerImage" | "software" | "softwareVersion" | "versionProbe" | "expectedVersion"> & { softwareId: string; versionId: string }, actor: AuthUser) {
+    const serviceType = String(input.type ?? "").toLowerCase();
+    if (["vps", "vds"].includes(serviceType)) throw new BadRequestException("VPS/VDS OS provisioning requires the unavailable KVM/libvirt provider");
+    if (!Types.ObjectId.isValid(input.softwareId) || !Types.ObjectId.isValid(input.versionId)) throw new BadRequestException("Choose a valid catalog software and version");
+    const [software, version] = await Promise.all([this.catalog.findById(input.softwareId), this.versions.findOne({ _id: input.versionId, softwareId: input.softwareId })]);
+    if (!software || !version) throw new NotFoundException("Software or version not found");
+    if (!software.enabled || !software.serviceTypes.includes(serviceType)) throw new BadRequestException("This software is not enabled for the selected service type");
+    if (version.publicationStatus !== "published" || version.deprecated || version.compatible === false) throw new BadRequestException("Choose a published, non-deprecated and compatible version");
+    const config = software.installationConfig ?? {};
+    const template = config.imageTemplate;
+    const environment = (config.environment ?? {}) as Record<string, string>;
+    const hasImageVersion = typeof template === "string" && template.includes("{version}");
+    const hasEnvironmentVersion = Object.values(environment).some(value => typeof value === "string" && value.includes("{version}"));
+    if (config.method !== "docker-image-template" || typeof template !== "string" || (!hasImageVersion && !hasEnvironmentVersion)) throw new BadRequestException("This catalog entry has no verified Docker installation adapter");
+    const safeVersion = version.version.replace(/[^A-Za-z0-9_.-]/g, "");
+    if (!safeVersion || safeVersion !== version.version) throw new BadRequestException("The selected version cannot be safely used in a container tag");
+    const dockerImage = template.replaceAll("{version}", safeVersion);
+    if (!/^[A-Za-z0-9._:/@-]+$/.test(dockerImage)) throw new BadRequestException("Configured container image is invalid");
+    const resolvedEnvironment = Object.fromEntries(Object.entries(environment).map(([key, value]) => [key, value.replaceAll("{version}", safeVersion)]));
+    const versionProbe = typeof config.versionProbe === "string" ? config.versionProbe : "";
+    if (hasEnvironmentVersion && !hasImageVersion && !versionProbe) throw new BadRequestException("This installer requires a version verification probe");
+    const result = await this.services.create({ ...input, dockerImage, envVars: resolvedEnvironment, software: software.identifier, softwareVersion: version.version, versionProbe, expectedVersion: versionProbe === "java-version" ? safeVersion.split("+")[0] : safeVersion }, actor);
+    await this.audit.log({ actorId: actor.id, action: "software.service.initial_install_requested", targetType: "service", targetId: result._id.toString(), detail: software.identifier + "@" + version.version, sensitive: true });
+    return result;
   }
   async listServiceOperations(serviceId: string, actor: AuthUser) {
     await this.services.get(serviceId, actor);
