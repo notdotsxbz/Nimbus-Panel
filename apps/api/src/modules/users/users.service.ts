@@ -90,16 +90,36 @@ export class UsersService implements OnModuleInit {
     return this.users.findById(id);
   }
 
-  async createFirebaseUser(uid: string, email: string, displayName?: string) {
-    const base = email.split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
-    const username = await this.availableUsername(base);
-    return this.users.create({
-      email: email.toLowerCase(),
-      username,
-      firebaseUid: uid,
-      displayName,
-      role: "customer",
-    });
+  async createFirebaseUser(uid: string, email: string, displayName?: string, requestedUsername?: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+    const username = requestedUsername?.trim().toLowerCase();
+    if (username) {
+      if (!USERNAME_RE.test(username)) {
+        throw new BadRequestException(
+          "Username must be 3–32 chars: lowercase letters, digits, . _ - and start alphanumeric",
+        );
+      }
+      if (await this.users.findOne({ username })) {
+        throw new ConflictException("Username already taken. Please choose another one.");
+      }
+    }
+    const finalUsername = username ?? await this.availableUsername(
+      normalizedEmail.split("@")[0].replace(/[^a-z0-9._-]/g, "") || "user",
+    );
+    try {
+      return await this.users.create({
+        email: normalizedEmail,
+        username: finalUsername,
+        firebaseUid: uid,
+        displayName,
+        role: "customer",
+      });
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        throw new ConflictException("Email or username already taken. Please choose another one.");
+      }
+      throw error;
+    }
   }
 
   /** Owner-created Firebase account; passwords are managed only by Firebase Auth. */

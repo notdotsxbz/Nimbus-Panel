@@ -104,7 +104,7 @@ export class AuthController {
   @Post("register")
   @HttpCode(200)
   @Throttle({ default: { ttl: 60000, limit: 5 } })
-  async register(@Body() body: { idToken?: string }, @Res({ passthrough: true }) res: Response) {
+  async register(@Body() body: { idToken?: string; username?: string }, @Res({ passthrough: true }) res: Response) {
     if (!body?.idToken) throw new UnauthorizedException("Firebase ID token is required");
     const decoded = await this.integrations.verifyIdToken(body.idToken);
     if (!decoded.email) throw new UnauthorizedException("A verified email address is required");
@@ -112,7 +112,7 @@ export class AuthController {
     if (!user) {
       const existingEmail = await this.users.findByEmail(decoded.email);
       if (existingEmail) throw new UnauthorizedException("An account with this email already exists. Sign in instead.");
-      user = await this.users.createFirebaseUser(decoded.uid, decoded.email, decoded.name);
+      user = await this.users.createFirebaseUser(decoded.uid, decoded.email, decoded.name, body.username);
     }
     if (user.role !== "customer" || user.deletedAt || user.suspended) throw new UnauthorizedException("This account cannot self-register");
     await this.users.recordLogin(user._id.toString(), true);
