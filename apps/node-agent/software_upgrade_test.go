@@ -249,3 +249,36 @@ func TestRuntimeVersionProbesUseFixedCommandsAndMatchExactVersion(t *testing.T) 
 	}
 	if versionOutputHasExpected("v22.15.10", "22.15.1") { t.Fatal("runtime version probe must not match a shorter version prefix") }
 }
+func TestInitialInstallVerifiesRuntimeVersion(t *testing.T) {
+	installFakeDocker(t)
+	server := NewAgentServer(&Config{DataDir: t.TempDir(), AgentToken: "test-token", NodeID: "node-test"})
+	body, err := json.Marshal(map[string]any{
+		"dockerImage": "new:1", "cpuPercent": 50, "ramMb": 512, "diskGb": 5,
+		"env": map[string]string{}, "versionProbe": "nodejs-version", "expectedVersion": "22.15.1",
+	})
+	if err != nil { t.Fatal(err) }
+	req := httptest.NewRequest(http.MethodPost, "/services/svc-test/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.handleService(rec, req)
+	if rec.Code != http.StatusOK { t.Fatalf("expected verified install, got %d: %s", rec.Code, rec.Body.String()) }
+	var result map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil { t.Fatal(err) }
+	if result["versionVerified"] != true { t.Fatalf("expected version verification in response: %#v", result) }
+}
+
+func TestInitialInstallRemovesContainerWhenVersionProbeFails(t *testing.T) {
+	logPath := installFakeDocker(t)
+	server := NewAgentServer(&Config{DataDir: t.TempDir(), AgentToken: "test-token", NodeID: "node-test"})
+	body, err := json.Marshal(map[string]any{
+		"dockerImage": "new:1", "cpuPercent": 50, "ramMb": 512, "diskGb": 5,
+		"env": map[string]string{}, "versionProbe": "nodejs-version", "expectedVersion": "20.0.0",
+	})
+	if err != nil { t.Fatal(err) }
+	req := httptest.NewRequest(http.MethodPost, "/services/svc-test/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.handleService(rec, req)
+	if rec.Code != http.StatusBadGateway { t.Fatalf("expected version verification failure, got %d: %s", rec.Code, rec.Body.String()) }
+	commands, err := os.ReadFile(logPath)
+	if err != nil { t.Fatal(err) }
+	if !strings.Contains(string(commands), "rm -f nimbus-svc-test") { t.Fatalf("unverified container should be removed: %s", commands) }
+}
