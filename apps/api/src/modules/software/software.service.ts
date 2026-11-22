@@ -516,8 +516,20 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const resolvedEnvironment = Object.fromEntries(Object.entries(environment).map(([key, value]) => [key, value.replaceAll("{version}", safeVersion)]));
     const versionProbe = typeof config.versionProbe === "string" ? config.versionProbe : "";
     if (hasEnvironmentVersion && !hasImageVersion && !versionProbe) throw new BadRequestException("This installer requires a version verification probe");
+    const startedAt = new Date();
     const result = await this.services.create({ ...input, dockerImage, envVars: resolvedEnvironment, software: software.identifier, softwareVersion: version.version, versionProbe, expectedVersion: versionProbe === "java-version" ? safeVersion.split("+")[0] : safeVersion }, actor);
-    await this.audit.log({ actorId: actor.id, action: "software.service.initial_install_requested", targetType: "service", targetId: result._id.toString(), detail: software.identifier + "@" + version.version, sensitive: true });
+    const completedAt = new Date();
+    const installSucceeded = result.status === "online";
+    await this.operations.create({
+      serviceId: result._id, requestedBy: new Types.ObjectId(actor.id), softwareId: software._id, versionId: version._id,
+      previousSoftware: "", previousVersion: "", requestedSoftware: software.identifier, requestedVersion: version.version,
+      status: installSucceeded ? "completed" : "failed", progress: installSucceeded ? 100 : 0,
+      error: installSucceeded ? "" : "Initial installation did not complete; service status: " + result.status,
+      warning: versionProbe ? "" : "Container/image verified without an application-specific version probe",
+      verification: { containerId: result.containerId ?? "", installedImage: dockerImage, containerRunning: installSucceeded, versionProbe: versionProbe || null, versionVerified: versionProbe ? installSucceeded : null },
+      startedAt, completedAt,
+    });
+    await this.audit.log({ actorId: actor.id, action: "software.service.initial_install_requested", targetType: "service", targetId: result._id.toString(), detail: software.identifier + "@" + version.version + " status=" + result.status, sensitive: true });
     return result;
   }
   async listServiceOperations(serviceId: string, actor: AuthUser) {
