@@ -6,7 +6,7 @@ import { GlassCard, useToast } from "@/components/glass";
 
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
-  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>;
+  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string> };
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
@@ -20,6 +20,7 @@ export default function AdminSoftwarePage() {
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [manualVersion, setManualVersion] = useState("");
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<string[]>([]);
@@ -73,14 +74,17 @@ export default function AdminSoftwarePage() {
       environment[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1);
     }
     try {
-      await api.post("/software", {
+      const payload = {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
-        enabled: true, customerAvailable: true, autoPublish: data.get("autoPublish") === "true",
+        enabled: data.get("enabled") === "true", customerAvailable: data.get("customerAvailable") === "true",
+        autoPublish: data.get("autoPublish") === "true",
         autoSync: data.get("autoSync") === "true", syncFrequency: data.get("syncFrequency") || "manual",
         installationConfig: imageTemplate ? { method: "docker-image-template", imageTemplate, environment } : {},
-      });
-      setFormOpen(false); show("Software added to catalog", "ok"); await load();
+      };
+      if (editingId) await api.patch("/software/" + editingId, payload);
+      else await api.post("/software", payload);
+      setFormOpen(false); setEditingId(null); show(editingId ? "Software updated" : "Software added to catalog", "ok"); await load();
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }
   };
 
@@ -124,19 +128,12 @@ export default function AdminSoftwarePage() {
       await load();
     } catch (e) { show(e instanceof Error ? e.message : "Cleanup is still pending", "err"); }
   };
-  const editSoftware = async () => {
+  const editSoftware = () => {
     if (!selected) return;
-    const name = window.prompt("Software name", selected.name);
-    if (name === null || !name.trim()) return;
-    const description = window.prompt("Description", selected.description ?? "");
-    if (description === null) return;
-    try {
-      await api.patch("/software/" + selected._id, { name: name.trim(), description });
-      const updated = { ...selected, name: name.trim(), description };
-      setSelected(updated); setItems(current => current.map(item => item._id === updated._id ? updated : item));
-      show("Software details updated", "ok");
-    } catch (e) { show(e instanceof Error ? e.message : "Could not update software", "err"); }
+    setEditingId(selected._id);
+    setFormOpen(true);
   };
+
   const deleteSoftware = async () => {
     if (!selected || !window.confirm("Delete " + selected.name + "? Software used by a service cannot be deleted.")) return;
     try { await api.del("/software/" + selected._id); setSelected(null); setVersions([]); show("Software deleted", "ok"); await load(); }
