@@ -7,6 +7,7 @@ The Software & Versions area is available to Owner/Admin accounts at **Admin →
 The currently implemented official-source adapters are:
 
 - **GitHub Releases** — release metadata from a configured public `owner/repository`.
+- **Minecraft Vanilla** — official Mojang version manifest, including release type, release date and manifest checksum.
 - **Node.js releases** — the official Node.js distribution index.
 - **Modrinth** — versions from a configured Modrinth project ID.
 - **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
