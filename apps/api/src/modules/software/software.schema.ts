@@ -23,7 +23,7 @@ export class Software {
   @Prop({ default: null }) lastSyncedAt?: Date;
   @Prop({ default: null }) lastSyncAttemptAt?: Date;
   @Prop({ default: null }) nextSyncAt?: Date;
-  @Prop({ default: null }) syncLeaseUntil?: Date | null;
+  @Prop({ type: Date, default: null }) syncLeaseUntil?: Date | null;
   @Prop({ default: "never" }) lastSyncStatus!: string;
   @Prop({ type: [{ startedAt: Date, completedAt: Date, status: String, discovered: Number, imported: Number, skipped: Number, failed: Number, error: String }], default: [] })
   syncHistory!: { startedAt: Date; completedAt?: Date; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }[];
