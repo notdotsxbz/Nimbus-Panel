@@ -95,6 +95,10 @@ export interface NodeHeartbeat {
   containersRunning: number;
   uptimeSeconds: number;
   agentVersion: string;
+  /** Detected by the authenticated node agent; optional for older agents. */
+  os?: string;
+  osVersion?: string;
+  architecture?: string;
   at: string;
 }
 
