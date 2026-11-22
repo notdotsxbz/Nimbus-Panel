@@ -366,6 +366,9 @@ async function call(path, { method = "GET", token, body } = {}) {
     { name: "Java source", identifier: "smoke-java-" + suffix, sourceType: "java-adoptium", sourceConfig: {} },
     { name: "Forge source", identifier: "smoke-forge-" + suffix, sourceType: "forge-maven", sourceConfig: {} },
     { name: "NeoForge source", identifier: "smoke-neoforge-" + suffix, sourceType: "neoforge-maven", sourceConfig: {} },
+    { name: "Python source", identifier: "smoke-python-" + suffix, sourceType: "python-releases", sourceConfig: {} },
+    { name: "PHP source", identifier: "smoke-php-" + suffix, sourceType: "php-releases", sourceConfig: { majorVersion: "8" } },
+    { name: "Lavalink source", identifier: "smoke-lavalink-" + suffix, sourceType: "lavalink-releases", sourceConfig: {} },
   ];
   for (const item of sourceCases) {
     const created = await call("/software", { method: "POST", token: ownerToken, body: { name: item.name, identifier: item.identifier, serviceTypes: ["minecraft"], sourceType: item.sourceType, sourceConfig: item.sourceConfig } });

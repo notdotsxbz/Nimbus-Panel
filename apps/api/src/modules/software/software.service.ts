@@ -560,7 +560,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "dotnet-index" && !/^\d+\.\d+$/.test(config.channelVersion ?? "")) throw new BadRequestException(".NET source requires a channel version such as 8.0 or 10.0");
     if (type === "papermc" && !["paper", "folia", "velocity", "waterfall"].includes(config.project ?? "paper")) throw new BadRequestException("Unsupported PaperMC project");
     if (type === "purpur" && config.project && config.project !== "purpur") throw new BadRequestException("Purpur source project must be purpur");
-    if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven", "python-releases", "php-releases", "lavalink-releases"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -669,6 +669,58 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       if (typeof response.data !== "string" || !response.data.includes("<metadata")) throw new BadRequestException("Minecraft loader Maven metadata is invalid");
       const versions = [...response.data.matchAll(/<version>\s*([^<]+?)\s*<\/version>/g)].map(match => match[1].trim()).filter(Boolean);
       return [...new Set(versions)].map(version => ({ version, sourceUrl: metadataUrl, metadata: { loader: software.sourceType === "forge-maven" ? "forge" : "neoforge" } }));
+    }
+    if (software.sourceType === "python-releases") {
+      const response = await axios.get("https://peps.python.org/api/python-releases.json", { timeout: 20000, headers: { Accept: "application/json" } });
+      const cycles = (response.data as any)?.releases;
+      if (!cycles || typeof cycles !== "object" || Array.isArray(cycles)) throw new BadRequestException("Python official release metadata returned an invalid response");
+      const releases: DiscoveredVersion[] = [];
+      for (const cycle of Object.values(cycles) as any[]) {
+        if (!Array.isArray(cycle)) continue;
+        for (const item of cycle) {
+          if (item?.state !== "actual" || typeof item.stage !== "string") continue;
+          const match = item.stage.match(/(\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)/i);
+          if (!match) continue;
+          const version = match[1];
+          releases.push({ version, releaseDate: item.date, prerelease: /(?:a|b|rc)\d+$/i.test(version),
+            sourceUrl: "https://www.python.org/downloads/release/python" + version.replace(/\./g, ""),
+            metadata: { releaseStage: item.stage, state: item.state, note: item.note ?? "", source: "Python PEP release metadata" } });
+        }
+      }
+      return releases;
+    }
+    if (software.sourceType === "php-releases") {
+      const majorVersion = software.sourceConfig.majorVersion ?? "";
+      if (majorVersion && !/^\d{1,2}$/.test(majorVersion)) throw new BadRequestException("PHP major version must be a number such as 8");
+      const url = "https://www.php.net/releases/index.php?json&max=100" + (majorVersion ? "&version=" + encodeURIComponent(majorVersion) : "");
+      const response = await axios.get(url, { timeout: 20000, headers: { Accept: "application/json" } });
+      const rows = response.data;
+      if (!rows || typeof rows !== "object" || Array.isArray(rows)) throw new BadRequestException("PHP official release metadata returned an invalid response");
+      return Object.entries(rows).flatMap(([version, metadata]: [string, any]) => {
+        if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) return [];
+        const source = Array.isArray(metadata?.source) ? metadata.source : [];
+        const archive = source.find((item: any) => typeof item?.filename === "string" && /\.tar\.(?:xz|gz|bz2)$/.test(item.filename));
+        return [{ version, releaseDate: metadata?.date, sourceUrl: "https://www.php.net/releases/" + version + ".php",
+          checksum: typeof archive?.sha256 === "string" ? archive.sha256 : "",
+          metadata: { majorVersion: version.split(".")[0], sourceFiles: source.map((item: any) => ({ filename: item.filename, sha256: item.sha256 })) } }];
+      });
+    }
+    if (software.sourceType === "lavalink-releases") {
+      const results: DiscoveredVersion[] = [];
+      for (let page = 1; page <= 5; page++) {
+        const response = await axios.get("https://api.github.com/repos/lavalink-devs/Lavalink/releases?per_page=100&page=" + page, {
+          timeout: 20000, headers: { Accept: "application/vnd.github+json", "User-Agent": "NIMBUS-Software-Manager" } });
+        if (!Array.isArray(response.data)) throw new BadRequestException("Lavalink official release source returned an invalid response");
+        const rows = response.data as any[];
+        results.push(...rows.filter(item => !item.draft).map(item => ({
+          version: String(item.tag_name ?? "").replace(/^v/, ""), releaseName: String(item.name ?? ""),
+          releaseDate: item.published_at, prerelease: !!item.prerelease,
+          sourceUrl: String(item.html_url ?? "https://github.com/lavalink-devs/Lavalink/releases"),
+          sourceId: String(item.id ?? ""), metadata: { targetCommitish: item.target_commitish ?? "", javaRuntime: "Java 17 or newer" },
+        })).filter(item => item.version));
+        if (rows.length < 100) break;
+      }
+      return results;
     }
     if (software.sourceType === "dockerhub-tags") {
       const repository = software.sourceConfig.repository;
