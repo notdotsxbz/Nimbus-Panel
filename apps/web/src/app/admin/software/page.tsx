@@ -11,7 +11,7 @@ type SoftwareRow = {
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
 type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
-type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; createdAt: string };
+type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
 
 export default function AdminSoftwarePage() {
   const [items, setItems] = useState<SoftwareRow[]>([]);
@@ -97,6 +97,13 @@ export default function AdminSoftwarePage() {
       setItems(current => current.map(item => item._id === updated._id ? updated : item));
       show("Automatic synchronization settings updated", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Could not update sync settings", "err"); }
+  };
+  const retryCleanup = async (operation: OperationRow) => {
+    try {
+      await api.post("/software/operations/" + operation._id + "/cleanup", {});
+      show("Previous container cleanup completed", "ok");
+      await load();
+    } catch (e) { show(e instanceof Error ? e.message : "Cleanup is still pending", "err"); }
   };
   const editSoftware = async () => {
     if (!selected) return;
@@ -232,7 +239,7 @@ export default function AdminSoftwarePage() {
         {recentOperations.map(operation => <div key={operation._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3 text-sm">
           <div><strong>{operation.requestedSoftware} · {operation.requestedVersion}</strong><p className="text-xs text-muted">{typeof operation.serviceId === "object" ? operation.serviceId?.name ?? "Service" : operation.serviceId} · {new Date(operation.createdAt).toLocaleString()}</p></div>
           <span className="text-xs text-muted">{operation.status} · {operation.progress}%</span>
-          {operation.error ? <p className="w-full text-xs text-rose-300">{operation.error}</p> : null}{operation.warning ? <p className="w-full text-xs text-amber-300">{operation.warning}</p> : null}
+          {operation.error ? <p className="w-full text-xs text-rose-300">{operation.error}</p> : null}{operation.warning ? <p className="w-full text-xs text-amber-300">{operation.warning}</p> : null}{operation.warning && operation.verification?.previousContainerName && !operation.verification.previousContainerRemoved ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void retryCleanup(operation)}>Retry old-container cleanup</button> : null}
         </div>)}
         {!recentOperations.length && <p className="text-sm text-muted">No software operations yet.</p>}
       </div>

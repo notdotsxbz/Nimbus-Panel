@@ -10,6 +10,10 @@ export class SoftwareController {
   @Roles("owner", "admin")
   list() { return this.software.list(); }
 
+  @Post("operations/:operationId/cleanup")
+  @Roles("owner", "admin")
+  cleanupPreviousContainer(@Param("operationId") operationId: string, @CurrentUser() actor: AuthUser) { return this.software.cleanupPreviousContainer(operationId, actor); }
+
   @Get("operations")
   @Roles("owner", "admin")
   listOperations() { return this.software.listOperations(); }

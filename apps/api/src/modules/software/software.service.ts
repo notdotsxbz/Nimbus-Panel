@@ -263,6 +263,25 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     return version;
   }
 
+  async cleanupPreviousContainer(operationId: string, actor: AuthUser) {
+    if (!Types.ObjectId.isValid(operationId)) throw new BadRequestException("Invalid operation ID");
+    const operation = await this.operations.findById(operationId);
+    if (!operation || operation.status !== "completed") throw new NotFoundException("Completed software operation not found");
+    const verification = operation.verification ?? {};
+    if (verification.previousContainerRemoved === true) return operation;
+    const previousContainerName = String(verification.previousContainerName ?? "");
+    const dockerImage = String(verification.installedImage ?? "");
+    if (!previousContainerName || !dockerImage) throw new BadRequestException("This operation has no pending container cleanup");
+    const service = await this.services.get(operation.serviceId.toString(), actor);
+    const node = await this.nodes.get(service.nodeId.toString());
+    const result = await this.nodes.agentCall(node, "/services/" + service._id.toString() + "/upgrade-commit", { dockerImage, previousContainerName }, "POST", 60_000) as { status?: string; previousContainerRemoved?: boolean };
+    if (result.status !== "committed" || !result.previousContainerRemoved) throw new BadRequestException("Previous container cleanup is still pending; it has been retained for safety");
+    operation.verification = { ...verification, previousContainerRemoved: true };
+    operation.warning = "";
+    await operation.save();
+    await this.audit.log({ actorId: actor.id, action: "software.service.upgrade_cleanup_completed", targetType: "service", targetId: operation.serviceId.toString(), detail: operationId, sensitive: true });
+    return operation;
+  }
   async listServiceOperations(serviceId: string, actor: AuthUser) {
     await this.services.get(serviceId, actor);
     return this.operations.find({ serviceId }).sort({ createdAt: -1 }).limit(50).lean();
@@ -312,7 +331,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       service.activity.push({ at: new Date(), action: "software.upgrade", ok: true, detail: software.identifier + "@" + version.version });
       await service.save(); serviceStateSaved = true;
       operation.status = "completed"; operation.progress = 100;
-      operation.verification = { running: true, installedImage: agentUpgrade.installedImage, containerId: agentUpgrade.containerId, healthStatus: agentUpgrade.healthStatus ?? "unknown", previousContainerRemoved: false };
+      operation.verification = { running: true, installedImage: agentUpgrade.installedImage, containerId: agentUpgrade.containerId, healthStatus: agentUpgrade.healthStatus ?? "unknown", previousContainerRemoved: false, previousContainerName: agentUpgrade.previousContainerName };
       operation.completedAt = new Date(); await operation.save();
       await this.audit.log({ actorId: actor.id, action: "software.service.upgraded", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
       // Finalize only after both the service record and operation record are safely saved.
