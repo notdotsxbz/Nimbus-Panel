@@ -14,6 +14,9 @@ The currently implemented official-source adapters are:
 - **Python** — actual CPython release stages from Python PEP release metadata.
 - **PHP** — official PHP release metadata and source checksums.
 - **Lavalink** — official Lavalink project releases from GitHub Releases.
+- **Python** — actual CPython release stages from Python PEP release metadata.
+- **PHP** — official PHP release metadata and source checksums.
+- **Lavalink** — official Lavalink project releases from GitHub Releases.
 - **Manual** — fallback for software without an implemented source adapter.
 
 GitHub discovery follows up to five pages of 100 releases. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
