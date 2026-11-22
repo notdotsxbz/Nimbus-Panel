@@ -162,6 +162,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       } catch { failed++; }
     }
     software.lastSyncedAt = new Date(); software.lastSyncAttemptAt = new Date(); software.lastSyncStatus = failed ? "partial" : "success";
+    const syncIntervals: Record<string, number> = { "6h": 21600000, "12h": 43200000, "24h": 86400000, "7d": 604800000 };
+    software.nextSyncAt = software.autoSync && syncIntervals[software.syncFrequency] ? new Date(Date.now() + syncIntervals[software.syncFrequency]) : undefined;
     software.syncHistory.push({ startedAt: software.discoveryPreviewAt, completedAt: new Date(), status: software.lastSyncStatus, discovered: selected.length, imported, skipped, failed });
     software.syncHistory = software.syncHistory.slice(-50); software.discoveryPreview = []; software.discoveryPreviewAt = undefined;
     await software.save();
@@ -217,14 +219,16 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   async bulkUpdateVersions(id: string, versionIds: string[], action: string, actor: AuthUser) {
     await this.getSoftware(id);
     if (!Array.isArray(versionIds) || versionIds.length < 1 || versionIds.length > 200 || versionIds.some(v => !Types.ObjectId.isValid(v))) throw new BadRequestException("Select between 1 and 200 valid versions");
-    const ids = versionIds.map(v => new Types.ObjectId(v));
+    const ids = [...new Set(versionIds)].map(v => new Types.ObjectId(v));
+    const validCount = await this.versions.countDocuments({ softwareId: id, _id: { $in: ids } });
+    if (validCount !== ids.length) throw new BadRequestException("One or more selected versions do not belong to this software entry");
     const update: Record<string, unknown> = {};
     if (action === "publish") update.publicationStatus = "published";
     else if (action === "disable") update.publicationStatus = "disabled";
     else if (action === "pending") update.publicationStatus = "pending";
     else if (action === "deprecate") update.deprecated = true;
     else if (action === "undeprecate") update.deprecated = false;
-    else if (action === "recommend" && ids.length === 1) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); update.recommended = true; }
+    else if (action === "recommend" && ids.length === 1) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: ids[0] } }); update.recommended = true; }
     else throw new BadRequestException("Unsupported bulk action");
     const result = await this.versions.updateMany({ softwareId: id, _id: { $in: ids } }, { $set: update });
     await this.audit.log({ actorId: actor.id, action: "software.versions.bulk_updated", targetType: "software", targetId: id, detail: "action=" + action + " modified=" + result.modifiedCount, sensitive: true });
@@ -235,7 +239,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");
     const version = await this.versions.findById(versionId);
     if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
-    if (input.recommended) await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } });
+    if (input.recommended) { await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } }); await this.catalog.updateOne({ _id: id }, { $set: { recommendedVersionId: version._id } }); }
+    else if (input.recommended === false) await this.catalog.updateOne({ _id: id, recommendedVersionId: version._id }, { $set: { recommendedVersionId: null } });
     if (input.publicationStatus !== undefined) version.publicationStatus = input.publicationStatus;
     if (input.deprecated !== undefined) version.deprecated = input.deprecated;
     if (input.recommended !== undefined) version.recommended = input.recommended;
