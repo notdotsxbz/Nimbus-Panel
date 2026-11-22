@@ -375,6 +375,11 @@ async function call(path, { method = "GET", token, body } = {}) {
   const invalidDotnet = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid .NET source", identifier: "smoke-dotnet-invalid-" + suffix, serviceTypes: ["backend"], sourceType: "dotnet-index", sourceConfig: { channelVersion: "latest" } } });
   check(".NET source rejects an invalid channel", invalidDotnet.status === 400, "status=" + invalidDotnet.status);
 
+  const osCatalog = await call("/software", { method: "POST", token: ownerToken, body: { name: "Ubuntu 24.04 OS Image", identifier: "smoke-ubuntu-os-" + suffix, category: "operating-system", serviceTypes: ["vps", "vds"], customerAvailable: false, sourceType: "manual", installationConfig: { method: "virtualization-image", provider: "kvm-libvirt", imageId: "kvm/ubuntu-2404", minRamMb: 1024, architecture: "amd64" } } });
+  check("admin can manage metadata for a KVM OS image", osCatalog.status === 201 && osCatalog.body?.installationConfig?.imageId === "kvm/ubuntu-2404", "status=" + osCatalog.status);
+  if (osCatalog.body?._id) await call("/software/" + osCatalog.body._id, { method: "DELETE", token: ownerToken });
+  const rejectedOsProvider = await call("/software", { method: "POST", token: ownerToken, body: { name: "Unapproved OS Image", identifier: "smoke-unapproved-os-" + suffix, category: "operating-system", serviceTypes: ["vps"], sourceType: "manual", installationConfig: { method: "virtualization-image", provider: "proxmox", imageId: "kvm/ubuntu-2404", minRamMb: 1024 } } });
+  check("OS catalog rejects unsupported virtualization providers", rejectedOsProvider.status === 400, "status=" + rejectedOsProvider.status);
   const softwareId = software.body?._id;
   const adminSyncJobs = await call("/software/sync-jobs", { token: ownerToken });
   check("admin can inspect durable software sync queue", adminSyncJobs.status === 200 && Array.isArray(adminSyncJobs.body), "status=" + adminSyncJobs.status);
