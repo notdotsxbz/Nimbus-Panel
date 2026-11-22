@@ -80,6 +80,15 @@ export default function AdminSoftwarePage() {
       setPreview([]); setSelectedPreview([]); await openSoftware(selected); await load();
     } catch (e) { show(e instanceof Error ? e.message : "Version import failed", "err"); }
   };
+  const updateAutoPublish = async (autoPublish: boolean) => {
+    if (!selected) return;
+    try {
+      await api.patch("/software/" + selected._id, { autoPublish });
+      const updated = { ...selected, autoPublish }; setSelected(updated);
+      setItems(current => current.map(item => item._id === updated._id ? updated : item));
+      show("Stable-release auto-publish setting updated", "ok");
+    } catch (e) { show(e instanceof Error ? e.message : "Could not update auto-publish", "err"); }
+  };
   const updateSyncSettings = async (autoSync: boolean, syncFrequency: string) => {
     if (!selected) return;
     try {
@@ -195,9 +204,10 @@ export default function AdminSoftwarePage() {
             <span className="self-center text-xs text-muted">{selectedVersionIds.length} selected</span>
             <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("publish")}>Publish</button>
             <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("disable")}>Disable</button>
-            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("deprecate")}>Deprecate</button>
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void bulkAction("deprecate")}>Deprecate</button><button className="btn-ghost !px-2 !py-1 text-xs" disabled={selectedVersionIds.length !== 1} onClick={() => void bulkAction("recommend")}>Recommend</button>
           </div>}
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={selected.autoPublish} onChange={e => void updateAutoPublish(e.target.checked)} /> Auto-publish stable releases</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={selected.autoSync} onChange={e => void updateSyncSettings(e.target.checked, e.target.checked && selected.syncFrequency === "manual" ? "24h" : selected.syncFrequency)} /> Automatic sync</label>
             <label className="flex items-center gap-2">Frequency<select className="input !w-auto !py-1" value={selected.syncFrequency} onChange={e => void updateSyncSettings(selected.autoSync, e.target.value)}>{["manual", "6h", "12h", "24h", "7d"].map(value => <option key={value} value={value} disabled={selected.autoSync && value === "manual"}>{value === "manual" ? "Manual" : value}</option>)}</select></label>
           </div>
@@ -208,7 +218,7 @@ export default function AdminSoftwarePage() {
           <div className="mt-4 space-y-2">
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
               <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />
-              <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}</p></div>
+              <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p></div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
             {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually through the API.</p>}
