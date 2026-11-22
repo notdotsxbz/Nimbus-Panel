@@ -371,8 +371,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           version: String(row.name), releaseDate: row.last_updated, prerelease: /(alpha|beta|rc|preview|dev)/i.test(String(row.name)),
           sourceUrl: "https://hub.docker.com/r/" + repository + "/tags?name=" + encodeURIComponent(String(row.name)),
           sourceId: String(row.digest ?? row.id ?? ""),
-          compatibility: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [],
-          metadata: { architectures: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [], os: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.os ?? "")).filter(Boolean))] : [] },
+          compatibility: Array.isArray(row.images) ? [...new Set<string>(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [],
+          metadata: { architectures: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [], os: Array.isArray(row.images) ? [...new Set<string>(row.images.map((image: any) => String(image.os ?? "")).filter(Boolean))] : [] },
         })));
         if (rows.length < 100) break;
       }
