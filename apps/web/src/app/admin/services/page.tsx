@@ -171,6 +171,11 @@ export default function AdminServices() {
               <option value="website">Website</option>
               <option value="backend">Backend</option>
               <option value="database">Database</option>
+              <option value="mongodb">MongoDB</option>
+              <option value="nodejs">Node.js Application</option>
+              <option value="python">Python Application</option>
+              <option value="lavalink">Lavalink</option>
+              <option value="custom">Custom Application</option>
               <option value="docker">Docker</option>
             </select>
           </div>
