@@ -42,6 +42,18 @@ case "$1" in
     echo "Starting Minecraft server version 1.21.11"
     exit 0
     ;;
+  exec)
+    case "$*" in
+      *"node --version"*) echo "v22.15.1" ;;
+      *"python --version"*) echo "Python 3.12.4" ;;
+      *"php --version"*) echo "PHP 8.3.15 (cli)" ;;
+      *"go version"*) echo "go version go1.23.4 linux/amd64" ;;
+      *"java -version"*) echo 'openjdk version "21.0.5" 2025-01-21' ;;
+      *"mongod --version"*) echo "db version v8.0.4" ;;
+      *) echo "unsupported fake runtime" >&2; exit 1 ;;
+    esac
+    exit 0
+    ;;
   run)
     [ "${FAIL_RUN:-0}" = "1" ] && exit 1
     echo "new-container-id"
@@ -216,4 +228,22 @@ func TestSoftwareUpgradeRollsBackWhenVersionEnvironmentIsMissing(t *testing.T) {
 	if rec.Code != http.StatusBadGateway { t.Fatalf("expected 502, got %d: %s", rec.Code, rec.Body.String()) }
 	log, err := os.ReadFile(logPath); if err != nil { t.Fatal(err) }
 	if !strings.Contains(string(log), "rename nimbus-prev-") || !strings.Contains(string(log), "start nimbus-svc-test") { t.Fatalf("expected rollback after environment mismatch: %s", string(log)) }
+}
+
+func TestRuntimeVersionProbesUseFixedCommandsAndMatchExactVersion(t *testing.T) {
+	installFakeDocker(t)
+	cases := []struct { probe, expected string }{
+		{"nodejs-version", "22.15.1"},
+		{"python-version", "3.12.4"},
+		{"php-version", "8.3.15"},
+		{"go-version", "1.23.4"},
+		{"java-version", "21.0.5"},
+		{"mongodb-version", "8.0.4"},
+	}
+	for _, test := range cases {
+		output, err := runContainerVersionProbe("nimbus-svc-test", test.probe)
+		if err != nil { t.Fatalf("%s probe failed: %v", test.probe, err) }
+		if !versionOutputHasExpected(output, test.expected) { t.Fatalf("%s output %q did not match %s", test.probe, output, test.expected) }
+	}
+	if versionOutputHasExpected("v22.15.10", "22.15.1") { t.Fatal("runtime version probe must not match a shorter version prefix") }
 }
