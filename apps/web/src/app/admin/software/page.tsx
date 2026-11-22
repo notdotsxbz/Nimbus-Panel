@@ -19,6 +19,7 @@ export default function AdminSoftwarePage() {
   const [items, setItems] = useState<SoftwareRow[]>([]);
   const [selected, setSelected] = useState<SoftwareRow | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
+  const [editingVersion, setEditingVersion] = useState<VersionRow | null>(null);
   const [versionPage, setVersionPage] = useState(1);
   const [versionPages, setVersionPages] = useState(1);
   const [versionTotal, setVersionTotal] = useState(0);
@@ -214,6 +215,37 @@ export default function AdminSoftwarePage() {
       await openSoftware(selected);
       show("Version added as pending approval", "ok");
     } catch (error) { show(error instanceof Error ? error.message : "Could not add version", "err"); }
+  };
+
+  const saveVersionEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected || !editingVersion) return;
+    const data = new FormData(event.currentTarget);
+    let runtimeRequirements: Record<string, unknown> = {};
+    const runtimeText = String(data.get("runtimeRequirements") ?? "").trim();
+    if (runtimeText) {
+      try {
+        const parsed = JSON.parse(runtimeText);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Runtime requirements must be a JSON object");
+        runtimeRequirements = parsed;
+      } catch (error) { show(error instanceof Error ? error.message : "Invalid runtime requirements JSON", "err"); return; }
+    }
+    const channel = String(data.get("channel") ?? "stable");
+    try {
+      await api.patch("/software/" + selected._id + "/versions/" + editingVersion._id, {
+        releaseName: String(data.get("releaseName") ?? ""),
+        releaseDate: String(data.get("releaseDate") ?? "") || undefined,
+        channel, prerelease: channel === "prerelease" || channel === "nightly",
+        sourceUrl: String(data.get("sourceUrl") ?? ""),
+        architectures: String(data.get("architectures") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+        operatingSystems: String(data.get("operatingSystems") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+        compatibility: String(data.get("compatibility") ?? "").split(",").map(value => value.trim()).filter(Boolean),
+        runtimeRequirements, checksum: String(data.get("checksum") ?? ""), signature: String(data.get("signature") ?? ""),
+      });
+      setEditingVersion(null);
+      await loadVersionPage(selected._id, versionPage);
+      show("Version metadata updated", "ok");
+    } catch (error) { show(error instanceof Error ? error.message : "Could not update version", "err"); }
   };
 
   const bulkAction = async (action: string) => {
