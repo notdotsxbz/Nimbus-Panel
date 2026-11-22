@@ -112,6 +112,7 @@ func runContainerVersionProbe(container, probe string) (string, error) {
 	case "php-version": command = []string{"php", "--version"}
 	case "go-version": command = []string{"go", "version"}
 	case "java-version": command = []string{"java", "-version"}
+	case "dotnet-version": command = []string{"dotnet", "--version"}
 	case "mongodb-version": command = []string{"mongod", "--version"}
 	default: return "", fmt.Errorf("unsupported application version probe")
 	}
