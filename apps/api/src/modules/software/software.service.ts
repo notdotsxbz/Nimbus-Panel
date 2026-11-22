@@ -100,8 +100,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
 
   async removeVersion(id: string, versionId: string, actor: AuthUser) {
     const software = await this.getSoftware(id);
-    const version = await this.versions.findOne({ _id: versionId, softwareId: id });
-    if (!version) throw new NotFoundException("Version not found");
+    const version = await this.versions.findById(versionId);
+    if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
     const inUse = await this.serviceRecords.countDocuments({ software: software.identifier, softwareVersion: version.version });
     if (inUse > 0) throw new BadRequestException("This version is currently used by " + inUse + " service(s) and cannot be deleted.");
     await version.deleteOne();
@@ -233,8 +233,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   async setVersion(id: string, versionId: string, input: { publicationStatus?: string; deprecated?: boolean; recommended?: boolean }, actor: AuthUser) {
     await this.getSoftware(id);
     if (input.publicationStatus && !["pending", "published", "disabled"].includes(input.publicationStatus)) throw new BadRequestException("Invalid publication status");
-    const version = await this.versions.findOne({ _id: versionId, softwareId: id });
-    if (!version) throw new NotFoundException("Version not found");
+    const version = await this.versions.findById(versionId);
+    if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Version not found");
     if (input.recommended) await this.versions.updateMany({ softwareId: id }, { $set: { recommended: false } });
     if (input.publicationStatus !== undefined) version.publicationStatus = input.publicationStatus;
     if (input.deprecated !== undefined) version.deprecated = input.deprecated;

@@ -349,7 +349,7 @@ async function call(path, { method = "GET", token, body } = {}) {
   const manualVersion = await call("/software/" + softwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0" } });
   check("admin adds manual fallback version", manualVersion.status === 201 && !!manualVersion.body?._id, "status=" + manualVersion.status);
   const publishedVersion = await call("/software/" + softwareId + "/versions/" + manualVersion.body?._id, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published", recommended: true } });
-  check("admin publishes and recommends a version", publishedVersion.status === 200 && publishedVersion.body?.publicationStatus === "published", "status=" + publishedVersion.status);
+  check("admin publishes and recommends a version", publishedVersion.status === 200 && publishedVersion.body?.publicationStatus === "published", "status=" + publishedVersion.status + " body=" + JSON.stringify(publishedVersion.body).slice(0, 180));
   if (svcId && softwareId) {
     const crossOptions = await call("/software/for-service/" + svcId, { token: custToken });
     check("customer cannot read another customer software options", crossOptions.status === 403, "status=" + crossOptions.status);
@@ -357,7 +357,7 @@ async function call(path, { method = "GET", token, body } = {}) {
     check("authorized owner can read service-specific software options", ownerOptions.status === 200 && Array.isArray(ownerOptions.body?.options), "status=" + ownerOptions.status);
   }
   const deleteVersion = await call("/software/" + softwareId + "/versions/" + manualVersion.body?._id, { method: "DELETE", token: ownerToken });
-  check("admin deletes unused software version", deleteVersion.status === 200, "status=" + deleteVersion.status);
+  check("admin deletes unused software version", deleteVersion.status === 200, "status=" + deleteVersion.status + " body=" + JSON.stringify(deleteVersion.body).slice(0, 180));
   const deleteSoftware = await call("/software/" + softwareId, { method: "DELETE", token: ownerToken });
   check("admin deletes unused software catalog entry", deleteSoftware.status === 200, "status=" + deleteSoftware.status);
 
