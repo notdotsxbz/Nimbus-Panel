@@ -471,11 +471,20 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const service = await this.services.get(serviceId, actor);
     if (["vps", "vds"].includes(service.type.toLowerCase())) return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: [] };
     const options = await this.catalog.find({ enabled: true, customerAvailable: true, serviceTypes: service.type }).lean();
-    const output = await Promise.all(options.map(async (software) => ({
-      software: { id: software._id, name: software.name, identifier: software.identifier, description: software.description, category: software.category, installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && (software.installationConfig.imageTemplate.includes("{version}") || Object.values((software.installationConfig.environment ?? {}) as Record<string, string>).some(value => typeof value === "string" && value.includes("{version}"))) },
-      versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false }).sort({ recommended: -1, releaseDate: -1 }).lean(),
-    })));
-    return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, options: output };
+    const [latestSuccess, output] = await Promise.all([
+      this.operations.findOne({ serviceId: service._id, status: "completed" }).sort({ completedAt: -1 }).select("completedAt").lean(),
+      Promise.all(options.map(async (software) => ({
+        software: {
+          id: software._id, name: software.name, identifier: software.identifier, description: software.description,
+          category: software.category, officialWebsite: software.officialWebsite, iconUrl: software.iconUrl,
+          supportedOperatingSystems: software.supportedOperatingSystems, supportedArchitectures: software.supportedArchitectures,
+          requiredRuntime: software.requiredRuntime, defaultVersion: software.defaultVersion,
+          installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && (software.installationConfig.imageTemplate.includes("{version}") || Object.values((software.installationConfig.environment ?? {}) as Record<string, string>).some(value => typeof value === "string" && value.includes("{version}"))),
+        },
+        versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false }).sort({ recommended: -1, releaseDate: -1 }).lean(),
+      }))),
+    ]);
+    return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, lastSuccessfulUpdate: latestSuccess?.completedAt ?? null, options: output };
   }
 
   private async getSoftware(id: string) {
