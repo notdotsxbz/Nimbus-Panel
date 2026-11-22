@@ -6,7 +6,7 @@ import { GlassCard, useToast } from "@/components/glass";
 
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
-  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string>; versionProbe?: string; provider?: string; imageId?: string; minRamMb?: number; architecture?: string }; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
+  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string>; versionProbe?: string; provider?: string; imageId?: string; minRamMb?: number; architecture?: string }; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string; latestDiscoveredVersion?: string | null; latestPublishedVersion?: string | null; recommendedVersion?: string | null; versionCount?: number;
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; channel?: string; importedAt?: string; compatibility?: string[]; architectures?: string[]; operatingSystems?: string[]; compatible?: boolean; incompatibilityReasons?: string[]; runtimeRequirements?: Record<string, unknown>; checksum?: string; signature?: string; sourceUrl?: string };
@@ -313,6 +313,7 @@ export default function AdminSoftwarePage() {
         {items.map(item => <button key={item._id} onClick={() => void openSoftware(item)} className={`block w-full border-b border-white/5 px-5 py-4 text-left hover:bg-white/5 ${selected?._id === item._id ? "bg-white/5" : ""}`}>
           <span className="flex items-center justify-between gap-2"><strong>{item.name}</strong><span className="text-xs text-muted">{item.enabled ? "Enabled" : "Disabled"}</span></span>
           <span className="mt-1 block text-xs text-muted">{item.identifier} · {item.serviceTypes.join(", ")}</span>
+          <span className="mt-1 block text-xs text-muted">Latest: {item.latestDiscoveredVersion ?? "Not synced"} · Published: {item.latestPublishedVersion ?? "None"} · Recommended: {item.recommendedVersion ?? "None"} · {item.versionCount ?? 0} versions</span>
         </button>)}
         {!items.length && <p className="p-5 text-sm text-muted">No software entries yet.</p>}
       </GlassCard>
