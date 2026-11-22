@@ -55,10 +55,10 @@ const agentVersion = "1.0.0"
 
 func parseOSRelease(raw []byte) (string, string) {
 	var id, version string
-	for _, line := range strings.Split(string(raw), "\\n") {
+	for _, line := range strings.Split(string(raw), "\n") {
 		key, value, ok := strings.Cut(line, "=")
 		if !ok { continue }
-		value = strings.Trim(strings.TrimSpace(value), `\"'`)
+		value = strings.Trim(strings.TrimSpace(value), "\"'")
 		switch key {
 		case "ID": id = strings.ToLower(value)
 		case "VERSION_ID": version = value
