@@ -436,6 +436,18 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const [software, version] = await Promise.all([this.catalog.findById(softwareId), this.versions.findOne({ _id: versionId, softwareId })]);
     if (!software || !version) throw new NotFoundException("Software or version not found");
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
+    if (software.supportedOperatingSystems?.length) {
+      const targetNode = await this.nodes.get(service.nodeId.toString());
+      const actualOs = String(targetNode.os ?? "").trim().toLowerCase();
+      if (!actualOs) throw new BadRequestException("The hosting node operating system is unknown, so this software's OS compatibility cannot be verified");
+      const supported = software.supportedOperatingSystems.map(value => value.trim().toLowerCase());
+      const matchesOs = supported.some(value => {
+        const normalized = value.replace(/[_-]/g, " ");
+        if (normalized === "linux") return ["linux", "ubuntu", "debian"].includes(actualOs);
+        return normalized === actualOs || normalized.startsWith(actualOs + " ") || actualOs.startsWith(normalized + " ");
+      });
+      if (!matchesOs) throw new BadRequestException("This software does not support the operating system installed on the selected hosting node");
+    }
     if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
     const template = software.installationConfig?.imageTemplate;
     if (software.installationConfig?.method !== "docker-image-template" || typeof template !== "string" || !template.includes("{version}")) throw new BadRequestException("This catalog entry has no verified installation adapter yet");
