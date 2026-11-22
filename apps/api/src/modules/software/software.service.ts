@@ -289,10 +289,10 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       try {
         const result = await this.versions.updateOne({ softwareId: software._id, version: item.version }, { $setOnInsert: {
           softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "", releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
-          channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(item.version) && typeof item.sourceUrl === "string" && item.sourceUrl.startsWith("https://") && item.metadata?.incomplete !== true ? "published" : "pending",
+          channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease && item.compatible !== false && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(item.version) && typeof item.sourceUrl === "string" && item.sourceUrl.startsWith("https://") && item.metadata?.incomplete !== true ? "published" : "pending",
           sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "", compatibility: item.compatibility ?? [],
           architectures: item.architectures ?? [], operatingSystems: item.operatingSystems ?? [],
-          ...this.assessCompatibility(software, item), runtimeRequirements: item.runtimeRequirements ?? {},
+          ...compatibility, runtimeRequirements: item.runtimeRequirements ?? {},
           checksum: item.checksum ?? (typeof item.metadata?.checksum === "string" ? item.metadata.checksum : ""), signature: item.signature ?? "",
           metadata: item.metadata ?? {}, importedAt: new Date(),
         } }, { upsert: true });
@@ -319,13 +319,14 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       for (const item of discovered) {
         try {
           if (!item.version || item.version.length > 100) { failed++; continue; }
+          const compatibility = this.assessCompatibility(software, item);
           const result = await this.versions.updateOne(
             { softwareId: software._id, version: item.version },
             { $setOnInsert: {
               softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "",
               releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
               channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease,
-              publicationStatus: software.autoPublish && !item.prerelease ? "published" : "pending",
+              publicationStatus: software.autoPublish && !item.prerelease && compatibility.compatible && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(item.version) && typeof item.sourceUrl === "string" && item.sourceUrl.startsWith("https://") && item.metadata?.incomplete !== true ? "published" : "pending",
               sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "",
               compatibility: item.compatibility ?? [], architectures: item.architectures ?? [], operatingSystems: item.operatingSystems ?? [],
               ...this.assessCompatibility(software, item), runtimeRequirements: item.runtimeRequirements ?? {},
@@ -352,6 +353,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       software.syncHistory.push({ startedAt, completedAt: new Date(), status: "failed", error: error instanceof Error ? error.message.slice(0, 500) : "Source request failed" });
       software.syncHistory = software.syncHistory.slice(-50);
       await software.save();
+      await this.audit.log({ actorId: actor.id === "system" ? undefined : actor.id, action: "software.sync.failed", targetType: "software", targetId: id, detail: error instanceof Error ? error.message.slice(0, 500) : "Source request failed", sensitive: true });
       throw new BadRequestException("Version discovery failed. Existing catalog entries were retained.");
     }
   }
