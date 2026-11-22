@@ -327,6 +327,20 @@ export default function AdminSoftwarePage() {
               </label>)}
             </div>
           </div>}
+          {editingVersion ? <form onSubmit={saveVersionEdit} className="mb-4 grid gap-2 rounded-lg border border-sky-400/30 p-3 sm:grid-cols-2">
+            <strong className="text-sm sm:col-span-2">Edit version {editingVersion.version}</strong>
+            <input name="releaseName" className="input min-w-0" placeholder="Release name" defaultValue={editingVersion.releaseName} />
+            <input name="releaseDate" type="date" className="input min-w-0" defaultValue={editingVersion.releaseDate?.slice(0, 10) ?? ""} />
+            <select name="channel" className="input min-w-0" defaultValue={editingVersion.channel ?? (editingVersion.prerelease ? "prerelease" : "stable")}><option value="stable">Stable</option><option value="lts">LTS</option><option value="prerelease">Prerelease</option><option value="nightly">Nightly</option></select>
+            <input name="sourceUrl" type="url" className="input min-w-0" placeholder="HTTPS release source URL" defaultValue={editingVersion.sourceUrl ?? ""} />
+            <input name="architectures" className="input min-w-0" placeholder="Architectures" defaultValue={editingVersion.architectures?.join(",") ?? ""} />
+            <input name="operatingSystems" className="input min-w-0" placeholder="Operating systems" defaultValue={editingVersion.operatingSystems?.join(",") ?? ""} />
+            <input name="compatibility" className="input min-w-0" placeholder="Compatibility" defaultValue={editingVersion.compatibility?.join(",") ?? ""} />
+            <input name="checksum" className="input min-w-0" placeholder="Checksum" defaultValue={editingVersion.checksum ?? ""} />
+            <input name="signature" className="input min-w-0 sm:col-span-2" placeholder="Signature / verification reference" defaultValue={editingVersion.signature ?? ""} />
+            <textarea name="runtimeRequirements" className="input min-w-0 font-mono sm:col-span-2" rows={2} defaultValue={JSON.stringify(editingVersion.runtimeRequirements ?? {}, null, 2)} />
+            <div className="flex gap-2 sm:col-span-2"><button className="btn-primary" type="submit">Save version metadata</button><button className="btn-ghost" type="button" onClick={() => setEditingVersion(null)}>Cancel</button></div>
+          </form> : null}
           <form onSubmit={addManualVersion} className="mt-4 grid gap-2 rounded-lg border border-white/10 p-3 sm:grid-cols-2">
             <input name="version" required className="input min-w-0" placeholder="Version number" aria-label="Version number" />
             <input name="releaseName" className="input min-w-0" placeholder="Release name" />
@@ -370,7 +384,7 @@ export default function AdminSoftwarePage() {
               {version.checksum ? <p className="break-all text-xs text-muted">Checksum: {version.checksum}</p> : null}
               {version.sourceUrl ? <a className="text-xs text-sky-300 underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}
 </div>
-              <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
+              <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" disabled={version.compatible === false} title={version.compatible === false ? version.incompatibilityReasons?.join(", ") : "Publish version"} onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setEditingVersion(version)}>Edit</button><button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
             {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually.</p>}
             {versionTotal > 0 ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3 text-xs text-muted">
