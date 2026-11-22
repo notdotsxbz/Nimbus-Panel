@@ -22,6 +22,15 @@ interface NodeOption {
   ramAllocatedMb: number;
   healthy: boolean;
 }
+interface SoftwareCatalogRow {
+  _id: string; name: string; identifier: string; serviceTypes: string[]; enabled: boolean;
+  installationConfig?: { method?: string; imageTemplate?: string };
+}
+interface SoftwareVersionRow {
+  _id: string; version: string; publicationStatus: string; deprecated: boolean;
+  compatible?: boolean; recommended?: boolean;
+}
+interface SoftwareVersionPage { items: SoftwareVersionRow[] }
 
 export default function AdminServices() {
   const [services, setServices] = useState<ServiceRow[]>([]);
@@ -29,6 +38,11 @@ export default function AdminServices() {
   const [step, setStep] = useState(1);
   const [users, setUsers] = useState<{ _id: string; username: string; role?: string }[]>([]);
   const [nodes, setNodes] = useState<NodeOption[]>([]);
+  const [catalog, setCatalog] = useState<SoftwareCatalogRow[]>([]);
+  const [catalogVersions, setCatalogVersions] = useState<SoftwareVersionRow[]>([]);
+  const [serviceType, setServiceType] = useState("minecraft");
+  const [softwareId, setSoftwareId] = useState("");
+  const [versionId, setVersionId] = useState("");
   const { show, node } = useToast();
 
   const load = async () => {
@@ -48,18 +62,54 @@ export default function AdminServices() {
     void load();
   }, []);
 
+  const loadCatalogVersions = async (id: string) => {
+    const page = await api.get<SoftwareVersionPage>("/software/" + id + "/versions?page=1&limit=100");
+    const published = page.items.filter(item => item.publicationStatus === "published" && !item.deprecated && item.compatible !== false);
+    setCatalogVersions(published);
+    setVersionId(published[0]?._id ?? "");
+  };
+
+  const changeCatalogSoftware = async (id: string) => {
+    setSoftwareId(id);
+    setVersionId("");
+    setCatalogVersions([]);
+    if (!id) return;
+    try { await loadCatalogVersions(id); }
+    catch (err) { show(err instanceof Error ? err.message : "Could not load published versions", "err"); }
+  };
+
+  const changeServiceType = async (type: string) => {
+    setServiceType(type);
+    const first = catalog.find(item => item.enabled && item.serviceTypes.includes(type) && item.installationConfig?.method === "docker-image-template");
+    setSoftwareId(first?._id ?? "");
+    setVersionId("");
+    setCatalogVersions([]);
+    if (first) {
+      try { await loadCatalogVersions(first._id); }
+      catch (err) { show(err instanceof Error ? err.message : "Could not load published versions", "err"); }
+    }
+  };
+
   const openWizard = async () => {
     setStep(1);
     setOpen(true);
     try {
-      const [u, n] = await Promise.all([
+      const [u, n, softwareRows] = await Promise.all([
         api.get<{ items: { _id: string; username: string; role?: string }[] }>("/users"),
         api.get<NodeOption[]>("/nodes/capacity"),
+        api.get<SoftwareCatalogRow[]>("/software"),
       ]);
       setUsers((u.items ?? []).filter(user => user.role === "customer"));
       setNodes(n);
+      setCatalog(softwareRows);
+      setServiceType("minecraft");
+      const first = softwareRows.find(item => item.enabled && item.serviceTypes.includes("minecraft") && item.installationConfig?.method === "docker-image-template");
+      setSoftwareId(first?._id ?? "");
+      setVersionId("");
+      setCatalogVersions([]);
+      if (first) await loadCatalogVersions(first._id);
     } catch {
-      show("Could not load users or node capacity", "err");
+      show("Could not load users, node capacity or software catalog", "err");
     }
   };
 
@@ -78,7 +128,11 @@ export default function AdminServices() {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     try {
-      await api.post("/services", {
+      if (!softwareId || !versionId) {
+        show("Choose a published software version before assigning this service.", "err");
+        return;
+      }
+      await api.post("/software/services/create", {
         name: f.get("name"),
         type: f.get("type"),
         ownerId: f.get("ownerId"),
@@ -86,8 +140,8 @@ export default function AdminServices() {
         cpuPercent: Number(f.get("cpuPercent")),
         ramMb: Number(f.get("ramMb")),
         diskGb: Number(f.get("diskGb")),
-        dockerImage: f.get("dockerImage"),
-        software: f.get("software") || undefined,
+        softwareId,
+        versionId,
       });
       setOpen(false);
       show("Service created — node is installing it", "ok");
@@ -165,7 +219,7 @@ export default function AdminServices() {
           </div>
           <div>
             <label className="label" htmlFor="s-type">Type</label>
-            <select id="s-type" name="type" className="input" defaultValue="minecraft">
+            <select id="s-type" name="type" className="input" value={serviceType} onChange={event => void changeServiceType(event.target.value)}>
               <option value="minecraft">Minecraft</option>
               <option value="discord">Discord Bot</option>
               <option value="website">Website</option>
@@ -202,13 +256,20 @@ export default function AdminServices() {
             <label className="label" htmlFor="s-cpu">CPU (%)</label>
             <input id="s-cpu" name="cpuPercent" type="number" min={10} max={400} defaultValue={100} required className="input" />
           </div>
-          <div>
-            <label className="label" htmlFor="s-image">Docker image</label>
-            <input id="s-image" name="dockerImage" required className="input" placeholder="ghcr.io/…:tag" />
+          <div className="col-span-2">
+            <label className="label" htmlFor="s-software">Approved software</label>
+            <select id="s-software" name="softwareId" className="input" value={softwareId} onChange={event => void changeCatalogSoftware(event.target.value)}>
+              <option value="">Select installable software…</option>
+              {catalog.filter(item => item.enabled && item.serviceTypes.includes(serviceType) && item.installationConfig?.method === "docker-image-template").map(item => <option key={item._id} value={item._id}>{item.name}</option>)}
+            </select>
           </div>
-          <div>
-            <label className="label" htmlFor="s-sw">Software</label>
-            <input id="s-sw" name="software" className="input" placeholder="paper / nodejs20 / python312" />
+          <div className="col-span-2">
+            <label className="label" htmlFor="s-version">Published version</label>
+            <select id="s-version" name="versionId" className="input" value={versionId} onChange={event => setVersionId(event.target.value)} disabled={!softwareId}>
+              <option value="">Select published version…</option>
+              {catalogVersions.map(item => <option key={item._id} value={item._id}>{item.version}{item.recommended ? " · Recommended" : ""}</option>)}
+            </select>
+            {!catalogVersions.length ? <p className="mt-1 text-xs text-muted">No published installable versions for this software. Fetch and publish versions in Admin → Software &amp; Versions first.</p> : null}
           </div>
           <div className="col-span-2">
             <button className="btn-primary w-full">Review & Assign</button>
