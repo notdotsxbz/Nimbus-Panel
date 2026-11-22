@@ -20,7 +20,7 @@ GitHub discovery follows up to five pages of 100 releases. Node.js uses the offi
 2. Enter a unique lowercase identifier and a name.
 3. Enter service type values exactly as used by NIMBUS (for example `minecraft`, `discord`, `website`, `backend`, `database`, or `docker`).
 4. Select an implemented source adapter and fill its repository/project fields.
-5. Optionally configure a Docker image template ending in `:{version}`, such as `example/application:{version}`. Use this only when the upstream project's published Docker tags actually match the version identifiers returned by the selected source. You may also supply installer environment overrides (for example `{"TYPE":"PAPER","EULA":"TRUE"}`); keys and values are validated and passed to the Node Agent, which merges them over the existing container environment.
+5. Configure a trusted Docker image and put `{version}` either in its image tag (for example `ghcr.io/example/application:{version}`) or in a version-bearing environment value. For Minecraft with `itzg/minecraft-server`, use a stable image tag such as `itzg/minecraft-server:java21` and environment overrides such as `TYPE=PAPER`, `VERSION={version}`, and `EULA=TRUE`. The Node Agent merges these values over the existing container environment. This verifies the replacement container/image and configured environment; application-specific version verification still depends on the image health check and is not a universal binary-level probe.
 6. Choose auto-sync frequency and whether stable discoveries may be published automatically.
 7. Save the entry and select it in the catalog.
 
