@@ -1,0 +1,14 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "nodejs",
+  "label": "Node.js Application Hosting",
+  "subdomainPattern": "api-{username}",
+  "requiresPort": true,
+  "protocols": ["tcp"],
+  "software": [
+    { "id": "nodejs22", "label": "Node.js 22 LTS", "image": "node:22-alpine", "versions": ["22"], "minRamMb": 256 },
+    { "id": "nodejs24", "label": "Node.js 24", "image": "node:24-alpine", "versions": ["24"], "minRamMb": 256 }
+  ],
+  "features": ["console", "files", "env-vars", "github-deploy", "build-logs", "health-checks", "auto-restart", "backups", "custom-domains"],
+  "notes": "Uses official Node.js container images. Only approved image templates are available to customers."
+}
