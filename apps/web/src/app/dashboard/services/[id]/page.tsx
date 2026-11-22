@@ -6,6 +6,7 @@ import { api, ApiError, currentUser } from "@/lib/api";
 import { CopyField, GlassCard, Modal, StatusBadge, Toast, useToast } from "@/components/glass";
 import { ConsoleV2 } from "@/components/console-v2";
 import { FileManager } from "@/components/file-manager";
+import { MinecraftProperties } from "@/components/minecraft-properties";
 
 interface ServiceDetail {
   _id: string;
@@ -22,7 +23,7 @@ interface ServiceDetail {
   containerId?: string;
 }
 
-const TABS = ["Overview", "Console", "Files", "Minecraft", "Backups", "Network", "Settings"] as const;
+const TABS = ["Overview", "Console", "Files", "Minecraft", "Properties", "Backups", "Network", "Settings"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ServicePage() {
@@ -95,7 +96,7 @@ export default function ServicePage() {
 
       {/* Tabs */}
       <div role="tablist" aria-label="Service sections" className="glass-soft flex overflow-x-auto rounded-xl p-1">
-        {TABS.map((t) => (
+        {TABS.filter((t) => t !== "Properties" || service.type === "minecraft").map((t) => (
           <button
             key={t}
             role="tab"
@@ -147,6 +148,8 @@ export default function ServicePage() {
       )}
 
       {tab === "Files" && <FileManager serviceId={service._id} initialPath={mcFile ?? undefined} onPathConsumed={() => setMcFile(null)} />}
+
+      {tab === "Properties" && service.type === "minecraft" && <MinecraftProperties serviceId={service._id} />}
 
       {tab === "Minecraft" && service.type === "minecraft" && (
         <div className="grid gap-4 lg:grid-cols-2">
