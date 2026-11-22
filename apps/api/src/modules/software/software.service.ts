@@ -253,8 +253,10 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       softwareId: software._id, version: input.version.trim(), releaseName: input.releaseName ?? "",
       releaseDate: input.releaseDate, channel: input.channel ?? "stable", prerelease: input.prerelease ?? false,
       recommended: false, deprecated: false, publicationStatus: "pending", sourceUrl: input.sourceUrl ?? "",
-      compatibility: input.compatibility ?? [], architectures: input.architectures ?? [], runtimeRequirements: input.runtimeRequirements ?? {},
-      checksum: input.checksum ?? "", signature: input.signature ?? "", metadata: input.metadata ?? {}, importedAt: new Date(),
+      compatibility: input.compatibility ?? [], architectures: input.architectures ?? [], operatingSystems: input.operatingSystems ?? [],
+      compatible: input.compatible ?? this.assessCompatibility(software, input).compatible,
+      incompatibilityReasons: input.incompatibilityReasons ?? this.assessCompatibility(software, input).incompatibilityReasons,
+      runtimeRequirements: input.runtimeRequirements ?? {}, checksum: input.checksum ?? "", signature: input.signature ?? "", metadata: input.metadata ?? {}, importedAt: new Date(),
     });
     await this.audit.log({ actorId: actor.id, action: "software.version.added", targetType: "software-version", targetId: version._id.toString(), sensitive: true });
     return version;
@@ -268,7 +270,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const existingSet = new Set(existing.map(item => item.version));
     const unique = new Map<string, DiscoveredVersion>();
     for (const item of discovered) if (item.version && item.version.length <= 100 && !unique.has(item.version)) unique.set(item.version, item);
-    const preview = [...unique.values()].map(item => ({ ...item, alreadyImported: existingSet.has(item.version) }));
+    const preview = [...unique.values()].map(item => ({ ...item, ...this.assessCompatibility(software, item), alreadyImported: existingSet.has(item.version) }));
     software.discoveryPreview = preview as unknown as Record<string, unknown>[];
     software.discoveryPreviewAt = new Date();
     await software.save();
@@ -289,7 +291,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "", releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
           channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(item.version) && typeof item.sourceUrl === "string" && item.sourceUrl.startsWith("https://") && item.metadata?.incomplete !== true ? "published" : "pending",
           sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "", compatibility: item.compatibility ?? [],
-          architectures: item.architectures ?? [], runtimeRequirements: item.runtimeRequirements ?? {},
+          architectures: item.architectures ?? [], operatingSystems: item.operatingSystems ?? [],
+          ...this.assessCompatibility(software, item), runtimeRequirements: item.runtimeRequirements ?? {},
           checksum: item.checksum ?? (typeof item.metadata?.checksum === "string" ? item.metadata.checksum : ""), signature: item.signature ?? "",
           metadata: item.metadata ?? {}, importedAt: new Date(),
         } }, { upsert: true });
@@ -324,7 +327,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
               channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease,
               publicationStatus: software.autoPublish && !item.prerelease ? "published" : "pending",
               sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "",
-              compatibility: item.compatibility ?? [], architectures: item.architectures ?? [], runtimeRequirements: item.runtimeRequirements ?? {},
+              compatibility: item.compatibility ?? [], architectures: item.architectures ?? [], operatingSystems: item.operatingSystems ?? [],
+              ...this.assessCompatibility(software, item), runtimeRequirements: item.runtimeRequirements ?? {},
               checksum: item.checksum ?? (typeof item.metadata?.checksum === "string" ? item.metadata.checksum : ""), signature: item.signature ?? "", metadata: item.metadata ?? {}, importedAt: new Date(),
             } },
             { upsert: true },
@@ -419,6 +423,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!software || !version) throw new NotFoundException("Software or version not found");
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
     if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
+    if (version.compatible === false) throw new BadRequestException("This software version is incompatible with the configured service platform");
     const template = software.installationConfig?.imageTemplate;
     const configuredEnvironment = (software.installationConfig?.environment ?? {}) as Record<string, string>;
     const hasImageVersion = typeof template === "string" && template.includes("{version}");
@@ -506,7 +511,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
           requiredRuntime: software.requiredRuntime, defaultVersion: software.defaultVersion,
           installable: software.installationConfig?.method === "docker-image-template" && typeof software.installationConfig?.imageTemplate === "string" && (software.installationConfig.imageTemplate.includes("{version}") || Object.values((software.installationConfig.environment ?? {}) as Record<string, string>).some(value => typeof value === "string" && value.includes("{version}"))),
         },
-        versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false }).sort({ recommended: -1, releaseDate: -1 }).lean(),
+        versions: await this.versions.find({ softwareId: software._id, publicationStatus: "published", deprecated: false, compatible: { $ne: false } }).sort({ recommended: -1, releaseDate: -1 }).lean(),
       }))),
     ]);
     return { serviceType: service.type, currentSoftware: service.software ?? null, currentVersion: service.softwareVersion ?? null, lastSuccessfulUpdate: latestSuccess?.completedAt ?? null, options: output };
