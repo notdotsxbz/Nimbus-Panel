@@ -287,6 +287,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     let imported = 0, skipped = 0, failed = 0;
     for (const item of selected) {
       try {
+        if (!item.version || item.version.length > 100) { failed++; continue; }
+        const compatibility = this.assessCompatibility(software, item);
         const result = await this.versions.updateOne({ softwareId: software._id, version: item.version }, { $setOnInsert: {
           softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "", releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
           channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease && item.compatible !== false && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(item.version) && typeof item.sourceUrl === "string" && item.sourceUrl.startsWith("https://") && item.metadata?.incomplete !== true ? "published" : "pending",
@@ -628,7 +630,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const imageHasVersion = template.includes("{version}");
     const versionProbe = config.versionProbe;
     const supportedVersionProbes = ["minecraft-log", "nodejs-version", "python-version", "php-version", "go-version", "java-version", "mongodb-version"];
-    if (versionProbe !== undefined && versionProbe !== "" && !supportedVersionProbes.includes(versionProbe)) throw new BadRequestException("Unsupported application version verification probe");
+    if (typeof versionProbe === "string" && versionProbe !== "" && !supportedVersionProbes.includes(versionProbe)) throw new BadRequestException("Unsupported application version verification probe");
     if (versionProbe === "minecraft-log" && !((environment as Record<string, unknown>).VERSION as string | undefined)?.includes("{version}")) throw new BadRequestException("Minecraft log verification requires VERSION={version} in the installer environment");
     if (method !== "docker-image-template" || !template || !/^[A-Za-z0-9._:/-]+$/.test(normalizedImage) || (!imageHasVersion && !environmentHasVersion)) {
       throw new BadRequestException("Installer must use a safe Docker image template or a version placeholder in its environment");
