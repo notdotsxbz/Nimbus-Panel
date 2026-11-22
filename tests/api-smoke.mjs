@@ -306,6 +306,18 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("VPS provisioning is not falsely routed through Docker", dockerOnlyVps.status === 400 && String(dockerOnlyVps.body?.message ?? "").includes("KVM/libvirt"), "status=" + dockerOnlyVps.status);
   const svc = await call("/services", { method: "POST", token: ownerToken, body: { name: "smoke-svc-" + suffix, type: "docker", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" } });
   check("workload created on node (agent offline, error state)", svc.status === 201, `status=${svc.status}`);
+  const osGuardSoftware = await call("/software", { method: "POST", token: ownerToken, body: { name: "OS Guard Runtime", identifier: "os-guard-" + suffix, serviceTypes: ["docker"], sourceType: "manual", supportedOperatingSystems: ["windows"], installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}" }, enabled: true, customerAvailable: true } });
+  const osGuardSoftwareId = osGuardSoftware.body?._id;
+  const osGuardVersion = await call("/software/" + osGuardSoftwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0" } });
+  const osGuardVersionId = osGuardVersion.body?._id;
+  const osGuardPublished = await call("/software/" + osGuardSoftwareId + "/versions/" + osGuardVersionId, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published" } });
+  check("OS guard test catalog is prepared", osGuardSoftware.status === 201 && osGuardVersion.status === 201 && osGuardPublished.status === 200, "software=" + osGuardSoftware.status + " version=" + osGuardVersion.status + " publish=" + osGuardPublished.status);
+  const wrongOsUpgrade = await call("/software/services/" + svc.body?._id + "/change", { method: "POST", token: ownerToken, body: { softwareId: osGuardSoftwareId, versionId: osGuardVersionId } });
+  check("software upgrade rejects unsupported node operating systems", wrongOsUpgrade.status === 400 && String(wrongOsUpgrade.body?.message ?? "").includes("operating system"), "status=" + wrongOsUpgrade.status + " body=" + JSON.stringify(wrongOsUpgrade.body));
+  const wrongOsInitialInstall = await call("/software/provision", { method: "POST", token: ownerToken, body: { name: "Wrong OS initial install", type: "docker", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, softwareId: osGuardSoftwareId, versionId: osGuardVersionId } });
+  check("initial service provisioning rejects unsupported node operating systems", wrongOsInitialInstall.status === 400 && String(wrongOsInitialInstall.body?.message ?? "").includes("operating system"), "status=" + wrongOsInitialInstall.status + " body=" + JSON.stringify(wrongOsInitialInstall.body));
+  await call("/software/" + osGuardSoftwareId + "/versions/" + osGuardVersionId, { method: "DELETE", token: ownerToken });
+  await call("/software/" + osGuardSoftwareId, { method: "DELETE", token: ownerToken });
 
   const safeBlocked = await call(`/nodes/${n2id}`, { method: "DELETE", token: ownerToken, body: { mode: "safe" } });
   check("Safe Delete blocked with active workloads", safeBlocked.status === 400, `status=${safeBlocked.status}`);
