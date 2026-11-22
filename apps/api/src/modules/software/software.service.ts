@@ -149,20 +149,6 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     return this.operations.find().sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("softwareId", "name identifier").lean();
   }
 
-  private async runDueSyncs() {
-    const rows = await this.catalog.find({ autoSync: true, syncFrequency: { $in: ["6h", "12h", "24h", "7d"] } }).select("_id syncFrequency lastSyncAttemptAt").lean();
-    const intervals: Record<string, number> = { "6h": 21600000, "12h": 43200000, "24h": 86400000, "7d": 604800000 };
-    for (const row of rows) {
-      const interval = intervals[row.syncFrequency] ?? 0;
-      if (!interval || (row.lastSyncAttemptAt && Date.now() - new Date(row.lastSyncAttemptAt).getTime() < interval)) continue;
-      const lease = await this.catalog.findOneAndUpdate({ _id: row._id, $or: [{ syncLeaseUntil: null }, { syncLeaseUntil: { $lt: new Date() } }] }, { $set: { syncLeaseUntil: new Date(Date.now() + 300000) } }, { new: true });
-      if (!lease) continue;
-      try { await this.discover(row._id.toString(), { id: "system", role: "owner" } as AuthUser); }
-      catch { /* sync history records failure; retry next interval */ }
-      finally { await this.catalog.updateOne({ _id: row._id }, { $set: { syncLeaseUntil: null } }); }
-    }
-  }
-
   async create(input: Partial<Software>, actor: AuthUser) {
     if (!input.name?.trim() || !/^[a-z0-9][a-z0-9._-]{1,63}$/.test(input.identifier ?? "")) {
       throw new BadRequestException("Name and a valid lowercase identifier are required");
@@ -503,7 +489,10 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "github-releases" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("GitHub source requires an owner/repository");
     if (type === "modrinth" && !/^[A-Za-z0-9_-]{1,64}$/.test(config.projectId ?? "")) throw new BadRequestException("Modrinth source requires a project ID");
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
-    if (!["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (type === "dotnet-index" && !/^\d+\.\d+$/.test(config.channelVersion ?? "")) throw new BadRequestException(".NET source requires a channel version such as 8.0 or 10.0");
+    if (type === "papermc" && !["paper", "folia", "velocity", "waterfall"].includes(config.project ?? "paper")) throw new BadRequestException("Unsupported PaperMC project");
+    if (type === "purpur" && config.project && config.project !== "purpur") throw new BadRequestException("Purpur source project must be purpur");
+    if (!["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -528,10 +517,78 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (software.sourceType === "nodejs-index") {
       const response = await axios.get("https://nodejs.org/dist/index.json", { timeout: 15000 });
       return (response.data as any[]).map((row) => ({
-        version: String(row.version ?? "").replace(/^v/, ""), releaseDate: row.date, prerelease: !!row.lts === false && /-/.test(String(row.version)),
+        version: String(row.version ?? "").replace(/^v/, ""), releaseDate: row.date, prerelease: /-/.test(String(row.version ?? "")),
         sourceUrl: `https://nodejs.org/dist/${String(row.version ?? "").replace(/^v/, "")}/`,
         metadata: { lts: row.lts || false, npm: row.npm, v8: row.v8 },
       }));
+    }
+    if (software.sourceType === "go-index") {
+      const response = await axios.get("https://go.dev/dl/?mode=json&include=all", { timeout: 20000, headers: { Accept: "application/json" } });
+      if (!Array.isArray(response.data)) throw new BadRequestException("Go release source returned an invalid response");
+      return response.data.filter((row: any) => typeof row.version === "string").map((row: any) => ({
+        version: String(row.version).replace(/^go/, ""), prerelease: row.stable !== true,
+        sourceUrl: "https://go.dev/dl/" + String(row.version),
+        metadata: { officialVersion: row.version, stable: row.stable === true, files: Array.isArray(row.files) ? row.files.map((file: any) => ({ os: file.os, arch: file.arch, kind: file.kind, filename: file.filename, sha256: file.sha256 })) : [] },
+      }));
+    }
+    if (software.sourceType === "dotnet-index") {
+      const channelVersion = software.sourceConfig.channelVersion;
+      const response = await axios.get("https://builds.dotnet.microsoft.com/dotnet/release-metadata/" + encodeURIComponent(channelVersion) + "/releases.json", { timeout: 20000, headers: { Accept: "application/json" } });
+      const rows = (response.data as any).releases;
+      if (!Array.isArray(rows)) throw new BadRequestException(".NET release source returned an invalid response");
+      return rows.filter((row: any) => typeof row["release-version"] === "string").map((row: any) => ({
+        version: String(row["release-version"]), releaseDate: row["release-date"],
+        sourceUrl: String(row["release-notes"] ?? "https://dotnet.microsoft.com/download/dotnet"),
+        metadata: { channelVersion, sdkVersion: row.sdk?.version, runtimeVersion: row.runtime?.version, aspnetCoreRuntimeVersion: row["aspnetcore-runtime"]?.version },
+      }));
+    }
+    if (software.sourceType === "papermc") {
+      const project = software.sourceConfig.project ?? "paper";
+      const response = await axios.get("https://api.papermc.io/v2/projects/" + encodeURIComponent(project) + "/versions", { timeout: 20000, headers: { Accept: "application/json" } });
+      const rows = (response.data as any).versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("PaperMC release source returned an invalid response");
+      return rows.map((version: string) => ({ version, sourceUrl: "https://papermc.io/downloads/" + project, metadata: { project } }));
+    }
+    if (software.sourceType === "purpur") {
+      const response = await axios.get("https://api.purpurmc.org/v2/purpur", { timeout: 20000, headers: { Accept: "application/json" } });
+      const rows = (response.data as any).versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("Purpur release source returned an invalid response");
+      return rows.map((version: string) => ({ version, sourceUrl: "https://purpurmc.org/downloads", metadata: { project: "purpur" } }));
+    }
+    if (software.sourceType === "fabric-meta") {
+      const [games, loaders] = await Promise.all([
+        axios.get("https://meta.fabricmc.net/v2/versions/game", { timeout: 20000, headers: { Accept: "application/json" } }),
+        axios.get("https://meta.fabricmc.net/v2/versions/loader", { timeout: 20000, headers: { Accept: "application/json" } }),
+      ]);
+      if (!Array.isArray(games.data) || !Array.isArray(loaders.data)) throw new BadRequestException("Fabric metadata source returned an invalid response");
+      const stableLoader = loaders.data.find((item: any) => item.stable === true);
+      return games.data.map((row: any) => ({ version: String(row.version), prerelease: row.stable !== true, sourceUrl: "https://fabricmc.net/use/server/", metadata: { stable: row.stable === true, latestStableLoader: stableLoader?.version ?? null } }));
+    }
+    if (software.sourceType === "quilt-meta") {
+      const response = await axios.get("https://meta.quiltmc.org/v3/versions/game", { timeout: 20000, headers: { Accept: "application/json" } });
+      if (!Array.isArray(response.data)) throw new BadRequestException("Quilt metadata source returned an invalid response");
+      return response.data.map((row: any) => ({ version: String(row.version), prerelease: row.stable !== true, sourceUrl: "https://quiltmc.org/en/install/server/", metadata: { stable: row.stable === true } }));
+    }
+    if (software.sourceType === "java-adoptium") {
+      const info = await axios.get("https://api.adoptium.net/v3/info/available_releases", { timeout: 20000, headers: { Accept: "application/json" } });
+      const majors = (info.data as any).available_lts_releases;
+      if (!Array.isArray(majors)) throw new BadRequestException("Adoptium release source returned an invalid response");
+      const assets = await Promise.all(majors.map((major: number) => axios.get("https://api.adoptium.net/v3/assets/latest/" + major + "/hotspot?architecture=x64&image_type=jdk&os=linux", { timeout: 20000, headers: { Accept: "application/json" } }).then(response => ({ major, data: response.data })).catch(() => ({ major, data: [] }))));
+      return assets.flatMap(({ major, data }: any) => {
+        const asset = Array.isArray(data) ? data[0] : undefined;
+        const version = asset?.version?.semver;
+        if (typeof version !== "string") return [];
+        return [{ version, sourceUrl: "https://adoptium.net/temurin/releases/", metadata: { major, build: asset.version.build, architecture: "x64", os: "linux", imageType: "jdk", checksum: asset.binary?.package?.checksum } }];
+      });
+    }
+    if (software.sourceType === "forge-maven" || software.sourceType === "neoforge-maven") {
+      const metadataUrl = software.sourceType === "forge-maven"
+        ? "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
+        : "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
+      const response = await axios.get(metadataUrl, { timeout: 20000, headers: { Accept: "application/xml,text/xml" }, responseType: "text" });
+      if (typeof response.data !== "string" || !response.data.includes("<metadata")) throw new BadRequestException("Minecraft loader Maven metadata is invalid");
+      const versions = [...response.data.matchAll(/<version>\s*([^<]+?)\s*<\/version>/g)].map(match => match[1].trim()).filter(Boolean);
+      return [...new Set(versions)].map(version => ({ version, sourceUrl: metadataUrl, metadata: { loader: software.sourceType === "forge-maven" ? "forge" : "neoforge" } }));
     }
     if (software.sourceType === "dockerhub-tags") {
       const repository = software.sourceConfig.repository;

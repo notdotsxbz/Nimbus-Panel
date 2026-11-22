@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { HydratedDocument, Types } from "mongoose";
 
-export const SOFTWARE_SOURCE_TYPES = ["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags"] as const;
+export const SOFTWARE_SOURCE_TYPES = ["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven"] as const;
 export type SoftwareSourceType = (typeof SOFTWARE_SOURCE_TYPES)[number];
 
 @Schema({ collection: "software_catalog", timestamps: true })
