@@ -326,6 +326,11 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("owner adds manual version", manualVersion.status === 201 && !!manualVersion.body?._id, `status=${manualVersion.status}`);
   const versionId = manualVersion.body?._id;
 
+  const pendingRecommendation = await call(`/software/${softwareId}/versions/${versionId}`, {
+    method: "PATCH", token: ownerToken, body: { recommended: true },
+  });
+  check("pending version cannot be marked recommended", pendingRecommendation.status === 400, `status=${pendingRecommendation.status}`);
+
   const unsafeSource = await call(`/software/${softwareId}/versions`, {
     method: "POST", token: ownerToken,
     body: { version: "unsafe-" + suffix, sourceUrl: "javascript:alert(1)" },
@@ -336,6 +341,11 @@ async function call(path, { method = "GET", token, body } = {}) {
     method: "PATCH", token: ownerToken, body: { publicationStatus: "published" },
   });
   check("owner publishes manual version", publishVersion.status === 200, `status=${publishVersion.status}`);
+
+  const recommendedVersion = await call(`/software/${softwareId}/versions/${versionId}`, {
+    method: "PATCH", token: ownerToken, body: { recommended: true },
+  });
+  check("published non-deprecated version can be recommended", recommendedVersion.status === 200 && recommendedVersion.body?.recommended === true, `status=${recommendedVersion.status}`);
 
   const customerCatalog = await call("/software", { token: custToken });
   check("customer cannot read admin software catalog", customerCatalog.status === 403, `status=${customerCatalog.status}`);
