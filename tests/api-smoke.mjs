@@ -301,6 +301,71 @@ async function call(path, { method = "GET", token, body } = {}) {
   const svc = await call("/services", { method: "POST", token: ownerToken, body: { name: "smoke-svc-" + suffix, type: "docker", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" } });
   check("workload created on node (agent offline, error state)", svc.status === 201, `status=${svc.status}`);
 
+  // ── Software & Version Manager: catalog RBAC, ownership and OS boundary ──
+  const serviceOwnerLogin = await call("/auth/test-login", {
+    method: "POST", body: { identifier: `svcowner${suffix}`, password: "smokepass123" },
+  });
+  const serviceOwnerToken = serviceOwnerLogin.body?.token;
+  check("service owner login for software tests", serviceOwnerLogin.status === 200 && !!serviceOwnerToken);
+
+  const software = await call("/software", {
+    method: "POST", token: ownerToken,
+    body: {
+      name: "Smoke Runtime " + suffix, identifier: "smoke-runtime-" + suffix,
+      description: "Software manager API smoke test", category: "runtime",
+      serviceTypes: ["docker"], sourceType: "manual", enabled: true, customerAvailable: true,
+    },
+  });
+  check("owner creates software catalog entry", software.status === 201 && !!software.body?._id, `status=${software.status}`);
+  const softwareId = software.body?._id;
+
+  const manualVersion = await call(`/software/${softwareId}/versions`, {
+    method: "POST", token: ownerToken,
+    body: { version: "1.0.0", releaseName: "Smoke stable", channel: "stable", compatibility: ["linux/amd64"] },
+  });
+  check("owner adds manual version", manualVersion.status === 201 && !!manualVersion.body?._id, `status=${manualVersion.status}`);
+  const versionId = manualVersion.body?._id;
+
+  const unsafeSource = await call(`/software/${softwareId}/versions`, {
+    method: "POST", token: ownerToken,
+    body: { version: "unsafe-" + suffix, sourceUrl: "javascript:alert(1)" },
+  });
+  check("manual version rejects non-HTTPS source URLs", unsafeSource.status === 400, `status=${unsafeSource.status}`);
+
+  const publishVersion = await call(`/software/${softwareId}/versions/${versionId}`, {
+    method: "PATCH", token: ownerToken, body: { publicationStatus: "published" },
+  });
+  check("owner publishes manual version", publishVersion.status === 200, `status=${publishVersion.status}`);
+
+  const customerCatalog = await call("/software", { token: custToken });
+  check("customer cannot read admin software catalog", customerCatalog.status === 403, `status=${customerCatalog.status}`);
+  const customerCreateCatalog = await call("/software", {
+    method: "POST", token: custToken,
+    body: { name: "Nope", identifier: "customer-nope", serviceTypes: ["docker"], sourceType: "manual" },
+  });
+  check("customer cannot create catalog entries", customerCreateCatalog.status === 403, `status=${customerCreateCatalog.status}`);
+
+  const ownSoftwareOptions = await call(`/software/for-service/${svc.body?._id}`, { token: serviceOwnerToken });
+  check("service owner sees software for matching service type", ownSoftwareOptions.status === 200 && ownSoftwareOptions.body?.options?.some(item => item.software.id === softwareId && item.versions.some(version => version._id === versionId)));
+  const otherCustomerOptions = await call(`/software/for-service/${svc.body?._id}`, { token: custToken });
+  check("customer cannot view another customer's software options", otherCustomerOptions.status === 403, `status=${otherCustomerOptions.status}`);
+
+  const noAdapterChange = await call(`/software/services/${svc.body?._id}/change`, {
+    method: "POST", token: serviceOwnerToken, body: { softwareId, versionId },
+  });
+  check("software change refuses catalog entries without a real installer", noAdapterChange.status === 400, `status=${noAdapterChange.status}`);
+
+  const vpsService = await call("/services", {
+    method: "POST", token: ownerToken,
+    body: { name: "smoke-vps-" + suffix, type: "vps", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" },
+  });
+  check("VPS service record created for OS restriction test", vpsService.status === 201 && !!vpsService.body?._id, `status=${vpsService.status}`);
+  const customerVpsOsChange = await call(`/software/services/${vpsService.body?._id}/change`, {
+    method: "POST", token: serviceOwnerToken,
+    body: { softwareId: "000000000000000000000000", versionId: "000000000000000000000000" },
+  });
+  check("customer VPS OS change rejected by backend before catalog lookup", customerVpsOsChange.status === 400, `status=${customerVpsOsChange.status}`);
+
   const safeBlocked = await call(`/nodes/${n2id}`, { method: "DELETE", token: ownerToken, body: { mode: "safe" } });
   check("Safe Delete blocked with active workloads", safeBlocked.status === 400, `status=${safeBlocked.status}`);
 
