@@ -156,7 +156,7 @@ export async function firebaseRegister(email: string, password: string, username
   return session;
 }
 
-export async function firebaseGoogleRegister(googleIdToken: string, username?: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
+export async function firebaseGoogleRegister(googleIdToken: string, username?: string, password?: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
   const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
   const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=" + encodeURIComponent(config.apiKey), {
     method: "POST", headers: { "content-type": "application/json" },
@@ -164,7 +164,26 @@ export async function firebaseGoogleRegister(googleIdToken: string, username?: s
   });
   const result = await response.json() as { idToken?: string; error?: { message?: string } };
   if (!response.ok || !result.idToken) throw new ApiError(response.status, (result.error?.message ?? "Google sign-in failed").replaceAll("_", " ").toLowerCase());
-  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>(username ? "/auth/register" : "/auth/firebase", username ? { idToken: result.idToken, username } : { idToken: result.idToken });
+
+  let idToken = result.idToken;
+  if (username) {
+    if (!password || password.length < 8) throw new ApiError(400, "Password must be at least 8 characters");
+    // Add an email/password credential to the Google-authenticated Firebase account.
+    const passwordResponse = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:update?key=" + encodeURIComponent(config.apiKey), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idToken, password, returnSecureToken: true }),
+    });
+    const passwordResult = await passwordResponse.json() as { idToken?: string; error?: { message?: string } };
+    if (!passwordResponse.ok || !passwordResult.idToken) {
+      throw new ApiError(passwordResponse.status, (passwordResult.error?.message ?? "Could not set your Firebase password").replaceAll("_", " ").toLowerCase());
+    }
+    idToken = passwordResult.idToken;
+  }
+
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>(
+    username ? "/auth/register" : "/auth/firebase",
+    username ? { idToken, username } : { idToken },
+  );
   localStorage.setItem("nimbus.token", session.token);
   localStorage.setItem("nimbus.user", JSON.stringify(session.user));
   return session;
