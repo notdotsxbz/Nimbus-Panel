@@ -433,8 +433,9 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (service.subscriptionStatus !== "active" || service.status === "suspended") throw new BadRequestException("This service is not active");
     if (["installing", "updating", "starting", "stopping", "restarting"].includes(service.status)) throw new BadRequestException("Wait for the current service operation to finish first");
     if (!Types.ObjectId.isValid(softwareId) || !Types.ObjectId.isValid(versionId)) throw new BadRequestException("Invalid software or version");
-    const [software, version] = await Promise.all([this.catalog.findById(softwareId), this.versions.findOne({ _id: versionId, softwareId })]);
-    if (!software || !version) throw new NotFoundException("Software or version not found");
+    const [software, version] = await Promise.all([this.catalog.findById(softwareId), this.versions.findById(versionId)]);
+    if (!software) throw new NotFoundException("Software not found");
+    if (!version || version.softwareId.toString() !== software._id.toString()) throw new NotFoundException("Software version not found");
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
     if (software.supportedOperatingSystems?.length || software.supportedArchitectures?.length) {
       const targetNode = await this.nodes.get(service.nodeId.toString());
