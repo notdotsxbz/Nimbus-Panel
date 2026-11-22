@@ -15,6 +15,15 @@ type PreviewRow = { version: string; releaseName?: string; releaseDate?: string;
 type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: string } | string; status: string; attempts: number; maxAttempts: number; runAt: string; lastError?: string; discovered?: number; imported?: number; failed?: number };
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
 
+function versionChecksum(metadata?: Record<string, unknown>): string | undefined {
+  const entries = [
+    ...(Array.isArray(metadata?.files) ? metadata.files : []),
+    ...(Array.isArray(metadata?.platforms) ? metadata.platforms : []),
+  ] as Array<Record<string, unknown>>;
+  const value = entries.find(entry => typeof entry.sha256 === "string" && entry.sha256.length > 0)?.sha256;
+  return typeof value === "string" ? value : undefined;
+}
+
 export default function AdminSoftwarePage() {
   const [items, setItems] = useState<SoftwareRow[]>([]);
   const [selected, setSelected] = useState<SoftwareRow | null>(null);
@@ -274,7 +283,7 @@ export default function AdminSoftwarePage() {
           <div className="mt-4 space-y-2">
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
               <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />
-              <div className="min-w-0"><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.releaseDate ? new Date(version.releaseDate).toLocaleDateString() + " · " : ""}{version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p>{version.compatibility?.length ? <p className="mt-1 text-[11px] text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}{version.sourceUrl ? <a className="mt-1 inline-block text-[11px] text-cyan-300 hover:underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}</div>
+              <div className="min-w-0"><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.releaseDate ? new Date(version.releaseDate).toLocaleDateString() + " · " : ""}{version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p>{version.compatibility?.length ? <p className="mt-1 text-[11px] text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}{versionChecksum(version.metadata) ? <p className="mt-1 break-all text-[11px] text-muted">SHA-256: {versionChecksum(version.metadata)}</p> : null}{version.sourceUrl ? <a className="mt-1 inline-block text-[11px] text-cyan-300 hover:underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}</div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
             {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually through the API.</p>}
