@@ -343,6 +343,8 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("admin creates software catalog entry", software.status === 201 && !!software.body?._id, "status=" + software.status);
   const invalidInstallerEnv = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid Installer", identifier: "invalid-installer-" + suffix, serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { "BAD KEY": "value" } } } });
   check("installer rejects unsafe environment keys", invalidInstallerEnv.status === 400, "status=" + invalidInstallerEnv.status);
+  const invalidMetadata = await call("/software", { method: "POST", token: ownerToken, body: { name: "Invalid Metadata", identifier: "invalid-metadata-" + suffix, officialWebsite: "javascript:alert(1)", serviceTypes: ["docker"], sourceType: "manual" } });
+  check("software metadata rejects non-HTTPS URLs", invalidMetadata.status === 400, "status=" + invalidMetadata.status);
   const configuredInstaller = await call("/software", { method: "POST", token: ownerToken, body: { name: "Configured Installer", identifier: "configured-installer-" + suffix, officialWebsite: "https://example.com", iconUrl: "https://example.com/icon.png", supportedOperatingSystems: ["linux"], supportedArchitectures: ["amd64", "arm64"], requiredRuntime: "Node.js 22", defaultVersion: "22", serviceTypes: ["docker"], sourceType: "manual", installationConfig: { method: "docker-image-template", imageTemplate: "example/app:{version}", environment: { NODE_ENV: "production" } } } });
   check("admin can configure validated image installer environment", configuredInstaller.status === 201 && configuredInstaller.body?.installationConfig?.environment?.NODE_ENV === "production", "status=" + configuredInstaller.status);
   if (configuredInstaller.body?._id) await call("/software/" + configuredInstaller.body._id, { method: "DELETE", token: ownerToken });
@@ -389,8 +391,8 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("customer cannot list admin software catalog", customerCatalog.status === 403, "status=" + customerCatalog.status);
   const customerCreate = await call("/software", { method: "POST", token: custToken, body: { name: "Nope", identifier: "customer-nope-" + suffix, serviceTypes: ["docker"], sourceType: "manual" } });
   check("customer cannot create software catalog entries", customerCreate.status === 403, "status=" + customerCreate.status);
-  const manualVersion = await call("/software/" + softwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0" } });
-  check("admin adds manual fallback version", manualVersion.status === 201 && !!manualVersion.body?._id, "status=" + manualVersion.status);
+  const manualVersion = await call("/software/" + softwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0", architectures: ["amd64"], runtimeRequirements: { java: "21" }, checksum: "sha256:test" } });
+  check("admin adds manual fallback version with compatibility metadata", manualVersion.status === 201 && !!manualVersion.body?._id && manualVersion.body?.architectures?.includes("amd64") && manualVersion.body?.checksum === "sha256:test", "status=" + manualVersion.status);
   const publishedVersion = await call("/software/" + softwareId + "/versions/" + manualVersion.body?._id, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published", recommended: true } });
   check("admin publishes and recommends a version", publishedVersion.status === 200 && publishedVersion.body?.publicationStatus === "published", "status=" + publishedVersion.status + " body=" + JSON.stringify(publishedVersion.body).slice(0, 180));
   if (svcId && softwareId) {
