@@ -52,6 +52,9 @@ jobs:
       - name: Shared package tests (imports compiled dist)
         run: npm run test --workspace @nimbus/shared
 
+      - name: Validate service module definitions
+        run: node tests/service-modules.mjs
+
       - name: Build web
         run: npm run build --workspace @nimbus/web
         env:
