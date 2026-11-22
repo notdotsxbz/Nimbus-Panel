@@ -226,6 +226,17 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   async addVersion(id: string, input: Partial<SoftwareVersion>, actor: AuthUser) {
     const software = await this.getSoftware(id);
     if (!input.version?.trim() || input.version.length > 100) throw new BadRequestException("A version identifier is required");
+    if (input.sourceUrl) {
+      try { const source = new URL(input.sourceUrl); if (source.protocol !== "https:") throw new Error("https required"); }
+      catch { throw new BadRequestException("Version source URL must use HTTPS"); }
+    }
+    for (const key of ["architectures", "compatibility"] as const) {
+      const values = input[key];
+      if (values !== undefined && (!Array.isArray(values) || values.length > 20 || values.some(value => typeof value !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(value)))) throw new BadRequestException("Version compatibility metadata is invalid");
+    }
+    if (input.runtimeRequirements !== undefined && (!input.runtimeRequirements || typeof input.runtimeRequirements !== "object" || Array.isArray(input.runtimeRequirements) || JSON.stringify(input.runtimeRequirements).length > 4096)) throw new BadRequestException("Runtime requirements metadata is invalid");
+    if (input.checksum !== undefined && (typeof input.checksum !== "string" || input.checksum.length > 256)) throw new BadRequestException("Checksum is too long");
+    if (input.signature !== undefined && (typeof input.signature !== "string" || input.signature.length > 4096)) throw new BadRequestException("Signature metadata is too long");
     const existing = await this.versions.findOne({ softwareId: software._id, version: input.version.trim() });
     if (existing) throw new BadRequestException("That version already exists");
     const version = await this.versions.create({
