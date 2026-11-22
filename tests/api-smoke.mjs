@@ -306,9 +306,9 @@ async function call(path, { method = "GET", token, body } = {}) {
     method: "POST", body: { identifier: `svcowner${suffix}`, password: "smokepass123" },
   });
   const serviceOwnerToken = serviceOwnerLogin.body?.token;
-  check("service owner login for svmSoftware tests", serviceOwnerLogin.status === 200 && !!serviceOwnerToken);
+  check("service owner login for software tests", serviceOwnerLogin.status === 200 && !!serviceOwnerToken);
 
-  const svmSoftware = await call("/svmSoftware", {
+  const svmSoftware = await call("/software", {
     method: "POST", token: ownerToken,
     body: {
       name: "Smoke Runtime " + suffix, identifier: "smoke-runtime-" + suffix,
@@ -316,63 +316,85 @@ async function call(path, { method = "GET", token, body } = {}) {
       serviceTypes: ["docker"], sourceType: "manual", enabled: true, customerAvailable: true,
     },
   });
-  check("owner creates svmSoftware catalog entry", svmSoftware.status === 201 && !!svmSoftware.body?._id, `status=${svmSoftware.status}`);
+  check("owner creates software catalog entry", svmSoftware.status === 201 && !!svmSoftware.body?._id, `status=${svmSoftware.status}`);
   const svmSoftwareId = svmSoftware.body?._id;
 
-  const svmManualVersion = await call(`/svmSoftware/${svmSoftwareId}/versions`, {
+  const svmManualVersion = await call(`/software/${svmSoftwareId}/versions`, {
     method: "POST", token: ownerToken,
     body: { version: "1.0.0", releaseName: "Smoke stable", channel: "stable", compatibility: ["linux/amd64"] },
   });
   check("owner adds manual version", svmManualVersion.status === 201 && !!svmManualVersion.body?._id, `status=${svmManualVersion.status}`);
   const svmVersionId = svmManualVersion.body?._id;
 
-  const pendingRecommendation = await call(`/svmSoftware/${svmSoftwareId}/versions/${svmVersionId}`, {
+  const pendingRecommendation = await call(`/software/${svmSoftwareId}/versions/${svmVersionId}`, {
     method: "PATCH", token: ownerToken, body: { recommended: true },
   });
   check("pending version cannot be marked recommended", pendingRecommendation.status === 400, `status=${pendingRecommendation.status}`);
 
-  const unsafeSource = await call(`/svmSoftware/${svmSoftwareId}/versions`, {
+  const unsafeSource = await call(`/software/${svmSoftwareId}/versions`, {
     method: "POST", token: ownerToken,
     body: { version: "unsafe-" + suffix, sourceUrl: "javascript:alert(1)" },
   });
   check("manual version rejects non-HTTPS source URLs", unsafeSource.status === 400, `status=${unsafeSource.status}`);
 
-  const publishVersion = await call(`/svmSoftware/${svmSoftwareId}/versions/${svmVersionId}`, {
+  const publishVersion = await call(`/software/${svmSoftwareId}/versions/${svmVersionId}`, {
     method: "PATCH", token: ownerToken, body: { publicationStatus: "published" },
   });
   check("owner publishes manual version", publishVersion.status === 200, `status=${publishVersion.status}`);
 
-  const recommendedVersion = await call(`/svmSoftware/${svmSoftwareId}/versions/${svmVersionId}`, {
+  const recommendedVersion = await call(`/software/${svmSoftwareId}/versions/${svmVersionId}`, {
     method: "PATCH", token: ownerToken, body: { recommended: true },
   });
   check("published non-deprecated version can be recommended", recommendedVersion.status === 200 && recommendedVersion.body?.recommended === true, `status=${recommendedVersion.status}`);
 
-  const svmCustomerCatalog = await call("/svmSoftware", { token: custToken });
-  check("customer cannot read admin svmSoftware catalog", svmCustomerCatalog.status === 403, `status=${svmCustomerCatalog.status}`);
-  const customerCreateCatalog = await call("/svmSoftware", {
+  const svmCustomerCatalog = await call("/software", { token: custToken });
+  check("customer cannot read admin software catalog", svmCustomerCatalog.status === 403, `status=${svmCustomerCatalog.status}`);
+  const customerCreateCatalog = await call("/software", {
     method: "POST", token: custToken,
     body: { name: "Nope", identifier: "customer-nope", serviceTypes: ["docker"], sourceType: "manual" },
   });
   check("customer cannot create catalog entries", customerCreateCatalog.status === 403, `status=${customerCreateCatalog.status}`);
 
-  const ownSoftwareOptions = await call(`/svmSoftware/for-service/${svc.body?._id}`, { token: serviceOwnerToken });
-  check("service owner sees svmSoftware for matching service type", ownSoftwareOptions.status === 200 && ownSoftwareOptions.body?.options?.some(item => item.svmSoftware.id === svmSoftwareId && item.versions.some(version => version._id === svmVersionId)));
-  const otherCustomerOptions = await call(`/svmSoftware/for-service/${svc.body?._id}`, { token: custToken });
-  check("customer cannot view another customer's svmSoftware options", otherCustomerOptions.status === 403, `status=${otherCustomerOptions.status}`);
+  const ownSoftwareOptions = await call(`/software/for-service/${svc.body?._id}`, { token: serviceOwnerToken });
+  check("service owner sees software for matching service type", ownSoftwareOptions.status === 200 && ownSoftwareOptions.body?.options?.some(item => item.software.id === svmSoftwareId && item.versions.some(version => version._id === svmVersionId)));
+  const otherCustomerOptions = await call(`/software/for-service/${svc.body?._id}`, { token: custToken });
+  check("customer cannot view another customer's software options", otherCustomerOptions.status === 403, `status=${otherCustomerOptions.status}`);
 
-  const noAdapterChange = await call(`/svmSoftware/services/${svc.body?._id}/change`, {
+  const noAdapterChange = await call(`/software/services/${svc.body?._id}/change`, {
     method: "POST", token: serviceOwnerToken, body: { svmSoftwareId, svmVersionId },
   });
-  check("svmSoftware change refuses catalog entries without a real installer", noAdapterChange.status === 400, `status=${noAdapterChange.status}`);
+  check("software change refuses catalog entries without a real installer", noAdapterChange.status === 400, `status=${noAdapterChange.status}`);
+
+  const osRestrictedSoftware = await call("/software", {
+    method: "POST", token: ownerToken,
+    body: {
+      name: "Smoke OS Restricted " + suffix, identifier: "smoke-os-" + suffix,
+      description: "OS compatibility smoke test", category: "runtime",
+      serviceTypes: ["docker"], sourceType: "manual",
+      installationConfig: { method: "docker-image-template", imageTemplate: "example/runtime:{version}" },
+      supportedOperatingSystems: ["windows"], enabled: true, customerAvailable: true,
+    },
+  });
+  const osRestrictedVersion = await call(`/software/${osRestrictedSoftware.body?._id}/versions`, {
+    method: "POST", token: ownerToken, body: { version: "1.0.0" },
+  });
+  await call(`/software/${osRestrictedSoftware.body?._id}/versions/${osRestrictedVersion.body?._id}`, {
+    method: "PATCH", token: ownerToken, body: { publicationStatus: "published" },
+  });
+  const incompatibleOsChange = await call(`/software/services/${svc.body?._id}/change`, {
+    method: "POST", token: serviceOwnerToken,
+    body: { softwareId: osRestrictedSoftware.body?._id, versionId: osRestrictedVersion.body?._id },
+  });
+  check("software upgrade rejects a catalog entry incompatible with the node OS", incompatibleOsChange.status === 400 && String(incompatibleOsChange.body?.message ?? "").includes("operating system"), `status=${incompatibleOsChange.status}`);
 
   const vpsService = await call("/services", {
     method: "POST", token: ownerToken,
     body: { name: "smoke-vps-" + suffix, type: "vps", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" },
   });
   check("VPS service record created for OS restriction test", vpsService.status === 201 && !!vpsService.body?._id, `status=${vpsService.status}`);
-  const vpsOptions = await call(`/svmSoftware/for-service/${vpsService.body?._id}`, { token: serviceOwnerToken });
-  check("VPS customer svmSoftware options never expose OS catalog controls", vpsOptions.status === 200 && Array.isArray(vpsOptions.body?.options) && vpsOptions.body.options.length === 0);
-  const customerVpsOsChange = await call(`/svmSoftware/services/${vpsService.body?._id}/change`, {
+  const vpsOptions = await call(`/software/for-service/${vpsService.body?._id}`, { token: serviceOwnerToken });
+  check("VPS customer software options never expose OS catalog controls", vpsOptions.status === 200 && Array.isArray(vpsOptions.body?.options) && vpsOptions.body.options.length === 0);
+  const customerVpsOsChange = await call(`/software/services/${vpsService.body?._id}/change`, {
     method: "POST", token: serviceOwnerToken,
     body: { svmSoftwareId: "000000000000000000000000", svmVersionId: "000000000000000000000000" },
   });
