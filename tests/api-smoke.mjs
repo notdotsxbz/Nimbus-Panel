@@ -361,7 +361,7 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("customer cannot view another customer's software options", otherCustomerOptions.status === 403, `status=${otherCustomerOptions.status}`);
 
   const noAdapterChange = await call(`/software/services/${svc.body?._id}/change`, {
-    method: "POST", token: serviceOwnerToken, body: { svmSoftwareId, svmVersionId },
+    method: "POST", token: serviceOwnerToken, body: { softwareId: svmSoftwareId, versionId: svmVersionId },
   });
   check("software change refuses catalog entries without a real installer", noAdapterChange.status === 400, `status=${noAdapterChange.status}`);
 
@@ -396,7 +396,7 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("VPS customer software options never expose OS catalog controls", vpsOptions.status === 200 && Array.isArray(vpsOptions.body?.options) && vpsOptions.body.options.length === 0);
   const customerVpsOsChange = await call(`/software/services/${vpsService.body?._id}/change`, {
     method: "POST", token: serviceOwnerToken,
-    body: { svmSoftwareId: "000000000000000000000000", svmVersionId: "000000000000000000000000" },
+    body: { softwareId: "000000000000000000000000", versionId: "000000000000000000000000" },
   });
   check("customer VPS OS change rejected by backend before catalog lookup", customerVpsOsChange.status === 400, `status=${customerVpsOsChange.status}`);
 
