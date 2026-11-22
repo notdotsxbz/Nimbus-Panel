@@ -11,6 +11,7 @@ type SoftwareRow = {
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
 type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
+type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: string } | string; status: string; attempts: number; maxAttempts: number; runAt: string; lastError?: string; discovered?: number; imported?: number; failed?: number };
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
 
 export default function AdminSoftwarePage() {
@@ -24,10 +25,11 @@ export default function AdminSoftwarePage() {
   const [selectedPreview, setSelectedPreview] = useState<string[]>([]);
   const [selectedVersionIds, setSelectedVersionIds] = useState<string[]>([]);
   const [recentOperations, setRecentOperations] = useState<OperationRow[]>([]);
+  const [syncJobs, setSyncJobs] = useState<SyncJobRow[]>([]);
   const { show, node } = useToast();
 
   const load = async () => {
-    try { const [catalog, operations] = await Promise.all([api.get<SoftwareRow[]>("/software"), api.get<OperationRow[]>("/software/operations")]); setItems(catalog); setRecentOperations(operations); }
+    try { const [catalog, operations, jobs] = await Promise.all([api.get<SoftwareRow[]>("/software"), api.get<OperationRow[]>("/software/operations"), api.get<SyncJobRow[]>("/software/sync-jobs")]); setItems(catalog); setRecentOperations(operations); setSyncJobs(jobs); }
     catch (e) { show(e instanceof Error ? e.message : "Could not load catalog", "err"); }
   };
   useEffect(() => { void load(); }, []);
@@ -97,6 +99,13 @@ export default function AdminSoftwarePage() {
       setItems(current => current.map(item => item._id === updated._id ? updated : item));
       show("Automatic synchronization settings updated", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Could not update sync settings", "err"); }
+  };
+  const retrySyncJob = async (job: SyncJobRow) => {
+    try {
+      await api.post("/software/sync-jobs/" + job._id + "/retry", {});
+      show("Synchronization job queued for retry", "ok");
+      await load();
+    } catch (e) { show(e instanceof Error ? e.message : "Could not retry synchronization", "err"); }
   };
   const retryCleanup = async (operation: OperationRow) => {
     try {
@@ -234,6 +243,16 @@ export default function AdminSoftwarePage() {
       </GlassCard>
     </div>
         <GlassCard className="p-5">
+      <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">Automatic synchronization queue</h2><button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void load()}>Refresh</button></div>
+      <div className="mt-3 space-y-2">
+        {syncJobs.map(job => <div key={job._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3 text-sm">
+          <div><strong>{typeof job.softwareId === "object" ? job.softwareId?.name ?? "Software" : job.softwareId}</strong><p className="text-xs text-muted">Attempt {job.attempts}/{job.maxAttempts} · next run {new Date(job.runAt).toLocaleString()}</p>{job.lastError ? <p className="text-xs text-rose-300">{job.lastError}</p> : null}</div>
+          <div className="flex items-center gap-2"><span className="text-xs text-muted">{job.status} · discovered {job.discovered ?? 0}, imported {job.imported ?? 0}</span>{["failed", "retry"].includes(job.status) ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void retrySyncJob(job)}>Retry</button> : null}</div>
+        </div>)}
+        {!syncJobs.length && <p className="text-sm text-muted">No synchronization jobs have been queued.</p>}
+      </div>
+    </GlassCard>
+    <GlassCard className="p-5">
       <h2 className="font-semibold">Recent software operations</h2>
       <div className="mt-3 space-y-2">
         {recentOperations.map(operation => <div key={operation._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3 text-sm">

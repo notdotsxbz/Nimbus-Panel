@@ -342,6 +342,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   const software = await call("/software", { method: "POST", token: ownerToken, body: { name: "Smoke Docker Runtime", identifier: "smoke-docker-" + suffix, description: "catalog smoke test", category: "runtime", serviceTypes: ["docker"], sourceType: "manual", sourceConfig: {}, installationConfig: {}, enabled: true, customerAvailable: true } });
   check("admin creates software catalog entry", software.status === 201 && !!software.body?._id, "status=" + software.status);
   const softwareId = software.body?._id;
+  const adminSyncJobs = await call("/software/sync-jobs", { token: ownerToken });
+  check("admin can inspect durable software sync queue", adminSyncJobs.status === 200 && Array.isArray(adminSyncJobs.body), "status=" + adminSyncJobs.status);
+  const customerSyncJobs = await call("/software/sync-jobs", { token: custToken });
+  check("customer cannot inspect global software sync queue", customerSyncJobs.status === 403, "status=" + customerSyncJobs.status);
   const adminOperations = await call("/software/operations", { token: ownerToken });
   check("admin can view software operation monitor", adminOperations.status === 200 && Array.isArray(adminOperations.body), "status=" + adminOperations.status);
   const customerOperations = await call("/software/operations", { token: custToken });

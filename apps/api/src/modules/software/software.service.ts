@@ -89,9 +89,13 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
 
   private async processOneSyncJob() {
     const now = new Date();
+    await this.syncJobs.updateMany(
+      { status: "running", leaseUntil: { $lte: now }, $expr: { $gte: ["$attempts", "$maxAttempts"] } },
+      { $set: { status: "failed", leaseUntil: null, completedAt: now, lastError: "Worker lease expired after the final attempt" } },
+    );
     const job = await this.syncJobs.findOneAndUpdate(
       {
-        attempts: { $lt: 5 },
+        $expr: { $lt: ["$attempts", "$maxAttempts"] },
         $or: [
           { status: { $in: ["queued", "retry"] }, runAt: { $lte: now } },
           { status: "running", leaseUntil: { $lte: now } },
