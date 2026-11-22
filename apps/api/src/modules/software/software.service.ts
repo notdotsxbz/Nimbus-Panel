@@ -143,7 +143,14 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     await this.audit.log({ actorId: actor.id, action: "software.sync.retry_requested", targetType: "software", targetId: job.softwareId.toString(), detail: job._id.toString(), sensitive: true });
     return job;
   }
-  list() { return this.catalog.find().sort({ name: 1 }).lean(); }
+  async list() {
+    const [rows, counts] = await Promise.all([
+      this.catalog.find().sort({ name: 1 }).populate("recommendedVersionId", "version").lean(),
+      this.versions.aggregate([{ $group: { _id: "$softwareId", count: { $sum: 1 } } }]),
+    ]);
+    const versionCounts = new Map<string, number>(counts.map((row: { _id: Types.ObjectId; count: number }) => [row._id.toString(), row.count]));
+    return rows.map(row => ({ ...row, versionCount: versionCounts.get(row._id.toString()) ?? 0 }));
+  }
 
   listOperations() {
     return this.operations.find().sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("softwareId", "name identifier").lean();
