@@ -436,17 +436,27 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const [software, version] = await Promise.all([this.catalog.findById(softwareId), this.versions.findOne({ _id: versionId, softwareId })]);
     if (!software || !version) throw new NotFoundException("Software or version not found");
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
-    if (software.supportedOperatingSystems?.length) {
+    if (software.supportedOperatingSystems?.length || software.supportedArchitectures?.length) {
       const targetNode = await this.nodes.get(service.nodeId.toString());
-      const actualOs = String(targetNode.os ?? "").trim().toLowerCase();
-      if (!actualOs) throw new BadRequestException("The hosting node operating system is unknown, so this software's OS compatibility cannot be verified");
-      const supported = software.supportedOperatingSystems.map(value => value.trim().toLowerCase());
-      const matchesOs = supported.some(value => {
-        const normalized = value.replace(/[_-]/g, " ");
-        if (normalized === "linux") return ["linux", "ubuntu", "debian"].includes(actualOs);
-        return normalized === actualOs || normalized.startsWith(actualOs + " ") || actualOs.startsWith(normalized + " ");
-      });
-      if (!matchesOs) throw new BadRequestException("This software does not support the operating system installed on the selected hosting node");
+      if (software.supportedOperatingSystems?.length) {
+        const actualOs = String(targetNode.detectedOs || targetNode.os || "").trim().toLowerCase();
+        if (!actualOs) throw new BadRequestException("The hosting node operating system is unknown, so this software's OS compatibility cannot be verified");
+        const supported = software.supportedOperatingSystems.map(value => value.trim().toLowerCase());
+        const matchesOs = supported.some(value => {
+          const normalized = value.replace(/[_-]/g, " ");
+          if (normalized === "linux") return ["linux", "ubuntu", "debian"].includes(actualOs);
+          return normalized === actualOs || normalized.startsWith(actualOs + " ") || actualOs.startsWith(normalized + " ");
+        });
+        if (!matchesOs) throw new BadRequestException("This software does not support the operating system installed on the selected hosting node");
+      }
+      if (software.supportedArchitectures?.length) {
+        const actualArchitecture = String(targetNode.architecture || "").trim().toLowerCase();
+        if (!actualArchitecture) throw new BadRequestException("The hosting node architecture is unknown, so this software's architecture compatibility cannot be verified");
+        const aliases: Record<string, string> = { x86_64: "amd64", x64: "amd64", aarch64: "arm64" };
+        const actual = aliases[actualArchitecture] ?? actualArchitecture;
+        const supported = software.supportedArchitectures.map(value => value.trim().toLowerCase()).map(value => aliases[value] ?? value);
+        if (!supported.includes(actual)) throw new BadRequestException("This software does not support the architecture of the selected hosting node");
+      }
     }
     if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
     const template = software.installationConfig?.imageTemplate;
