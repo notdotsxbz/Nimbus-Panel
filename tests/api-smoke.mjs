@@ -386,6 +386,15 @@ async function call(path, { method = "GET", token, body } = {}) {
     body: { softwareId: osRestrictedSoftware.body?._id, versionId: osRestrictedVersion.body?._id },
   });
   check("software upgrade rejects a catalog entry incompatible with the node OS", incompatibleOsChange.status === 400 && String(incompatibleOsChange.body?.message ?? "").includes("operating system"), `status=${incompatibleOsChange.status}`);
+  const archMetadataUpdate = await call(`/software/${osRestrictedSoftware.body?._id}`, {
+    method: "PATCH", token: ownerToken,
+    body: { supportedOperatingSystems: [], supportedArchitectures: ["arm64"] },
+  });
+  const unknownArchitectureChange = await call(`/software/services/${svc.body?._id}/change`, {
+    method: "POST", token: serviceOwnerToken,
+    body: { softwareId: osRestrictedSoftware.body?._id, versionId: osRestrictedVersion.body?._id },
+  });
+  check("software upgrade fails closed when required node architecture is unknown", archMetadataUpdate.status === 200 && unknownArchitectureChange.status === 400 && String(unknownArchitectureChange.body?.message ?? "").includes("architecture"), `update=${archMetadataUpdate.status} change=${unknownArchitectureChange.status}`);
 
   const vpsService = await call("/services", {
     method: "POST", token: ownerToken,
