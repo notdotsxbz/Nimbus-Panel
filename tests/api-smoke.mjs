@@ -363,7 +363,7 @@ async function call(path, { method = "GET", token, body } = {}) {
   const noAdapterChange = await call(`/software/services/${svc.body?._id}/change`, {
     method: "POST", token: serviceOwnerToken, body: { softwareId: svmSoftwareId, versionId: svmVersionId },
   });
-  check("software change refuses catalog entries without a real installer", noAdapterChange.status === 400, `status=${noAdapterChange.status}`);
+  check("software change refuses catalog entries without a real installer", noAdapterChange.status === 400, `status=${noAdapterChange.status} body=${JSON.stringify(noAdapterChange.body)}`);
 
   const osRestrictedSoftware = await call("/software", {
     method: "POST", token: ownerToken,
@@ -385,7 +385,7 @@ async function call(path, { method = "GET", token, body } = {}) {
     method: "POST", token: serviceOwnerToken,
     body: { softwareId: osRestrictedSoftware.body?._id, versionId: osRestrictedVersion.body?._id },
   });
-  check("software upgrade rejects a catalog entry incompatible with the node OS", incompatibleOsChange.status === 400 && String(incompatibleOsChange.body?.message ?? "").includes("operating system"), `status=${incompatibleOsChange.status}`);
+  check("software upgrade rejects a catalog entry incompatible with the node OS", incompatibleOsChange.status === 400 && String(incompatibleOsChange.body?.message ?? "").includes("operating system"), `status=${incompatibleOsChange.status} body=${JSON.stringify(incompatibleOsChange.body)}`);
   const archMetadataUpdate = await call(`/software/${osRestrictedSoftware.body?._id}`, {
     method: "PATCH", token: ownerToken,
     body: { supportedOperatingSystems: [], supportedArchitectures: ["arm64"] },
