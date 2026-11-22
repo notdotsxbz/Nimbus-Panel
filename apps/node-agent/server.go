@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // AgentServer exposes a narrow, authenticated operation API. Every request
@@ -88,8 +89,11 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		DiskGb         int      `json:"diskGb"`
 		StartupCommand []string `json:"startupCommand"`
 		Env            map[string]string `json:"env"`
+		PreviousContainerName string `json:"previousContainerName"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	type inspectResult struct { ID string `json:"Id"`; Config struct { Image string `json:"Image"`; Env []string `json:"Env"` } `json:"Config"`; State struct { Running bool `json:"Running"`; Health *struct { Status string `json:"Status"` } `json:"Health"` } `json:"State"` }
 
 	switch op {
 	case "install":
@@ -116,6 +120,82 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 	case "restart":
 		_, err := docker("restart", "nimbus-"+serviceID)
 		reply(w, err, map[string]string{"status": "online"})
+	case "upgrade":
+		if req.DockerImage == "" { http.Error(w, "missing target Docker image", http.StatusBadRequest); return }
+		// Pull before touching the running container so registry failures are harmless.
+		if _, err := docker("pull", req.DockerImage); err != nil { http.Error(w, "could not pull target image: "+err.Error(), http.StatusBadGateway); return }
+		oldName := "nimbus-" + serviceID
+		previousName := fmt.Sprintf("nimbus-prev-%s-%d", serviceID, time.Now().UnixNano())
+		existingJSON, existingErr := docker("inspect", oldName)
+		var existing []inspectResult
+		if existingErr == nil { existingErr = json.Unmarshal([]byte(existingJSON), &existing) }
+		if existingErr != nil || len(existing) == 0 {
+			http.Error(w, "existing service container could not be inspected; refusing an in-place upgrade", http.StatusNotFound)
+			return
+		}
+		// Preserve the currently running container's environment by default.
+		// Explicitly supplied values override existing values without dropping
+		// unrelated secrets or runtime configuration.
+		environment := make(map[string]string, len(existing[0].Config.Env)+len(req.Env))
+		for _, entry := range existing[0].Config.Env {
+			key, value, ok := strings.Cut(entry, "=")
+			if ok && key != "" { environment[key] = value }
+		}
+		for key, value := range req.Env {
+			if strings.TrimSpace(key) != "" { environment[key] = value }
+		}
+		if _, err := docker("stop", "--time", "30", oldName); err != nil { http.Error(w, "could not stop existing container: "+err.Error(), http.StatusBadGateway); return }
+		if _, err := docker("rename", oldName, previousName); err != nil { _, _ = docker("start", oldName); http.Error(w, "could not stage existing container: "+err.Error(), http.StatusBadGateway); return }
+		rollback := func() error {
+			_, _ = docker("rm", "-f", oldName)
+			if _, err := docker("rename", previousName, oldName); err != nil { return err }
+			if _, err := docker("start", oldName); err != nil { return err }
+			return nil
+		}
+		args := []string{"run", "-d", "--name", oldName, "--memory", fmt.Sprintf("%dm", req.RAMMb), "--cpus", fmt.Sprintf("%.2f", float64(req.CPUPercent)/100.0), "--restart", "unless-stopped", "--security-opt", "no-new-privileges", "-v", dir + ":/data", "-w", "/data"}
+		for k, v := range environment { args = append(args, "-e", k+"="+v) }
+		args = append(args, req.DockerImage)
+		args = append(args, req.StartupCommand...)
+		containerID, runErr := docker(args...)
+		if runErr != nil { if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "upgrade failed and automatic rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }; http.Error(w, "new container failed to start; previous container restored: "+runErr.Error(), http.StatusBadGateway); return }
+		inspectJSON, inspectErr := docker("inspect", oldName)
+		var inspected []inspectResult
+		if inspectErr == nil { inspectErr = json.Unmarshal([]byte(inspectJSON), &inspected) }
+		// If the image defines a Docker health check, wait up to 60 seconds for it.
+		for attempt := 0; inspectErr == nil && len(inspected) > 0 && inspected[0].State.Running && inspected[0].State.Health != nil && inspected[0].State.Health.Status == "starting" && attempt < 30; attempt++ {
+			time.Sleep(2 * time.Second)
+			inspectJSON, inspectErr = docker("inspect", oldName)
+			inspected = nil
+			if inspectErr == nil { inspectErr = json.Unmarshal([]byte(inspectJSON), &inspected) }
+		}
+		if inspectErr != nil || len(inspected) == 0 || !inspected[0].State.Running || inspected[0].Config.Image != req.DockerImage || (inspected[0].State.Health != nil && inspected[0].State.Health.Status != "healthy") {
+			if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "verification failed and automatic rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }
+			http.Error(w, "new container did not pass image/running verification; previous container restored", http.StatusBadGateway)
+			return
+		}
+		// Keep the previous stopped container until the API commits its database update.
+		writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "previousContainerName": previousName, "healthStatus": func() string { if inspected[0].State.Health == nil { return "not-configured" }; return inspected[0].State.Health.Status }()})
+	case "upgrade-commit":
+		if !strings.HasPrefix(req.PreviousContainerName, "nimbus-prev-"+serviceID+"-") { http.Error(w, "invalid previous container reference", http.StatusBadRequest); return }
+		currentJSON, currentErr := docker("inspect", "nimbus-"+serviceID)
+		var current []inspectResult
+		if currentErr == nil { currentErr = json.Unmarshal([]byte(currentJSON), &current) }
+		if currentErr != nil || len(current) == 0 || !current[0].State.Running || (req.DockerImage != "" && current[0].Config.Image != req.DockerImage) { http.Error(w, "replacement container is not verified; previous container retained", http.StatusBadGateway); return }
+		if _, previousErr := docker("inspect", req.PreviousContainerName); previousErr == nil {
+			if _, removeErr := docker("rm", req.PreviousContainerName); removeErr != nil { http.Error(w, "replacement is active but previous container cleanup failed: "+removeErr.Error(), http.StatusBadGateway); return }
+		}
+		writeJSON(w, map[string]any{"status": "committed", "previousContainerRemoved": true})
+	case "upgrade-rollback":
+		if !strings.HasPrefix(req.PreviousContainerName, "nimbus-prev-"+serviceID+"-") { http.Error(w, "invalid previous container reference", http.StatusBadRequest); return }
+		oldName := "nimbus-" + serviceID
+		_, _ = docker("rm", "-f", oldName)
+		if _, renameErr := docker("rename", req.PreviousContainerName, oldName); renameErr != nil { http.Error(w, "could not restore previous container: "+renameErr.Error(), http.StatusInternalServerError); return }
+		if _, startErr := docker("start", oldName); startErr != nil { http.Error(w, "previous container was restored but could not be started: "+startErr.Error(), http.StatusInternalServerError); return }
+		restoredJSON, restoredErr := docker("inspect", oldName)
+		var restored []inspectResult
+		if restoredErr == nil { restoredErr = json.Unmarshal([]byte(restoredJSON), &restored) }
+		if restoredErr != nil || len(restored) == 0 || !restored[0].State.Running { http.Error(w, "previous container did not pass running verification", http.StatusInternalServerError); return }
+		writeJSON(w, map[string]any{"status": "rolled-back", "containerId": strings.TrimSpace(restored[0].ID), "running": true})
 	case "reinstall":
 		_, _ = docker("rm", "-f", "nimbus-"+serviceID)
 		if err := os.RemoveAll(dir); err != nil {

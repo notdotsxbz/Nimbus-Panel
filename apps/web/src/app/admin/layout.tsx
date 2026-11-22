@@ -27,7 +27,8 @@ const SECTIONS: NavSection[] = [
   },
   {
     title: "Hosting",
-    items: [{ href: "/admin/services", label: "All Services", icon: "▣" }],
+    items: [{ href: "/admin/services", label: "All Services", icon: "▣" },
+      { href: "/admin/software", label: "Software & Versions", icon: "◇" }],
   },
   {
     title: "Management",

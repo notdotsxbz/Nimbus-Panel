@@ -338,6 +338,41 @@ async function call(path, { method = "GET", token, body } = {}) {
     console.log("  (skipping console/files permission checks — service id not found)");
   }
 
+  // ── Software catalog and ownership boundaries ──────────────────
+  const software = await call("/software", { method: "POST", token: ownerToken, body: { name: "Smoke Docker Runtime", identifier: "smoke-docker-" + suffix, description: "catalog smoke test", category: "runtime", serviceTypes: ["docker"], sourceType: "manual", sourceConfig: {}, installationConfig: {}, enabled: true, customerAvailable: true } });
+  check("admin creates software catalog entry", software.status === 201 && !!software.body?._id, "status=" + software.status);
+  const softwareId = software.body?._id;
+  const adminOperations = await call("/software/operations", { token: ownerToken });
+  check("admin can view software operation monitor", adminOperations.status === 200 && Array.isArray(adminOperations.body), "status=" + adminOperations.status);
+  const customerOperations = await call("/software/operations", { token: custToken });
+  check("customer cannot view global software operations", customerOperations.status === 403, "status=" + customerOperations.status);
+  const manualPreview = await call("/software/" + softwareId + "/preview", { method: "POST", token: ownerToken });
+  check("manual-only catalog cannot call an automatic source adapter", manualPreview.status === 400, "status=" + manualPreview.status);
+  const emptyImport = await call("/software/" + softwareId + "/import", { method: "POST", token: ownerToken, body: { all: true } });
+  check("version import requires a current source preview", emptyImport.status === 400, "status=" + emptyImport.status);
+  const customerCatalog = await call("/software", { token: custToken });
+  check("customer cannot list admin software catalog", customerCatalog.status === 403, "status=" + customerCatalog.status);
+  const customerCreate = await call("/software", { method: "POST", token: custToken, body: { name: "Nope", identifier: "customer-nope-" + suffix, serviceTypes: ["docker"], sourceType: "manual" } });
+  check("customer cannot create software catalog entries", customerCreate.status === 403, "status=" + customerCreate.status);
+  const manualVersion = await call("/software/" + softwareId + "/versions", { method: "POST", token: ownerToken, body: { version: "1.0.0" } });
+  check("admin adds manual fallback version", manualVersion.status === 201 && !!manualVersion.body?._id, "status=" + manualVersion.status);
+  const publishedVersion = await call("/software/" + softwareId + "/versions/" + manualVersion.body?._id, { method: "PATCH", token: ownerToken, body: { publicationStatus: "published", recommended: true } });
+  check("admin publishes and recommends a version", publishedVersion.status === 200 && publishedVersion.body?.publicationStatus === "published", "status=" + publishedVersion.status + " body=" + JSON.stringify(publishedVersion.body).slice(0, 180));
+  if (svcId && softwareId) {
+    const crossOptions = await call("/software/for-service/" + svcId, { token: custToken });
+    check("customer cannot read another customer software options", crossOptions.status === 403, "status=" + crossOptions.status);
+    const crossOperations = await call("/software/services/" + svcId + "/operations", { token: custToken });
+    check("customer cannot read another customer software operation history", crossOperations.status === 403, "status=" + crossOperations.status);
+    const crossChange = await call("/software/services/" + svcId + "/change", { method: "POST", token: custToken, body: { softwareId, versionId: manualVersion.body?._id } });
+    check("customer cannot change another users software", crossChange.status === 403, "status=" + crossChange.status);
+    const ownerOptions = await call("/software/for-service/" + svcId, { token: ownerToken });
+    check("authorized owner can read service-specific software options", ownerOptions.status === 200 && Array.isArray(ownerOptions.body?.options), "status=" + ownerOptions.status);
+  }
+  const deleteVersion = await call("/software/" + softwareId + "/versions/" + manualVersion.body?._id, { method: "DELETE", token: ownerToken });
+  check("admin deletes unused software version", deleteVersion.status === 200, "status=" + deleteVersion.status + " body=" + JSON.stringify(deleteVersion.body).slice(0, 180));
+  const deleteSoftware = await call("/software/" + softwareId, { method: "DELETE", token: ownerToken });
+  check("admin deletes unused software catalog entry", deleteSoftware.status === 200, "status=" + deleteSoftware.status);
+
   // ── Notifications & migrations ─────────────────────────────────
   const bc = await call("/notifications/broadcast", { method: "POST", token: ownerToken, body: { title: "Maintenance window", body: "Scheduled maintenance tonight", type: "info" } });
   check("admin broadcasts notification", (bc.status === 200 || bc.status === 201) && bc.body?.delivered >= 1, `status=${bc.status}`);

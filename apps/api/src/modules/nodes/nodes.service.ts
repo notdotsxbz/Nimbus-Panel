@@ -5,7 +5,7 @@ import { Model, Types } from "mongoose";
 import * as bcrypt from "bcryptjs";
 import axios from "axios";
 import { Agent as HttpsAgent } from "node:https";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from "node:crypto";
 import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
 import { Node, NodeDocument } from "./node.schema";
@@ -15,6 +15,22 @@ import { Allocation, AllocationDocument } from "../allocations/allocation.schema
 /** Per-node credential issued at enrollment — hashed, never stored raw. */
 export const hashAgentToken = (token: string) =>
   createHmac("sha256", env.agentSharedSecret).update(token).digest("hex");
+
+const agentEncryptionKey = () => createHash("sha256").update(env.agentSharedSecret).digest();
+const encryptAgentToken = (token: string) => {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", agentEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+  return [iv.toString("hex"), cipher.getAuthTag().toString("hex"), encrypted.toString("hex")].join(".");
+};
+const decryptAgentToken = (value?: string) => {
+  if (!value) throw new BadRequestException("This node must be re-enrolled before control-plane operations can run");
+  const [ivHex, tagHex, dataHex] = value.split(".");
+  if (!ivHex || !tagHex || !dataHex) throw new BadRequestException("Stored node credential is invalid; re-enroll this node");
+  const decipher = createDecipheriv("aes-256-gcm", agentEncryptionKey(), Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]).toString("utf8");
+};
 
 export interface NodeDto {
   name: string;
@@ -106,6 +122,7 @@ export class NodesService {
   async revokeCredentials(id: string, actorId: string) {
     const node = await this.get(id);
     node.agentTokenHash = undefined;
+    node.agentTokenEncrypted = undefined;
     node.status = "enrolling";
     node.online = false;
     await node.save();
@@ -169,6 +186,7 @@ export class NodesService {
     node.status = "retired";
     node.online = false;
     node.agentTokenHash = undefined; // revoke credentials permanently
+    node.agentTokenEncrypted = undefined;
     await node.save();
     await this.audit.log({
       actorId: actor.id,
@@ -227,6 +245,7 @@ export class NodesService {
     node.online = true;
     node.lastHeartbeatAt = new Date();
     node.agentTokenHash = hashAgentToken(agentToken);
+    node.agentTokenEncrypted = encryptAgentToken(agentToken);
     await node.save();
     await this.audit.log({ action: "nodes.enrolled", targetType: "node", targetId: nodeId });
     return agentToken;
@@ -313,7 +332,8 @@ export class NodesService {
 
   /** Authenticated command to a node agent (never the control plane shell). */
   async agentCall(node: NodeDocument, path: string, body?: unknown, method: "GET" | "POST" = "POST", timeoutMs = 15_000) {
-    const token = this.jwt.sign({ nid: node._id!.toString() }, { secret: env.agentSharedSecret, expiresIn: "2m" });
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
     const res = await axios({
       method,
       url: `${node.agentUrl}${path}`,
@@ -328,7 +348,8 @@ export class NodesService {
 
   /** Download a completed archive from the authenticated node agent. */
   async downloadBackupArchive(node: NodeDocument, serviceId: string, backupId: string): Promise<Buffer> {
-    const token = this.jwt.sign({ nid: node._id!.toString() }, { secret: env.agentSharedSecret, expiresIn: "2m" });
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
     const response = await axios({
       method: "POST",
       url: `${node.agentUrl}/backups/download`,
