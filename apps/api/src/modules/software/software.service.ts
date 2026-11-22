@@ -148,7 +148,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       this.catalog.find().sort({ name: 1 }).populate("recommendedVersionId", "version").lean(),
       this.versions.aggregate([{ $group: { _id: "$softwareId", count: { $sum: 1 } } }]),
     ]);
-    const versionCounts = new Map<string, number>(counts.map((row: { _id: Types.ObjectId; count: number }) => [row._id.toString(), row.count]));
+    const versionCounts = new Map<string, number>(counts.map((row: { _id: Types.ObjectId; count: number }): [string, number] => [row._id.toString(), row.count]));
     return rows.map(row => ({ ...row, versionCount: versionCounts.get(row._id.toString()) ?? 0 }));
   }
 
