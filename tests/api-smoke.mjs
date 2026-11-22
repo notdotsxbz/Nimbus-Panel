@@ -370,6 +370,8 @@ async function call(path, { method = "GET", token, body } = {}) {
     body: { name: "smoke-vps-" + suffix, type: "vps", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" },
   });
   check("VPS service record created for OS restriction test", vpsService.status === 201 && !!vpsService.body?._id, `status=${vpsService.status}`);
+  const vpsOptions = await call(`/software/for-service/${vpsService.body?._id}`, { token: serviceOwnerToken });
+  check("VPS customer software options never expose OS catalog controls", vpsOptions.status === 200 && Array.isArray(vpsOptions.body?.options) && vpsOptions.body.options.length === 0);
   const customerVpsOsChange = await call(`/software/services/${vpsService.body?._id}/change`, {
     method: "POST", token: serviceOwnerToken,
     body: { softwareId: "000000000000000000000000", versionId: "000000000000000000000000" },
