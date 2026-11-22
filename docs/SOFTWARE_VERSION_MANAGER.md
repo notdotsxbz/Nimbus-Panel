@@ -12,6 +12,8 @@ The currently implemented official-source adapters are:
 - **MongoDB current releases** — MongoDB's official `current.json` feed, limited to Community (`targeted`) Linux packages, with per-platform URLs and SHA-256 metadata. This feed reports current releases per series, not every historical patch.
 - **PaperMC builds** — the official PaperMC Fill v3 API for a configured Minecraft version, including stable/experimental channel and download metadata.
 - **Purpur builds** — the official Purpur API for a configured Minecraft version, including build identifiers and direct release URLs.
+- **Minecraft versions** — Mojang's official version manifest, including release/snapshot classification and manifest metadata.
+- **Fabric-compatible game versions** — Fabric's official metadata API, including stable-version status.
 - **Modrinth** — versions from a configured Modrinth project ID.
 - **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
 - **Manual** — fallback for software without an implemented source adapter.
