@@ -39,7 +39,7 @@ Do not configure an image template unless the image is trusted and the tag conve
 
 ## Automatic synchronization
 
-Automatic sync runs in the API process once per minute and checks each enabled catalog entry's configured interval (6 hours, 12 hours, 24 hours, or 7 days). A database lease prevents two API instances from synchronizing the same software entry at the same time. If a source fails, the existing catalog remains intact and the next interval can retry.
+Automatic sync runs in the API process every 15 seconds and checks each enabled catalog entry's configured interval (6 hours, 12 hours, 24 hours, or 7 days). A database lease prevents two API instances from synchronizing the same software entry at the same time. If a source fails, the existing catalog remains intact and the next interval can retry.
 
 This is an in-process scheduler, not a durable external job queue. For multi-region or high-availability deployments, move this work to a dedicated persistent worker before scaling the API horizontally.
 
