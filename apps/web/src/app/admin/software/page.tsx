@@ -192,8 +192,19 @@ export default function AdminSoftwarePage() {
   const addManualVersion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || !manualVersion.trim()) return;
+    const data = new FormData(event.currentTarget);
+    const compatibility = String(data.get("compatibility") ?? "").split(",").map(value => value.trim()).filter(Boolean);
+    const releaseDate = String(data.get("releaseDate") ?? "").trim();
     try {
-      await api.post("/software/" + selected._id + "/versions", { version: manualVersion.trim() });
+      await api.post("/software/" + selected._id + "/versions", {
+        version: manualVersion.trim(),
+        releaseName: String(data.get("releaseName") ?? "").trim(),
+        releaseDate: releaseDate || undefined,
+        channel: String(data.get("channel") ?? "stable"),
+        prerelease: data.get("prerelease") === "on",
+        sourceUrl: String(data.get("sourceUrl") ?? "").trim(),
+        compatibility,
+      });
       setManualVersion(""); await openSoftware(selected); show("Version added as pending approval", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Could not add version", "err"); }
   };
@@ -263,9 +274,16 @@ export default function AdminSoftwarePage() {
               </label>)}
             </div>
           </div>}
-          <form onSubmit={addManualVersion} className="mt-4 flex gap-2">
-            <input className="input min-w-0 flex-1" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Add version manually" aria-label="Version number" />
-            <button className="btn-ghost" type="submit">Add version</button>
+          <form onSubmit={addManualVersion} className="mt-4 grid gap-2 rounded-lg border border-white/10 p-3 sm:grid-cols-2">
+            <strong className="text-sm sm:col-span-2">Add version manually</strong>
+            <input name="version" required className="input min-w-0" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Version identifier" aria-label="Version number" />
+            <input name="releaseName" className="input min-w-0" placeholder="Release name (optional)" />
+            <input name="releaseDate" type="date" className="input min-w-0" aria-label="Release date" />
+            <select name="channel" className="input min-w-0" defaultValue="stable"><option value="stable">Stable</option><option value="beta">Beta</option><option value="alpha">Alpha</option><option value="prerelease">Prerelease</option></select>
+            <input name="sourceUrl" type="url" className="input min-w-0 sm:col-span-2" placeholder="Official release URL (HTTPS)" />
+            <input name="compatibility" className="input min-w-0 sm:col-span-2" placeholder="Compatibility labels (comma-separated)" />
+            <label className="flex items-center gap-2 text-xs text-muted"><input name="prerelease" type="checkbox" /> Mark as prerelease</label>
+            <button className="btn-ghost sm:justify-self-end" type="submit">Add pending version</button>
           </form>
           {selectedVersionIds.length > 0 && <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-white/10 p-3">
             <span className="self-center text-xs text-muted">{selectedVersionIds.length} selected</span>
