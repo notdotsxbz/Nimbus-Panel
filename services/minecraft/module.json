@@ -11,6 +11,7 @@
     { "id": "purpur",   "label": "Purpur",   "image": "ghcr.io/pterodactyl/yolks:java_21", "versions": ["1.21", "1.20.4"], "minRamMb": 2048 },
     { "id": "spigot",   "label": "Spigot",   "image": "ghcr.io/pterodactyl/yolks:java_17", "versions": ["1.20.4"], "minRamMb": 1024 },
     { "id": "fabric",   "label": "Fabric",   "image": "ghcr.io/pterodactyl/yolks:java_21", "versions": ["1.21"], "minRamMb": 2048 },
+    { "id": "quilt",    "label": "Quilt",    "image": "ghcr.io/pterodactyl/yolks:java_21", "versions": ["1.21"], "minRamMb": 2048 },
     { "id": "forge",    "label": "Forge",    "image": "ghcr.io/pterodactyl/yolks:java_17", "versions": ["1.20.4"], "minRamMb": 3072 },
     { "id": "neoforge", "label": "NeoForge", "image": "ghcr.io/pterodactyl/yolks:java_21", "versions": ["1.21"], "minRamMb": 3072 },
     { "id": "folia",    "label": "Folia",    "image": "ghcr.io/pterodactyl/yolks:java_21", "versions": ["1.21"], "minRamMb": 4096 }
