@@ -77,6 +77,10 @@ Control-plane-to-agent requests now use the per-node enrollment credential encry
 
 Never share enrollment tokens or node credentials in support tickets or public channels.
 
+## Regression smoke coverage
+
+The main API smoke suite now also checks Owner-only catalog access, manual version creation and HTTPS source validation, publish-before-recommend rules, customer service ownership for software options, rejection of software changes without a real installer, and backend rejection of customer VPS operating-system changes. These checks run in the existing CI integration job; source-adapter network behavior and real agent-backed upgrades still require dedicated tests.
+
 ## Security boundaries and current limitations
 
 - Catalog management endpoints are Owner/Admin-only.
