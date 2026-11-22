@@ -285,6 +285,10 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const dockerImage = template.replaceAll("{version}", safeVersion);
     if (!/^[A-Za-z0-9._:/@-]+$/.test(dockerImage)) throw new BadRequestException("Configured container image is invalid");
     const beforeStatus = service.status;
+    const previousState = { dockerImage: service.dockerImage, software: service.software, softwareVersion: service.softwareVersion, containerId: service.containerId };
+    let agentNode: any;
+    let agentUpgrade: any;
+    let serviceStateSaved = false;
     const operation = await this.operations.create({
       serviceId: service._id, requestedBy: new Types.ObjectId(actor.id), softwareId: software._id, versionId: version._id,
       previousSoftware: service.software ?? "", previousVersion: service.softwareVersion ?? "",
@@ -296,29 +300,49 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       operation.backupId = backup._id.toString();
       service.status = "updating"; await service.save();
       operation.status = "updating"; operation.progress = 25; await operation.save();
-      const node = await this.nodes.get(service.nodeId.toString());
-      const result = await this.nodes.agentCall(node, "/services/" + service._id.toString() + "/upgrade", {
+      agentNode = await this.nodes.get(service.nodeId.toString());
+      agentUpgrade = await this.nodes.agentCall(agentNode, "/services/" + service._id.toString() + "/upgrade", {
         dockerImage, cpuPercent: service.cpuPercent, ramMb: service.ramMb, diskGb: service.diskGb,
         startupCommand: service.startupCommand ?? [], env: {},
-      }, "POST", 10 * 60 * 1000) as { status?: string; containerId?: string; installedImage?: string; running?: boolean };
+      }, "POST", 10 * 60 * 1000);
       operation.status = "verifying"; operation.progress = 85; await operation.save();
-      if (result.status !== "online" || !result.running || result.installedImage !== dockerImage || !result.containerId) throw new BadRequestException("Node Agent did not verify the requested image and running container");
+      if (agentUpgrade.status !== "online" || !agentUpgrade.running || agentUpgrade.installedImage !== dockerImage || !agentUpgrade.containerId || !agentUpgrade.previousContainerName) throw new BadRequestException("Node Agent did not verify the replacement container and retain the previous container for rollback");
       service.dockerImage = dockerImage; service.software = software.identifier; service.softwareVersion = version.version;
-      service.containerId = result.containerId; service.status = "online";
+      service.containerId = agentUpgrade.containerId; service.status = "online";
       service.activity.push({ at: new Date(), action: "software.upgrade", ok: true, detail: software.identifier + "@" + version.version });
-      await service.save();
-      operation.status = "completed"; operation.progress = 100; operation.verification = { running: true, installedImage: result.installedImage, containerId: result.containerId }; operation.completedAt = new Date(); await operation.save();
+      await service.save(); serviceStateSaved = true;
+      operation.status = "completed"; operation.progress = 100;
+      operation.verification = { running: true, installedImage: agentUpgrade.installedImage, containerId: agentUpgrade.containerId, healthStatus: agentUpgrade.healthStatus ?? "unknown", previousContainerRemoved: false };
+      operation.completedAt = new Date(); await operation.save();
       await this.audit.log({ actorId: actor.id, action: "software.service.upgraded", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
+      // Finalize only after both the service record and operation record are safely saved.
+      try {
+        const committed = await this.nodes.agentCall(agentNode, "/services/" + service._id.toString() + "/upgrade-commit", { dockerImage, previousContainerName: agentUpgrade.previousContainerName }, "POST", 60_000) as { status?: string; previousContainerRemoved?: boolean };
+        if (committed.status === "committed" && committed.previousContainerRemoved) operation.verification = { ...operation.verification, previousContainerRemoved: true };
+        else operation.warning = "The new version is active, but the previous stopped container is still retained for administrator cleanup.";
+      } catch { operation.warning = "The new version is active, but the previous stopped container could not be cleaned up. It was retained for safety."; }
+      try { await operation.save(); } catch { /* The completed operation and service state are already saved; retain the old container if cleanup status cannot be recorded. */ }
       return operation;
     } catch (error) {
       const failureDetail = axios.isAxiosError(error) ? String(error.response?.data ?? error.message) : (error instanceof Error ? error.message : "Upgrade failed");
-      const rollbackNeedsAttention = failureDetail.toLowerCase().includes("rollback needs administrator attention");
+      let rollbackSucceeded = false;
+      if (agentNode && agentUpgrade?.previousContainerName) {
+        try {
+          const rolledBack = await this.nodes.agentCall(agentNode, "/services/" + service._id.toString() + "/upgrade-rollback", { previousContainerName: agentUpgrade.previousContainerName }, "POST", 60_000) as { status?: string; running?: boolean };
+          rollbackSucceeded = rolledBack.status === "rolled-back" && rolledBack.running === true;
+        } catch { rollbackSucceeded = false; }
+      }
+      if (rollbackSucceeded || !serviceStateSaved) {
+        service.dockerImage = previousState.dockerImage; service.software = previousState.software;
+        service.softwareVersion = previousState.softwareVersion; service.containerId = previousState.containerId;
+      }
+      const rollbackNeedsAttention = (!!agentUpgrade && !rollbackSucceeded) || failureDetail.toLowerCase().includes("rollback needs administrator attention");
       service.status = rollbackNeedsAttention ? "error" : beforeStatus;
       service.activity.push({ at: new Date(), action: "software.upgrade.failed", ok: false, detail: failureDetail.slice(0, 300) });
       await service.save();
       operation.status = "failed"; operation.error = failureDetail.slice(0, 500); operation.completedAt = new Date(); await operation.save();
       await this.audit.log({ actorId: actor.id, action: "software.service.upgrade_failed", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
-      throw error instanceof BadRequestException ? error : new BadRequestException(rollbackNeedsAttention ? "Upgrade failed and automatic rollback needs administrator attention. Contact support before retrying." : "Software upgrade failed. The previous confirmed software/version was retained.");
+      throw error instanceof BadRequestException ? error : new BadRequestException(rollbackNeedsAttention ? "Upgrade failed and rollback could not be verified. The service was marked for administrator attention." : "Software upgrade failed. The previous confirmed software/version was retained.");
     }
   }
   async customerOptions(serviceId: string, actor: AuthUser) {

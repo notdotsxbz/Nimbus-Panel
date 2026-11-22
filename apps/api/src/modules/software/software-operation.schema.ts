@@ -14,6 +14,7 @@ export class SoftwareOperation {
   @Prop({ enum: ["pending", "backing-up", "updating", "verifying", "completed", "failed", "cancelled"], default: "pending", index: true }) status!: string;
   @Prop({ default: 0 }) progress!: number;
   @Prop({ default: "" }) error!: string;
+  @Prop({ default: "" }) warning!: string;
   @Prop({ type: Object, default: {} }) verification!: Record<string, unknown>;
   @Prop() backupId?: string;
   @Prop() startedAt?: Date;

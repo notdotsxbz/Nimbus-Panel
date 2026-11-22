@@ -54,10 +54,10 @@ For a supported container change, NIMBUS:
 3. Creates a local pre-update backup through the existing Node Agent backup endpoint.
 4. Pulls the target image before stopping the existing container.
 5. Stops and renames the previous container while retaining the same service data directory.
-6. Starts the new image using the service resource limits and configured startup command.
-7. Checks that the running container reports the requested image.
-8. Updates the service's confirmed software/version fields only after verification.
-9. Attempts to restore the previous container if the new container fails its start/image verification.
+6. Starts the new image using the service resource limits and configured startup command, while retaining the previous stopped container.
+7. Checks that the running container reports the requested image and waits for a configured Docker health check to become healthy.
+8. Saves the service and operation records, then asks the Node Agent to remove the previous container in a separate commit step.
+9. If the database update fails after the new container starts, asks the Node Agent to restore the retained previous container. If final cleanup fails, the previous container is kept and an administrator warning is recorded.
 
 Operation history is available on the service's **Software** tab. The current verification is container-level: running state, configured image, and Docker health status when a health check exists. An application without a Docker health check cannot receive an application-specific health guarantee from this adapter.
 

@@ -79,15 +79,39 @@ func TestSoftwareUpgradePullsAndVerifiesReplacement(t *testing.T) {
 	if !strings.Contains(commands, "pull new:1") || !strings.Contains(commands, "stop --time 30 nimbus-svc-test") || !strings.Contains(commands, "rename nimbus-svc-test nimbus-prev-") {
 		t.Fatalf("expected pull, stop, and rename sequence; commands: %s", commands)
 	}
-	if !strings.Contains(commands, "rm nimbus-prev-") {
-		t.Fatalf("expected old container cleanup after verification; commands: %s", commands)
-	}
+	previousName, ok := result["previousContainerName"].(string)
+	if !ok || !strings.HasPrefix(previousName, "nimbus-prev-svc-test-") { t.Fatalf("expected previous container reference in response: %#v", result) }
+	if strings.Contains(commands, "rm "+previousName) { t.Fatalf("previous container must remain until API commit; commands: %s", commands) }
 	expectedMount := "-v " + filepath.Join(dataDir, "services", "svc-test") + ":/data"
 	if !strings.Contains(commands, expectedMount) {
 		t.Fatalf("expected existing service data directory to be reused; commands: %s", commands)
 	}
 }
 
+func TestSoftwareUpgradeCommitRemovesPreviousContainer(t *testing.T) {
+	logPath := installFakeDocker(t)
+	server := NewAgentServer(&Config{DataDir: t.TempDir(), AgentToken: "test-token", NodeID: "node-test"})
+	body := []byte(`{"dockerImage":"new:1","previousContainerName":"nimbus-prev-svc-test-123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/services/svc-test/upgrade-commit", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.handleService(rec, req)
+	if rec.Code != http.StatusOK { t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String()) }
+	log, err := os.ReadFile(logPath); if err != nil { t.Fatal(err) }
+	if !strings.Contains(string(log), "rm nimbus-prev-svc-test-123") { t.Fatalf("expected old container removal on commit: %s", string(log)) }
+}
+
+func TestSoftwareUpgradeRollbackRestoresPreviousContainer(t *testing.T) {
+	logPath := installFakeDocker(t)
+	server := NewAgentServer(&Config{DataDir: t.TempDir(), AgentToken: "test-token", NodeID: "node-test"})
+	body := []byte(`{"previousContainerName":"nimbus-prev-svc-test-123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/services/svc-test/upgrade-rollback", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.handleService(rec, req)
+	if rec.Code != http.StatusOK { t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String()) }
+	log, err := os.ReadFile(logPath); if err != nil { t.Fatal(err) }
+	commands := string(log)
+	if !strings.Contains(commands, "rm -f nimbus-svc-test") || !strings.Contains(commands, "rename nimbus-prev-svc-test-123 nimbus-svc-test") || !strings.Contains(commands, "start nimbus-svc-test") { t.Fatalf("expected previous container restore sequence: %s", commands) }
+}
 func TestSoftwareUpgradeRestoresPreviousContainerWhenRunFails(t *testing.T) {
 	logPath := installFakeDocker(t)
 	t.Setenv("FAIL_RUN", "1")

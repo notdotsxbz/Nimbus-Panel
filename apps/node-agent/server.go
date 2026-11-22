@@ -89,8 +89,11 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		DiskGb         int      `json:"diskGb"`
 		StartupCommand []string `json:"startupCommand"`
 		Env            map[string]string `json:"env"`
+		PreviousContainerName string `json:"previousContainerName"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	type inspectResult struct { ID string `json:"Id"`; Config struct { Image string `json:"Image"` } `json:"Config"`; State struct { Running bool `json:"Running"`; Health *struct { Status string `json:"Status"` } `json:"Health"` } `json:"State"` }
 
 	switch op {
 	case "install":
@@ -138,7 +141,6 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		args = append(args, req.StartupCommand...)
 		containerID, runErr := docker(args...)
 		if runErr != nil { if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "upgrade failed and automatic rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }; http.Error(w, "new container failed to start; previous container restored: "+runErr.Error(), http.StatusBadGateway); return }
-		type inspectResult struct { Config struct { Image string `json:"Image"` } `json:"Config"`; State struct { Running bool `json:"Running"`; Health *struct { Status string `json:"Status"` } `json:"Health"` } `json:"State"` }
 		inspectJSON, inspectErr := docker("inspect", oldName)
 		var inspected []inspectResult
 		if inspectErr == nil { inspectErr = json.Unmarshal([]byte(inspectJSON), &inspected) }
@@ -154,9 +156,27 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "new container did not pass image/running verification; previous container restored", http.StatusBadGateway)
 			return
 		}
-		// Keep the old container until the replacement is confirmed running.
-		_, _ = docker("rm", previousName)
-		writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "healthStatus": func() string { if inspected[0].State.Health == nil { return "not-configured" }; return inspected[0].State.Health.Status }()})
+		// Keep the previous stopped container until the API commits its database update.
+		writeJSON(w, map[string]any{"status": "online", "containerId": strings.TrimSpace(containerID), "installedImage": inspected[0].Config.Image, "running": inspected[0].State.Running, "previousContainerName": previousName, "healthStatus": func() string { if inspected[0].State.Health == nil { return "not-configured" }; return inspected[0].State.Health.Status }()})
+	case "upgrade-commit":
+		if !strings.HasPrefix(req.PreviousContainerName, "nimbus-prev-"+serviceID+"-") { http.Error(w, "invalid previous container reference", http.StatusBadRequest); return }
+		currentJSON, currentErr := docker("inspect", "nimbus-"+serviceID)
+		var current []inspectResult
+		if currentErr == nil { currentErr = json.Unmarshal([]byte(currentJSON), &current) }
+		if currentErr != nil || len(current) == 0 || !current[0].State.Running || (req.DockerImage != "" && current[0].Config.Image != req.DockerImage) { http.Error(w, "replacement container is not verified; previous container retained", http.StatusBadGateway); return }
+		if _, removeErr := docker("rm", req.PreviousContainerName); removeErr != nil { http.Error(w, "replacement is active but previous container cleanup failed: "+removeErr.Error(), http.StatusBadGateway); return }
+		writeJSON(w, map[string]any{"status": "committed", "previousContainerRemoved": true})
+	case "upgrade-rollback":
+		if !strings.HasPrefix(req.PreviousContainerName, "nimbus-prev-"+serviceID+"-") { http.Error(w, "invalid previous container reference", http.StatusBadRequest); return }
+		oldName := "nimbus-" + serviceID
+		_, _ = docker("rm", "-f", oldName)
+		if _, renameErr := docker("rename", req.PreviousContainerName, oldName); renameErr != nil { http.Error(w, "could not restore previous container: "+renameErr.Error(), http.StatusInternalServerError); return }
+		if _, startErr := docker("start", oldName); startErr != nil { http.Error(w, "previous container was restored but could not be started: "+startErr.Error(), http.StatusInternalServerError); return }
+		restoredJSON, restoredErr := docker("inspect", oldName)
+		var restored []inspectResult
+		if restoredErr == nil { restoredErr = json.Unmarshal([]byte(restoredJSON), &restored) }
+		if restoredErr != nil || len(restored) == 0 || !restored[0].State.Running { http.Error(w, "previous container did not pass running verification", http.StatusInternalServerError); return }
+		writeJSON(w, map[string]any{"status": "rolled-back", "containerId": strings.TrimSpace(restored[0].ID), "running": true})
 	case "reinstall":
 		_, _ = docker("rm", "-f", "nimbus-"+serviceID)
 		if err := os.RemoveAll(dir); err != nil {

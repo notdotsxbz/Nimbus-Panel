@@ -7,7 +7,7 @@ import { GlassCard, useToast } from "@/components/glass";
 type VersionOption = { _id: string; version: string; releaseName?: string; recommended?: boolean; prerelease?: boolean; publicationStatus: string };
 type SoftwareOption = { software: { id: string; name: string; identifier: string; description: string; category: string; installable: boolean }; versions: VersionOption[] };
 type OptionsResponse = { serviceType: string; currentSoftware: string | null; currentVersion: string | null; options: SoftwareOption[] };
-type Operation = { _id: string; requestedSoftware: string; requestedVersion: string; previousSoftware: string; previousVersion: string; status: string; progress: number; error?: string; createdAt: string; completedAt?: string };
+type Operation = { _id: string; requestedSoftware: string; requestedVersion: string; previousSoftware: string; previousVersion: string; status: string; progress: number; error?: string; warning?: string; createdAt: string; completedAt?: string };
 
 export function SoftwareManager({ serviceId, serviceType }: { serviceId: string; serviceType: string }) {
   const [data, setData] = useState<OptionsResponse | null>(null);
@@ -89,7 +89,7 @@ export function SoftwareManager({ serviceId, serviceType }: { serviceId: string;
         {operations.map(operation => <div key={operation._id} className="rounded-lg border border-white/10 p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2"><strong>{operation.requestedSoftware} · {operation.requestedVersion}</strong><span className="text-xs text-muted">{operation.status} · {operation.progress}%</span></div>
           <p className="mt-1 text-xs text-muted">{operation.previousSoftware || "—"} {operation.previousVersion ? "· " + operation.previousVersion : ""} → {operation.requestedSoftware} · {new Date(operation.createdAt).toLocaleString()}</p>
-          {operation.error ? <p className="mt-2 text-xs text-rose-300">{operation.error}</p> : null}
+          {operation.error ? <p className="mt-2 text-xs text-rose-300">{operation.error}</p> : null}{operation.warning ? <p className="mt-2 text-xs text-amber-300">{operation.warning}</p> : null}
         </div>)}
         {!operations.length && <p className="text-sm text-muted">No software changes recorded yet.</p>}
       </div>
