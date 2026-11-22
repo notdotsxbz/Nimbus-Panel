@@ -16,6 +16,8 @@ The currently implemented official-source adapters are:
 
 GitHub discovery follows up to 20 pages of 100 releases (up to 2,000 releases); if a source still has more data at that safety limit, discovery fails explicitly instead of silently returning a partial catalog. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
 
+Catalog metadata also supports an HTTPS official website, HTTPS logo URL, supported operating systems, supported architectures, required runtime, and default version. These fields are descriptive compatibility metadata; they do not themselves install host packages or prove compatibility. Release pages show upstream source URLs, compatibility labels, and available SHA-256 values from the official Go and MongoDB feeds.
+
 ## Add a catalog entry
 
 1. Open **Admin → Software & Versions → Add Software**.
