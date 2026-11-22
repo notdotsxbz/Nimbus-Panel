@@ -6,7 +6,7 @@ import { GlassCard, useToast } from "@/components/glass";
 
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
-  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string>; provider?: string; imageId?: string; minRamMb?: number; architecture?: string }; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
+  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string>; versionProbe?: string; provider?: string; imageId?: string; minRamMb?: number; architecture?: string }; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; channel?: string; importedAt?: string; compatibility?: string[]; architectures?: string[]; runtimeRequirements?: Record<string, unknown>; checksum?: string; signature?: string; sourceUrl?: string };
@@ -88,7 +88,7 @@ export default function AdminSoftwarePage() {
         installationConfig: installationMethod === "virtualization-image"
           ? { method: "virtualization-image", provider: "kvm-libvirt", imageId: String(data.get("osImageId") ?? "").trim(), minRamMb: Number(data.get("osMinRamMb")), architecture: String(data.get("osArchitecture") ?? "amd64") }
           : imageTemplate || installationMethod === "docker-image-template"
-            ? { method: "docker-image-template", imageTemplate, environment }
+            ? { method: "docker-image-template", imageTemplate, environment, versionProbe: String(data.get("versionProbe") ?? "") || undefined }
             : {},
       };
       if (editingId) await api.patch("/software/" + editingId, payload);
@@ -245,6 +245,8 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">OS architecture<select name="osArchitecture" className="input w-full" defaultValue={editingId ? selected?.installationConfig?.architecture ?? "amd64" : "amd64"}><option value="amd64">amd64</option><option value="arm64">arm64</option></select></label>
         <p className="text-xs text-amber-200 sm:col-span-2">KVM/libvirt OS entries are catalog metadata only. This repository does not yet contain a virtualization Node Agent/provider, so no OS reinstall or apply action is offered.</p>
         <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} defaultValue={editingId ? Object.entries(selected?.installationConfig?.environment ?? {}).map(([key, value]) => key + "=" + value).join("\n") : ""} /></label>
+        <label className="space-y-1 text-sm">Application version verification<select name="versionProbe" className="input w-full" defaultValue={editingId ? selected?.installationConfig?.versionProbe ?? "" : ""}><option value="">Container image / environment only</option><option value="minecraft-log">Minecraft startup log version</option></select></label>
+        <p className="text-xs text-muted">For Minecraft, set VERSION={version} in the environment and choose the startup-log probe. The Agent checks the server startup log before saving the new version.</p>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" defaultValue={editingId ? selected?.description : ""} /></label>
         <label className="space-y-1 text-sm">Supported OS<input name="supportedOperatingSystems" className="input w-full" placeholder="linux,windows" defaultValue={editingId ? selected?.supportedOperatingSystems?.join(",") : ""} /></label>
         <label className="space-y-1 text-sm">Architectures<input name="supportedArchitectures" className="input w-full" placeholder="amd64,arm64" defaultValue={editingId ? selected?.supportedArchitectures?.join(",") : ""} /></label>
