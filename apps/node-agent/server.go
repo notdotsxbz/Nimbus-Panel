@@ -142,7 +142,14 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		inspectJSON, inspectErr := docker("inspect", oldName)
 		var inspected []inspectResult
 		if inspectErr == nil { inspectErr = json.Unmarshal([]byte(inspectJSON), &inspected) }
-		if inspectErr != nil || len(inspected) == 0 || !inspected[0].State.Running || inspected[0].Config.Image != req.DockerImage || (inspected[0].State.Health != nil && inspected[0].State.Health.Status == "unhealthy") {
+		// If the image defines a Docker health check, wait up to 60 seconds for it.
+		for attempt := 0; inspectErr == nil && len(inspected) > 0 && inspected[0].State.Running && inspected[0].State.Health != nil && inspected[0].State.Health.Status == "starting" && attempt < 30; attempt++ {
+			time.Sleep(2 * time.Second)
+			inspectJSON, inspectErr = docker("inspect", oldName)
+			inspected = nil
+			if inspectErr == nil { inspectErr = json.Unmarshal([]byte(inspectJSON), &inspected) }
+		}
+		if inspectErr != nil || len(inspected) == 0 || !inspected[0].State.Running || inspected[0].Config.Image != req.DockerImage || (inspected[0].State.Health != nil && inspected[0].State.Health.Status != "healthy") {
 			if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "verification failed and automatic rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }
 			http.Error(w, "new container did not pass image/running verification; previous container restored", http.StatusBadGateway)
 			return
