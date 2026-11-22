@@ -9,9 +9,10 @@ The currently implemented official-source adapters are:
 - **GitHub Releases** — release metadata from a configured public `owner/repository`.
 - **Node.js releases** — the official Node.js distribution index.
 - **Modrinth** — versions from a configured Modrinth project ID.
+- **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
 - **Manual** — fallback for software without an implemented source adapter.
 
-GitHub discovery follows up to five pages of 100 releases. Node.js uses the official distribution index. Modrinth currently requests the latest 100 project versions.
+GitHub discovery follows up to five pages of 100 releases. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
 
 ## Add a catalog entry
 

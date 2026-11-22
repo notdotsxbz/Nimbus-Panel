@@ -290,7 +290,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   private validateSource(type: string, config: Record<string, string>) {
     if (type === "github-releases" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("GitHub source requires an owner/repository");
     if (type === "modrinth" && !/^[A-Za-z0-9_-]{1,64}$/.test(config.projectId ?? "")) throw new BadRequestException("Modrinth source requires a project ID");
-    if (!["manual", "github-releases", "nodejs-index", "modrinth"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
+    if (!["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -319,6 +320,23 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         sourceUrl: `https://nodejs.org/dist/${String(row.version ?? "").replace(/^v/, "")}/`,
         metadata: { lts: row.lts || false, npm: row.npm, v8: row.v8 },
       }));
+    }
+    if (software.sourceType === "dockerhub-tags") {
+      const repository = software.sourceConfig.repository;
+      const discovered: DiscoveredVersion[] = [];
+      for (let page = 1; page <= 10; page++) {
+        const response = await axios.get("https://hub.docker.com/v2/repositories/" + encodeURIComponent(repository.split("/")[0]) + "/" + encodeURIComponent(repository.split("/")[1]) + "/tags?page_size=100&page=" + page, { timeout: 15000, headers: { Accept: "application/json" } });
+        const rows = (response.data as { results?: any[] }).results ?? [];
+        discovered.push(...rows.filter(row => row.name && row.name !== "latest").map(row => ({
+          version: String(row.name), releaseDate: row.last_updated, prerelease: /(alpha|beta|rc|preview|dev)/i.test(String(row.name)),
+          sourceUrl: "https://hub.docker.com/r/" + repository + "/tags?name=" + encodeURIComponent(String(row.name)),
+          sourceId: String(row.digest ?? row.id ?? ""),
+          compatibility: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [],
+          metadata: { architectures: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.architecture ?? "")).filter(Boolean))] : [], os: Array.isArray(row.images) ? [...new Set(row.images.map((image: any) => String(image.os ?? "")).filter(Boolean))] : [] },
+        })));
+        if (rows.length < 100) break;
+      }
+      return discovered;
     }
     if (software.sourceType === "modrinth") {
       const projectId = software.sourceConfig.projectId;

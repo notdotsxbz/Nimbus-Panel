@@ -52,7 +52,7 @@ export default function AdminSoftwarePage() {
     const serviceTypes = String(data.get("serviceTypes") ?? "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
     const sourceType = String(data.get("sourceType") ?? "manual");
     const sourceConfig: Record<string, string> = {};
-    if (sourceType === "github-releases") sourceConfig.repository = String(data.get("repository") ?? "").trim();
+    if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
     if (sourceType === "modrinth") sourceConfig.projectId = String(data.get("projectId") ?? "").trim();
     const imageTemplate = String(data.get("imageTemplate") ?? "").trim();
     try {
@@ -136,8 +136,8 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm">Identifier<input name="identifier" required pattern="[a-z0-9][a-z0-9._-]{1,63}" className="input w-full" placeholder="nodejs" /></label>
         <label className="space-y-1 text-sm">Category<input name="category" className="input w-full" defaultValue="runtime" /></label>
         <label className="space-y-1 text-sm">Service types<input name="serviceTypes" required className="input w-full" placeholder="discord,website,backend" /></label>
-        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="modrinth">Modrinth project</option></select></label>
-        <label className="space-y-1 text-sm">GitHub repository<input name="repository" className="input w-full" placeholder="owner/repository" /></label>
+        <label className="space-y-1 text-sm">Version source<select name="sourceType" className="input w-full"><option value="manual">Manual</option><option value="github-releases">GitHub Releases</option><option value="nodejs-index">Official Node.js releases</option><option value="modrinth">Modrinth project</option><option value="dockerhub-tags">Docker Hub tags</option></select></label>
+        <label className="space-y-1 text-sm">GitHub / Docker Hub repository<input name="repository" className="input w-full" placeholder="owner/repository or namespace/repository" /></label>
         <label className="space-y-1 text-sm">Modrinth project ID<input name="projectId" className="input w-full" /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" /></label>
         <div className="flex gap-2 sm:col-span-2"><button className="btn-primary" type="submit">Save software</button><button className="btn-ghost" type="button" onClick={() => setFormOpen(false)}>Cancel</button></div>
