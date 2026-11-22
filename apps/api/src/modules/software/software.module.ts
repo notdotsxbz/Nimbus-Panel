@@ -9,6 +9,7 @@ import { SoftwareService } from "./software.service";
 import { Software, SoftwareSchema } from "./software.schema";
 import { SoftwareVersion, SoftwareVersionSchema } from "./software-version.schema";
 import { SoftwareOperation, SoftwareOperationSchema } from "./software-operation.schema";
+import { Service, ServiceSchema } from "../services/service.schema";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SoftwareOperation, SoftwareOperationSchema } from "./software-operation
       { name: Software.name, schema: SoftwareSchema },
       { name: SoftwareVersion.name, schema: SoftwareVersionSchema },
       { name: SoftwareOperation.name, schema: SoftwareOperationSchema },
+      { name: Service.name, schema: ServiceSchema },
     ]),
     AuditModule,
     ServicesModule,

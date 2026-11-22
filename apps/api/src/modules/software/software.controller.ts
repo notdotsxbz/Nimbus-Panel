@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { SoftwareService } from "./software.service";
 
@@ -15,6 +15,10 @@ export class SoftwareController {
   create(@Body() body: Record<string, unknown>, @CurrentUser() actor: AuthUser) {
     return this.software.create(body as never, actor);
   }
+
+  @Delete(":id")
+  @Roles("owner", "admin")
+  remove(@Param("id") id: string, @CurrentUser() actor: AuthUser) { return this.software.removeSoftware(id, actor); }
 
   @Patch(":id")
   @Roles("owner", "admin")
@@ -53,6 +57,10 @@ export class SoftwareController {
   bulkVersions(@Param("id") id: string, @Body() body: { versionIds: string[]; action: string }, @CurrentUser() actor: AuthUser) {
     return this.software.bulkUpdateVersions(id, body.versionIds, body.action, actor);
   }
+
+  @Delete(":id/versions/:versionId")
+  @Roles("owner", "admin")
+  removeVersion(@Param("id") id: string, @Param("versionId") versionId: string, @CurrentUser() actor: AuthUser) { return this.software.removeVersion(id, versionId, actor); }
 
   @Patch(":id/versions/:versionId")
   @Roles("owner", "admin")

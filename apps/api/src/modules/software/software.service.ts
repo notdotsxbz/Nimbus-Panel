@@ -4,6 +4,7 @@ import axios from "axios";
 import { Model, Types } from "mongoose";
 import { AuditService } from "../audit/audit.service";
 import { ServicesService } from "../services/services.service";
+import { Service, ServiceDocument } from "../services/service.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { BackupsService } from "../backups/backups.service";
 import { AuthUser } from "../../common/auth.decorators";
@@ -27,6 +28,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   private syncTimer?: NodeJS.Timeout;
   constructor(
     @InjectModel(Software.name) private readonly catalog: Model<SoftwareDocument>,
+    @InjectModel(Service.name) private readonly serviceRecords: Model<ServiceDocument>,
     @InjectModel(SoftwareVersion.name) private readonly versions: Model<SoftwareVersionDocument>,
     @InjectModel(SoftwareOperation.name) private readonly operations: Model<SoftwareOperationDocument>,
     private readonly services: ServicesService,
@@ -86,6 +88,26 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     return software;
   }
 
+  async removeSoftware(id: string, actor: AuthUser) {
+    const software = await this.getSoftware(id);
+    const inUse = await this.serviceRecords.countDocuments({ software: software.identifier });
+    if (inUse > 0) throw new BadRequestException("This software is assigned to " + inUse + " service(s). Disable it instead of deleting it.");
+    await this.versions.deleteMany({ softwareId: software._id });
+    await software.deleteOne();
+    await this.audit.log({ actorId: actor.id, action: "software.deleted", targetType: "software", targetId: id, sensitive: true });
+    return { deleted: true };
+  }
+
+  async removeVersion(id: string, versionId: string, actor: AuthUser) {
+    const software = await this.getSoftware(id);
+    const version = await this.versions.findOne({ _id: versionId, softwareId: id });
+    if (!version) throw new NotFoundException("Version not found");
+    const inUse = await this.serviceRecords.countDocuments({ software: software.identifier, softwareVersion: version.version });
+    if (inUse > 0) throw new BadRequestException("This version is currently used by " + inUse + " service(s) and cannot be deleted.");
+    await version.deleteOne();
+    await this.audit.log({ actorId: actor.id, action: "software.version.deleted", targetType: "software-version", targetId: versionId, sensitive: true });
+    return { deleted: true };
+  }
   async listVersions(id: string) {
     await this.getSoftware(id);
     return this.versions.find({ softwareId: id }).sort({ releaseDate: -1, version: -1 }).lean();
@@ -139,7 +161,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       software.syncHistory.push({ startedAt, completedAt: new Date(), status: software.lastSyncStatus, discovered: discovered.length, imported, skipped, failed });
       software.syncHistory = software.syncHistory.slice(-50);
       await software.save();
-      await this.audit.log({ actorId: actor.id, action: "software.versions.discovered", targetType: "software", targetId: id, detail: `discovered=${discovered.length} imported=${imported} skipped=${skipped} failed=${failed}`, sensitive: true });
+      await this.audit.log({ actorId: actor.id === "system" ? undefined : actor.id, action: "software.versions.discovered", targetType: "software", targetId: id, detail: `discovered=${discovered.length} imported=${imported} skipped=${skipped} failed=${failed}`, sensitive: true });
       return { discovered: discovered.length, imported, skipped, failed, versions: discovered };
     } catch (error) {
       software.lastSyncStatus = "failed";
@@ -230,11 +252,14 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       await this.audit.log({ actorId: actor.id, action: "software.service.upgraded", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
       return operation;
     } catch (error) {
-      service.status = beforeStatus;
-      service.activity.push({ at: new Date(), action: "software.upgrade.failed", ok: false, detail: error instanceof Error ? error.message.slice(0, 300) : "Upgrade failed" });
+      const failureDetail = axios.isAxiosError(error) ? String(error.response?.data ?? error.message) : (error instanceof Error ? error.message : "Upgrade failed");
+      const rollbackNeedsAttention = failureDetail.toLowerCase().includes("rollback needs administrator attention");
+      service.status = rollbackNeedsAttention ? "error" : beforeStatus;
+      service.activity.push({ at: new Date(), action: "software.upgrade.failed", ok: false, detail: failureDetail.slice(0, 300) });
       await service.save();
-      operation.status = "failed"; operation.error = error instanceof Error ? error.message.slice(0, 500) : "Upgrade failed"; operation.completedAt = new Date(); await operation.save();
-      throw error instanceof BadRequestException ? error : new BadRequestException("Software upgrade failed. The previous confirmed software/version was retained.");
+      operation.status = "failed"; operation.error = failureDetail.slice(0, 500); operation.completedAt = new Date(); await operation.save();
+      await this.audit.log({ actorId: actor.id, action: "software.service.upgrade_failed", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
+      throw error instanceof BadRequestException ? error : new BadRequestException(rollbackNeedsAttention ? "Upgrade failed and automatic rollback needs administrator attention. Contact support before retrying." : "Software upgrade failed. The previous confirmed software/version was retained.");
     }
   }
   async customerOptions(serviceId: string, actor: AuthUser) {

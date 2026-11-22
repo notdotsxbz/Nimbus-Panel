@@ -67,6 +67,30 @@ export default function AdminSoftwarePage() {
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }
   };
 
+  const editSoftware = async () => {
+    if (!selected) return;
+    const name = window.prompt("Software name", selected.name);
+    if (name === null || !name.trim()) return;
+    const description = window.prompt("Description", selected.description ?? "");
+    if (description === null) return;
+    try {
+      await api.patch("/software/" + selected._id, { name: name.trim(), description });
+      const updated = { ...selected, name: name.trim(), description };
+      setSelected(updated); setItems(current => current.map(item => item._id === updated._id ? updated : item));
+      show("Software details updated", "ok");
+    } catch (e) { show(e instanceof Error ? e.message : "Could not update software", "err"); }
+  };
+  const deleteSoftware = async () => {
+    if (!selected || !window.confirm("Delete " + selected.name + "? Software used by a service cannot be deleted.")) return;
+    try { await api.del("/software/" + selected._id); setSelected(null); setVersions([]); show("Software deleted", "ok"); await load(); }
+    catch (e) { show(e instanceof Error ? e.message : "Could not delete software", "err"); }
+  };
+
+  const deleteVersion = async (version: VersionRow) => {
+    if (!selected || !window.confirm("Delete version " + version.version + "?")) return;
+    try { await api.del("/software/" + selected._id + "/versions/" + version._id); await openSoftware(selected); show("Version deleted", "ok"); }
+    catch (e) { show(e instanceof Error ? e.message : "Could not delete version", "err"); }
+  };
   const toggleSoftware = async (field: "enabled" | "customerAvailable", value: boolean) => {
     if (!selected) return;
     try {
@@ -131,7 +155,7 @@ export default function AdminSoftwarePage() {
       </GlassCard>
       <GlassCard className="p-5">
         {selected ? <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus}</p></div><div className="flex flex-wrap gap-2"><button className="btn-ghost" onClick={() => void toggleSoftware("enabled", selected.enabled)}>{selected.enabled ? "Disable software" : "Enable software"}</button><button className="btn-ghost" onClick={() => void toggleSoftware("customerAvailable", selected.customerAvailable)}>{selected.customerAvailable ? "Hide from customers" : "Show to customers"}</button><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus}</p></div><div className="flex flex-wrap gap-2"><button className="btn-ghost" onClick={() => void editSoftware()}>Edit</button><button className="btn-ghost" onClick={() => void toggleSoftware("enabled", selected.enabled)}>{selected.enabled ? "Disable software" : "Enable software"}</button><button className="btn-ghost" onClick={() => void deleteSoftware()}>Delete software</button><button className="btn-ghost" onClick={() => void toggleSoftware("customerAvailable", selected.customerAvailable)}>{selected.customerAvailable ? "Hide from customers" : "Show to customers"}</button><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div></div>
           <form onSubmit={addManualVersion} className="mt-4 flex gap-2">
             <input className="input min-w-0 flex-1" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Add version manually" aria-label="Version number" />
             <button className="btn-ghost" type="submit">Add version</button>
@@ -146,7 +170,7 @@ export default function AdminSoftwarePage() {
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
               <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />
               <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}</p></div>
-              <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}</div>
+              <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
             {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually through the API.</p>}
           </div>
