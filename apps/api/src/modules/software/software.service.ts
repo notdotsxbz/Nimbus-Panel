@@ -410,13 +410,16 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
     if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
     const template = software.installationConfig?.imageTemplate;
-    if (software.installationConfig?.method !== "docker-image-template" || typeof template !== "string" || !template.includes("{version}")) throw new BadRequestException("This catalog entry has no verified installation adapter yet");
+    const configuredEnvironment = (software.installationConfig?.environment ?? {}) as Record<string, string>;
+    const hasImageVersion = typeof template === "string" && template.includes("{version}");
+    const hasEnvironmentVersion = Object.values(configuredEnvironment).some(value => typeof value === "string" && value.includes("{version}"));
+    if (software.installationConfig?.method !== "docker-image-template" || typeof template !== "string" || (!hasImageVersion && !hasEnvironmentVersion)) throw new BadRequestException("This catalog entry has no verified installation adapter yet");
     const safeVersion = version.version.replace(/[^A-Za-z0-9_.-]/g, "");
     if (!safeVersion || safeVersion !== version.version) throw new BadRequestException("The selected version cannot be safely used as a container tag");
     const dockerImage = template.replaceAll("{version}", safeVersion);
     if (!/^[A-Za-z0-9._:/@-]+$/.test(dockerImage)) throw new BadRequestException("Configured container image is invalid");
-    const configuredEnvironment = (software.installationConfig?.environment ?? {}) as Record<string, string>;
     const resolvedEnvironment = Object.fromEntries(Object.entries(configuredEnvironment).map(([key, value]) => [key, value.replaceAll("{version}", safeVersion)]));
+    const versionProbe = software.installationConfig?.versionProbe ?? "";
     const beforeStatus = service.status;
     const previousState = { dockerImage: service.dockerImage, software: service.software, softwareVersion: service.softwareVersion, containerId: service.containerId };
     let agentNode: any;
@@ -437,15 +440,16 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       agentUpgrade = await this.nodes.agentCall(agentNode, "/services/" + service._id.toString() + "/upgrade", {
         dockerImage, cpuPercent: service.cpuPercent, ramMb: service.ramMb, diskGb: service.diskGb,
         startupCommand: service.startupCommand ?? [], env: resolvedEnvironment,
+        versionProbe, expectedVersion: safeVersion,
       }, "POST", 10 * 60 * 1000);
       operation.status = "verifying"; operation.progress = 85; await operation.save();
-      if (agentUpgrade.status !== "online" || !agentUpgrade.running || agentUpgrade.installedImage !== dockerImage || !agentUpgrade.containerId || !agentUpgrade.previousContainerName) throw new BadRequestException("Node Agent did not verify the replacement container and retain the previous container for rollback");
+      if (agentUpgrade.status !== "online" || !agentUpgrade.running || agentUpgrade.installedImage !== dockerImage || !agentUpgrade.containerId || !agentUpgrade.previousContainerName || (versionProbe === "minecraft-log" && agentUpgrade.versionVerified !== true) || (Object.keys(resolvedEnvironment).length > 0 && agentUpgrade.environmentVerified !== true)) throw new BadRequestException("Node Agent did not verify the requested application version, replacement container, and rollback state");
       service.dockerImage = dockerImage; service.software = software.identifier; service.softwareVersion = version.version;
       service.containerId = agentUpgrade.containerId; service.status = "online";
       service.activity.push({ at: new Date(), action: "software.upgrade", ok: true, detail: software.identifier + "@" + version.version });
       await service.save(); serviceStateSaved = true;
       operation.status = "completed"; operation.progress = 100;
-      operation.verification = { running: true, installedImage: agentUpgrade.installedImage, containerId: agentUpgrade.containerId, healthStatus: agentUpgrade.healthStatus ?? "unknown", previousContainerRemoved: false, previousContainerName: agentUpgrade.previousContainerName };
+      operation.verification = { running: true, installedImage: agentUpgrade.installedImage, containerId: agentUpgrade.containerId, healthStatus: agentUpgrade.healthStatus ?? "unknown", environmentVerified: agentUpgrade.environmentVerified === true, versionVerified: versionProbe === "minecraft-log" ? agentUpgrade.versionVerified === true : undefined, previousContainerRemoved: false, previousContainerName: agentUpgrade.previousContainerName };
       operation.completedAt = new Date(); await operation.save();
       await this.audit.log({ actorId: actor.id, action: "software.service.upgraded", targetType: "service", targetId: serviceId, detail: operation._id.toString(), sensitive: true });
       // Finalize only after both the service record and operation record are safely saved.
@@ -548,6 +552,9 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       if (value.includes("{version}")) environmentHasVersion = true;
     }
     const imageHasVersion = template.includes("{version}");
+    const versionProbe = config.versionProbe;
+    if (versionProbe !== undefined && versionProbe !== "minecraft-log") throw new BadRequestException("Unsupported application version verification probe");
+    if (versionProbe === "minecraft-log" && !((environment as Record<string, unknown>).VERSION as string | undefined)?.includes("{version}")) throw new BadRequestException("Minecraft log verification requires VERSION={version} in the installer environment");
     if (method !== "docker-image-template" || !template || !/^[A-Za-z0-9._:/-]+$/.test(normalizedImage) || (!imageHasVersion && !environmentHasVersion)) {
       throw new BadRequestException("Installer must use a safe Docker image template or a version placeholder in its environment");
     }
