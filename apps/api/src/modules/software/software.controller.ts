@@ -8,7 +8,7 @@ export class SoftwareController {
 
   @Get()
   @Roles("owner", "admin")
-  list() { return this.software.list(); }
+  list(): Promise<unknown[]> { return this.software.list(); }
 
   @Post("operations/:operationId/cleanup")
   @Roles("owner", "admin")
