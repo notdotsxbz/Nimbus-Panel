@@ -40,6 +40,8 @@ The source adapters validate response shapes and use request timeouts. Paginated
 7. Choose auto-sync frequency and whether eligible stable releases may be automatically published.
 8. Keep **Customer availability** disabled until the software and installer have been reviewed.
 
+Supported operating-system metadata is enforced before initial provisioning and version upgrades: the selected node must report an OS that matches the catalog entry. Unknown node OS values are rejected rather than assumed compatible. Architecture and required-runtime metadata are displayed but are not a substitute for a verified architecture-aware installer.
+
 The Admin form also accepts KVM/libvirt OS-image metadata. This is catalog metadata only; no VM reinstall action is available until a real virtualization provider and Node Agent are implemented and verified.
 
 ## Fetch, import and publish versions
