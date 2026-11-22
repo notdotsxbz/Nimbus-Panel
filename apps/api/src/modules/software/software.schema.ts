@@ -21,6 +21,7 @@ export class Software {
   @Prop({ default: false }) autoPublish!: boolean;
   @Prop({ type: Types.ObjectId, ref: "SoftwareVersion", default: null }) recommendedVersionId?: Types.ObjectId;
   @Prop({ default: null }) lastSyncedAt?: Date;
+  @Prop({ default: null }) lastSyncAttemptAt?: Date;
   @Prop({ default: null }) nextSyncAt?: Date;
   @Prop({ default: null }) syncLeaseUntil?: Date | null;
   @Prop({ default: "never" }) lastSyncStatus!: string;

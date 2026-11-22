@@ -59,7 +59,7 @@ export class NodesService {
   }
 
   async get(id: string) {
-    const node = await this.nodes.findById(id).select("+agentTokenEncrypted");
+    const node = await this.nodes.findById(id);
     if (!node) throw new NotFoundException("Node not found");
     return node;
   }
@@ -332,7 +332,8 @@ export class NodesService {
 
   /** Authenticated command to a node agent (never the control plane shell). */
   async agentCall(node: NodeDocument, path: string, body?: unknown, method: "GET" | "POST" = "POST", timeoutMs = 15_000) {
-    const token = decryptAgentToken(node.agentTokenEncrypted);
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
     const res = await axios({
       method,
       url: `${node.agentUrl}${path}`,
@@ -347,7 +348,8 @@ export class NodesService {
 
   /** Download a completed archive from the authenticated node agent. */
   async downloadBackupArchive(node: NodeDocument, serviceId: string, backupId: string): Promise<Buffer> {
-    const token = decryptAgentToken(node.agentTokenEncrypted);
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
     const response = await axios({
       method: "POST",
       url: `${node.agentUrl}/backups/download`,

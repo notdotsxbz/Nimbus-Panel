@@ -67,6 +67,15 @@ export default function AdminSoftwarePage() {
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }
   };
 
+  const toggleSoftware = async (field: "enabled" | "customerAvailable", value: boolean) => {
+    if (!selected) return;
+    try {
+      await api.patch("/software/" + selected._id, { [field]: !value });
+      const updated = { ...selected, [field]: !value }; setSelected(updated);
+      setItems(current => current.map(item => item._id === updated._id ? updated : item));
+      show(field === "enabled" ? "Software status updated" : "Customer availability updated", "ok");
+    } catch (e) { show(e instanceof Error ? e.message : "Could not update software", "err"); }
+  };
   const addManualVersion = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || !manualVersion.trim()) return;
@@ -122,7 +131,7 @@ export default function AdminSoftwarePage() {
       </GlassCard>
       <GlassCard className="p-5">
         {selected ? <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus}</p></div><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus}</p></div><div className="flex flex-wrap gap-2"><button className="btn-ghost" onClick={() => void toggleSoftware("enabled", selected.enabled)}>{selected.enabled ? "Disable software" : "Enable software"}</button><button className="btn-ghost" onClick={() => void toggleSoftware("customerAvailable", selected.customerAvailable)}>{selected.customerAvailable ? "Hide from customers" : "Show to customers"}</button><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div></div>
           <form onSubmit={addManualVersion} className="mt-4 flex gap-2">
             <input className="input min-w-0 flex-1" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Add version manually" aria-label="Version number" />
             <button className="btn-ghost" type="submit">Add version</button>

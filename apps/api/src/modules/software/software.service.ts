@@ -42,11 +42,11 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy() { if (this.syncTimer) clearInterval(this.syncTimer); }
   list() { return this.catalog.find().sort({ name: 1 }).lean(); }
   private async runDueSyncs() {
-    const rows = await this.catalog.find({ autoSync: true, syncFrequency: { $in: ["6h", "12h", "24h", "7d"] } }).select("_id syncFrequency lastSyncedAt").lean();
+    const rows = await this.catalog.find({ autoSync: true, syncFrequency: { $in: ["6h", "12h", "24h", "7d"] } }).select("_id syncFrequency lastSyncAttemptAt").lean();
     const intervals: Record<string, number> = { "6h": 21600000, "12h": 43200000, "24h": 86400000, "7d": 604800000 };
     for (const row of rows) {
       const interval = intervals[row.syncFrequency] ?? 0;
-      if (!interval || (row.lastSyncedAt && Date.now() - new Date(row.lastSyncedAt).getTime() < interval)) continue;
+      if (!interval || (row.lastSyncAttemptAt && Date.now() - new Date(row.lastSyncAttemptAt).getTime() < interval)) continue;
       const lease = await this.catalog.findOneAndUpdate({ _id: row._id, $or: [{ syncLeaseUntil: null }, { syncLeaseUntil: { $lt: new Date() } }] }, { $set: { syncLeaseUntil: new Date(Date.now() + 300000) } }, { new: true });
       if (!lease) continue;
       try { await this.discover(row._id.toString(), { id: "system", role: "owner" } as AuthUser); }
@@ -109,6 +109,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   async discover(id: string, actor: AuthUser) {
     const software = await this.getSoftware(id);
     const startedAt = new Date();
+    software.lastSyncAttemptAt = startedAt;
+    await software.save();
     try {
       const discovered = await this.fetchSource(software);
       let imported = 0, skipped = 0, failed = 0;
@@ -141,6 +143,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       return { discovered: discovered.length, imported, skipped, failed, versions: discovered };
     } catch (error) {
       software.lastSyncStatus = "failed";
+      const retryIntervals: Record<string, number> = { "6h": 21600000, "12h": 43200000, "24h": 86400000, "7d": 604800000 };
+      software.nextSyncAt = software.autoSync && retryIntervals[software.syncFrequency] ? new Date(Date.now() + retryIntervals[software.syncFrequency]) : undefined;
       software.syncHistory.push({ startedAt, completedAt: new Date(), status: "failed", error: error instanceof Error ? error.message.slice(0, 500) : "Source request failed" });
       software.syncHistory = software.syncHistory.slice(-50);
       await software.save();
@@ -186,6 +190,8 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   async changeServiceSoftware(serviceId: string, softwareId: string, versionId: string, actor: AuthUser) {
     const service = await this.services.get(serviceId, actor);
     if (["vps", "vds"].includes(service.type.toLowerCase())) throw new BadRequestException("VPS/VDS operating systems can only be changed by an authorized administrator through the OS management workflow");
+    if (service.subscriptionStatus !== "active" || service.status === "suspended") throw new BadRequestException("This service is not active");
+    if (["installing", "updating", "starting", "stopping", "restarting"].includes(service.status)) throw new BadRequestException("Wait for the current service operation to finish first");
     if (!Types.ObjectId.isValid(softwareId) || !Types.ObjectId.isValid(versionId)) throw new BadRequestException("Invalid software or version");
     const [software, version] = await Promise.all([this.catalog.findById(softwareId), this.versions.findOne({ _id: versionId, softwareId })]);
     if (!software || !version) throw new NotFoundException("Software or version not found");
@@ -291,14 +297,20 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     }
     if (software.sourceType === "modrinth") {
       const projectId = software.sourceConfig.projectId;
-      const response = await axios.get(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version?limit=100`, { timeout: 15000, headers: { "User-Agent": "NIMBUS/1.0 (software catalog)" } });
-      return (response.data as any[]).map((row) => ({
-        version: String(row.version_number ?? ""), releaseName: String(row.name ?? ""),
-        releaseDate: row.date_published, prerelease: row.version_type !== "release",
-        sourceUrl: `https://modrinth.com/${projectId}/version/${String(row.id ?? "")}`, sourceId: String(row.id ?? ""),
-        compatibility: Array.isArray(row.game_versions) ? row.game_versions : [],
-        metadata: { loaders: row.loaders ?? [], versionType: row.version_type ?? "unknown" },
-      }));
+      const discovered: DiscoveredVersion[] = [];
+      for (let offset = 0; offset < 1000; offset += 100) {
+        const response = await axios.get(`https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version?limit=100&offset=${offset}`, { timeout: 15000, headers: { "User-Agent": "NIMBUS/1.0 (software catalog)" } });
+        const rows = response.data as any[];
+        discovered.push(...rows.map((row) => ({
+          version: String(row.version_number ?? ""), releaseName: String(row.name ?? ""),
+          releaseDate: row.date_published, prerelease: row.version_type !== "release",
+          sourceUrl: `https://modrinth.com/${projectId}/version/${String(row.id ?? "")}`, sourceId: String(row.id ?? ""),
+          compatibility: Array.isArray(row.game_versions) ? row.game_versions : [],
+          metadata: { loaders: row.loaders ?? [], versionType: row.version_type ?? "unknown" },
+        })));
+        if (rows.length < 100) break;
+      }
+      return discovered;
     }
     throw new BadRequestException("This software uses manual version management; no automatic source is configured");
   }
