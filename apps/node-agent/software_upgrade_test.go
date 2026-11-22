@@ -282,3 +282,20 @@ func TestInitialInstallRemovesContainerWhenVersionProbeFails(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if !strings.Contains(string(commands), "rm -f nimbus-svc-test") { t.Fatalf("unverified container should be removed: %s", commands) }
 }
+
+func TestParseOSRelease(t *testing.T) {
+	osName, version := parseOSRelease([]byte("NAME=\"Ubuntu\"\nID=Ubuntu\nVERSION_ID=\"24.04\"\n"))
+	if osName != "ubuntu" || version != "24.04" {
+		t.Fatalf("unexpected OS release values: os=%q version=%q", osName, version)
+	}
+}
+
+func TestCollectHeartbeatReportsArchitecture(t *testing.T) {
+	hb, err := collectHeartbeat()
+	if err != nil {
+		t.Fatalf("collectHeartbeat returned an error: %v", err)
+	}
+	if hb.Architecture == "" {
+		t.Fatal("expected detected CPU architecture in heartbeat")
+	}
+}
