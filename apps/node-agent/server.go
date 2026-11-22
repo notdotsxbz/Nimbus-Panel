@@ -164,7 +164,9 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		var current []inspectResult
 		if currentErr == nil { currentErr = json.Unmarshal([]byte(currentJSON), &current) }
 		if currentErr != nil || len(current) == 0 || !current[0].State.Running || (req.DockerImage != "" && current[0].Config.Image != req.DockerImage) { http.Error(w, "replacement container is not verified; previous container retained", http.StatusBadGateway); return }
-		if _, removeErr := docker("rm", req.PreviousContainerName); removeErr != nil { http.Error(w, "replacement is active but previous container cleanup failed: "+removeErr.Error(), http.StatusBadGateway); return }
+		if _, previousErr := docker("inspect", req.PreviousContainerName); previousErr == nil {
+			if _, removeErr := docker("rm", req.PreviousContainerName); removeErr != nil { http.Error(w, "replacement is active but previous container cleanup failed: "+removeErr.Error(), http.StatusBadGateway); return }
+		}
 		writeJSON(w, map[string]any{"status": "committed", "previousContainerRemoved": true})
 	case "upgrade-rollback":
 		if !strings.HasPrefix(req.PreviousContainerName, "nimbus-prev-"+serviceID+"-") { http.Error(w, "invalid previous container reference", http.StatusBadRequest); return }
