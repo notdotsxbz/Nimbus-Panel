@@ -539,7 +539,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "dotnet-index" && !/^\d+\.\d+$/.test(config.channelVersion ?? "")) throw new BadRequestException(".NET source requires a channel version such as 8.0 or 10.0");
     if (type === "papermc" && !["paper", "folia", "velocity", "waterfall"].includes(config.project ?? "paper")) throw new BadRequestException("Unsupported PaperMC project");
     if (type === "purpur" && config.project && config.project !== "purpur") throw new BadRequestException("Purpur source project must be purpur");
-    if (!["manual", "github-releases", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
+    if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
   }
 
   private async fetchSource(software: SoftwareDocument): Promise<DiscoveredVersion[]> {
@@ -560,6 +560,16 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
         if (rows.length < 100) break;
       }
       return results;
+    }
+    if (software.sourceType === "minecraft-manifest") {
+      const response = await axios.get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", { timeout: 20000, headers: { Accept: "application/json" } });
+      const rows = (response.data as any).versions;
+      if (!Array.isArray(rows)) throw new BadRequestException("Mojang version manifest returned an invalid response");
+      return rows.map((row: any) => ({
+        version: String(row.id ?? ""), releaseDate: row.releaseTime,
+        prerelease: row.type !== "release", sourceUrl: String(row.url ?? "https://www.minecraft.net/en-us/download/server"),
+        checksum: String(row.sha1 ?? ""), metadata: { type: row.type, sha1: row.sha1, manifestUrl: "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json" },
+      }));
     }
     if (software.sourceType === "nodejs-index") {
       const response = await axios.get("https://nodejs.org/dist/index.json", { timeout: 15000 });
