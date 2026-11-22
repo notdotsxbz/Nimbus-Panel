@@ -177,7 +177,7 @@ export default function AdminSettings() {
               reader.onerror = () => show("Could not read that image file", "err");
               reader.readAsDataURL(file);
             }} />
-            <button className="btn-primary" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData }); show("Background image saved for all users", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save background image", "err"); } finally { setBusy(false); } }}>Save image</button>
+            <button className="btn-primary" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData }); setBackgroundAnimationUrl(""); show("Background image saved for all users", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save background image", "err"); } finally { setBusy(false); } }}>Save image</button>
             <button className="btn-ghost" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData: "" }); setBackgroundImageData(""); show("Background image removed", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not remove image", "err"); } finally { setBusy(false); } }}>Remove</button>
           </div>
           {backgroundImageData ? <img src={backgroundImageData} alt="Selected panel background preview" className="mt-4 max-h-40 max-w-xs rounded-xl object-cover" /> : null}
