@@ -496,6 +496,21 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     await this.audit.log({ actorId: actor.id, action: "software.service.upgrade_cleanup_completed", targetType: "service", targetId: operation.serviceId.toString(), detail: operationId, sensitive: true });
     return operation;
   }
+  private async assertNodeOsCompatibility(software: SoftwareDocument, nodeId: string) {
+    const supportedOs = software.supportedOperatingSystems ?? [];
+    if (!supportedOs.length) return;
+    const node = await this.nodes.get(nodeId);
+    const actualOs = String(node.os ?? "").trim().toLowerCase();
+    if (!actualOs) throw new BadRequestException("The hosting node operating system is unknown, so this software's OS compatibility cannot be verified");
+    const supported = supportedOs.map(value => value.trim().toLowerCase());
+    const matches = supported.some(value => {
+      const normalized = value.replace(/[_-]/g, " ");
+      if (normalized === "linux") return ["linux", "ubuntu", "debian"].includes(actualOs);
+      return normalized === actualOs || normalized.startsWith(actualOs + " ") || actualOs.startsWith(normalized + " ");
+    });
+    if (!matches) throw new BadRequestException("This software does not support the operating system installed on the selected hosting node");
+  }
+
   async createServiceFromCatalog(input: Omit<CreateServiceDto, "dockerImage" | "software" | "softwareVersion" | "versionProbe" | "expectedVersion"> & { softwareId: string; versionId: string }, actor: AuthUser) {
     const serviceType = String(input.type ?? "").toLowerCase();
     if (["vps", "vds"].includes(serviceType)) throw new BadRequestException("VPS/VDS OS provisioning requires the unavailable KVM/libvirt provider");
@@ -506,6 +521,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (version.softwareId.toString() !== software._id.toString()) throw new BadRequestException("Selected version does not belong to the selected software");
     if (!software.enabled || !software.serviceTypes.includes(serviceType)) throw new BadRequestException("This software is not enabled for the selected service type");
     if (version.publicationStatus !== "published" || version.deprecated || version.compatible === false) throw new BadRequestException("Choose a published, non-deprecated and compatible version");
+    await this.assertNodeOsCompatibility(software, input.nodeId);
     const config = software.installationConfig ?? {};
     const template = config.imageTemplate;
     const environment = (config.environment ?? {}) as Record<string, string>;
@@ -551,6 +567,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (!software.enabled || !software.customerAvailable || !software.serviceTypes.includes(service.type)) throw new BadRequestException("This software is not available for this service type");
     if (version.publicationStatus !== "published" || version.deprecated) throw new BadRequestException("This version is not available for new installations");
     if (version.compatible === false) throw new BadRequestException("This software version is incompatible with the configured service platform");
+    await this.assertNodeOsCompatibility(software, service.nodeId.toString());
     const template = software.installationConfig?.imageTemplate;
     const configuredEnvironment = (software.installationConfig?.environment ?? {}) as Record<string, string>;
     const hasImageVersion = typeof template === "string" && template.includes("{version}");
