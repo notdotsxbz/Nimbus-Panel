@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { SoftwareService } from "./software.service";
 
@@ -54,7 +54,9 @@ export class SoftwareController {
 
   @Get(":id/versions")
   @Roles("owner", "admin")
-  versions(@Param("id") id: string) { return this.software.listVersions(id); }
+  versions(@Param("id") id: string, @Query("page") page?: string, @Query("limit") limit?: string) {
+    return this.software.listVersions(id, Number(page ?? 1), Number(limit ?? 50));
+  }
 
   @Post(":id/versions")
   @Roles("owner", "admin")
