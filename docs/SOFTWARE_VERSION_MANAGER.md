@@ -12,7 +12,7 @@ The currently implemented official-source adapters are:
 - **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
 - **Manual** — fallback for software without an implemented source adapter.
 
-GitHub discovery follows up to five pages of 100 releases. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
+GitHub discovery follows up to 20 pages of 100 releases (up to 2,000 releases); if a source still has more data at that safety limit, discovery fails explicitly instead of silently returning a partial catalog. Node.js uses the official distribution index. Modrinth paginates in 100-version pages (up to 1,000). Docker Hub tag discovery paginates in 100-tag pages (up to 1,000) and skips the floating `latest` tag.
 
 ## Add a catalog entry
 
@@ -33,7 +33,7 @@ Do not configure an image template unless the image is trusted and the tag conve
 - Existing software/version pairs are detected by a unique database index and are not duplicated. Preview data expires after 24 hours.
 - New versions are pending approval by default.
 - If auto-publishing is enabled, only non-prerelease discoveries are published automatically. Prereleases remain pending.
-- Select individual versions to publish or disable them. The bulk actions support publishing, disabling, and deprecating selected versions.
+- Select individual versions to publish or disable them. The bulk actions support publishing, disabling, and deprecating selected versions. A version can be marked recommended only after it is published and is not deprecated; this is enforced by the API for both single and bulk actions.
 - Manual version entry remains available as a fallback and creates a pending version.
 - Existing versions are not deleted when a source request fails. Sync status and a bounded history are stored on the software record.
 
