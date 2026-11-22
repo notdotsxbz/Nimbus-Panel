@@ -1,0 +1,13 @@
+{
+  "$schema": "../module.schema.json",
+  "name": "custom",
+  "label": "Custom Application Hosting",
+  "subdomainPattern": null,
+  "requiresPort": true,
+  "protocols": ["tcp", "udp"],
+  "software": [
+    { "id": "approved-custom-image", "label": "Admin-approved Custom Image", "image": "catalogue", "versions": ["approved"], "minRamMb": 512 }
+  ],
+  "features": ["console", "logs", "env-vars", "port-mappings", "volumes", "limits", "backups", "health-checks"],
+  "notes": "Custom images must be explicitly approved by an Admin; customers never receive Docker daemon access."
+}
