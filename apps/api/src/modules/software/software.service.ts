@@ -686,7 +686,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     if (type === "modrinth" && !/^[A-Za-z0-9_-]{1,64}$/.test(config.projectId ?? "")) throw new BadRequestException("Modrinth source requires a project ID");
     if (type === "dockerhub-tags" && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(config.repository ?? "")) throw new BadRequestException("Docker Hub source requires a namespace/repository");
     if (type === "dotnet-index" && !/^\d+\.\d+$/.test(config.channelVersion ?? "")) throw new BadRequestException(".NET source requires a channel version such as 8.0 or 10.0");
-    if (type === "php-releases" && config.majorVersion && !/^\d{1,2}$/.test(config.majorVersion)) throw new BadRequestException("PHP major version must be a number such as 8");
+    if (type === "php-releases" && config.majorVersion && !/^\d{1,2}$/.test(config.majorVersion)) throw new BadRequestException("PHP release line must look like 8 or 8.4");
     if (type === "papermc" && !["paper", "folia", "velocity", "waterfall"].includes(config.project ?? "paper")) throw new BadRequestException("Unsupported PaperMC project");
     if (type === "purpur" && config.project && config.project !== "purpur") throw new BadRequestException("Purpur source project must be purpur");
     if (!["manual", "github-releases", "minecraft-manifest", "nodejs-index", "modrinth", "dockerhub-tags", "go-index", "dotnet-index", "papermc", "purpur", "fabric-meta", "quilt-meta", "java-adoptium", "forge-maven", "neoforge-maven", "python-releases", "php-releases", "lavalink-releases", "mongodb-releases"].includes(type)) throw new BadRequestException("Unsupported official source adapter");
@@ -821,7 +821,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     }
     if (software.sourceType === "php-releases") {
       const majorVersion = software.sourceConfig.majorVersion ?? "";
-      if (majorVersion && !/^\d{1,2}$/.test(majorVersion)) throw new BadRequestException("PHP major version must be a number such as 8");
+      if (majorVersion && !/^\d{1,2}(?:\.\d{1,2})?$/.test(majorVersion)) throw new BadRequestException("PHP major version must be a number such as 8");
       const url = "https://www.php.net/releases/index.php?json&max=100" + (majorVersion ? "&version=" + encodeURIComponent(majorVersion) : "");
       const response = await axios.get(url, { timeout: 20000, headers: { Accept: "application/json" } });
       const rows = response.data;
