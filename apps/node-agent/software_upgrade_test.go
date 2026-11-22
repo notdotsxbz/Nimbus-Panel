@@ -173,3 +173,21 @@ func TestServiceInstallCreatesAndVerifiesContainer(t *testing.T) {
 		t.Fatalf("expected create, environment and inspect verification commands: %s", string(log))
 	}
 }
+
+
+func TestParseOSRelease(t *testing.T) {
+	id, version := parseOSRelease([]byte("NAME=Ubuntu\nID=\"Ubuntu\"\nVERSION_ID=\"24.04\"\n"))
+	if id != "ubuntu" || version != "24.04" {
+		t.Fatalf("unexpected OS release parse: id=%q version=%q", id, version)
+	}
+}
+
+func TestCollectHeartbeatReportsArchitecture(t *testing.T) {
+	hb, err := collectHeartbeat()
+	if err != nil {
+		t.Fatalf("collectHeartbeat returned an error: %v", err)
+	}
+	if hb.Architecture == "" {
+		t.Fatal("expected detected CPU architecture in heartbeat")
+	}
+}
