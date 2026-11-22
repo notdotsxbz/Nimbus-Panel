@@ -6,10 +6,10 @@ import { GlassCard, useToast } from "@/components/glass";
 
 type SoftwareRow = {
   _id: string; name: string; identifier: string; description: string; category: string;
-  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string> };
+  serviceTypes: string[]; sourceType: string; sourceConfig: Record<string, string>; installationConfig?: { method?: string; imageTemplate?: string; environment?: Record<string, string> }; officialWebsite?: string; iconUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
-type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
+type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; compatibility?: string[]; architectures?: string[]; runtimeRequirements?: Record<string, unknown>; checksum?: string; signature?: string; sourceUrl?: string };
 type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
 type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: string } | string; status: string; attempts: number; maxAttempts: number; runAt: string; lastError?: string; discovered?: number; imported?: number; failed?: number };
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
@@ -58,6 +58,8 @@ export default function AdminSoftwarePage() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const serviceTypes = String(data.get("serviceTypes") ?? "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
+    const supportedOperatingSystems = String(data.get("supportedOperatingSystems") ?? "").split(",").map(v => v.trim()).filter(Boolean);
+    const supportedArchitectures = String(data.get("supportedArchitectures") ?? "").split(",").map(v => v.trim()).filter(Boolean);
     const sourceType = String(data.get("sourceType") ?? "manual");
     const sourceConfig: Record<string, string> = {};
     if (sourceType === "github-releases" || sourceType === "dockerhub-tags") sourceConfig.repository = String(data.get("repository") ?? "").trim();
@@ -76,6 +78,8 @@ export default function AdminSoftwarePage() {
     try {
       const payload = {
         name: data.get("name"), identifier: data.get("identifier"), description: data.get("description"),
+        officialWebsite: data.get("officialWebsite"), iconUrl: data.get("iconUrl"), supportedOperatingSystems, supportedArchitectures,
+        requiredRuntime: data.get("requiredRuntime"), defaultVersion: data.get("defaultVersion"),
         category: data.get("category"), serviceTypes, sourceType, sourceConfig,
         enabled: data.get("enabled") === "true", customerAvailable: data.get("customerAvailable") === "true",
         autoPublish: data.get("autoPublish") === "true",
@@ -185,8 +189,10 @@ export default function AdminSoftwarePage() {
       <button className="btn-primary" onClick={() => setFormOpen(v => !v)}>Add Software</button>
     </header>
     {formOpen && <GlassCard className="p-5">
-      <form onSubmit={saveSoftware} className="grid gap-3 sm:grid-cols-2">
+      <form key={editingId ?? "new"} onSubmit={saveSoftware} className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">Name<input name="name" required className="input w-full" defaultValue={editingId ? selected?.name : ""} /></label>
+        <label className="space-y-1 text-sm">Official website<input name="officialWebsite" type="url" className="input w-full" placeholder="https://example.com" defaultValue={editingId ? selected?.officialWebsite : ""} /></label>
+        <label className="space-y-1 text-sm">Icon URL<input name="iconUrl" type="url" className="input w-full" placeholder="https://example.com/icon.png" defaultValue={editingId ? selected?.iconUrl : ""} /></label>
         <label className="space-y-1 text-sm">Identifier<input name="identifier" required readOnly={!!editingId} pattern="[a-z0-9][a-z0-9._-]{1,63}" className="input w-full" placeholder="nodejs" defaultValue={editingId ? selected?.identifier : ""} /></label>
         <label className="space-y-1 text-sm">Category<input name="category" className="input w-full" defaultValue={editingId ? selected?.category : "runtime"} /></label>
         <label className="space-y-1 text-sm">Service types<input name="serviceTypes" required className="input w-full" placeholder="discord,website,backend" defaultValue={editingId ? selected?.serviceTypes.join(",") : ""} /></label>
@@ -198,6 +204,10 @@ export default function AdminSoftwarePage() {
         <label className="space-y-1 text-sm sm:col-span-2">Docker image template (optional)<input name="imageTemplate" className="input w-full" placeholder="itzg/minecraft-server:java21 (use VERSION={version} below)" defaultValue={editingId ? selected?.installationConfig?.imageTemplate : ""} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Installer environment overrides (KEY=VALUE, one per line)<textarea name="environment" className="input min-h-24 w-full font-mono" placeholder={"TYPE=PAPER\nEULA=TRUE"} defaultValue={editingId ? Object.entries(selected?.installationConfig?.environment ?? {}).map(([key, value]) => key + "=" + value).join("\n") : ""} /></label>
         <label className="space-y-1 text-sm sm:col-span-2">Description<input name="description" className="input w-full" defaultValue={editingId ? selected?.description : ""} /></label>
+        <label className="space-y-1 text-sm">Supported OS<input name="supportedOperatingSystems" className="input w-full" placeholder="linux,windows" defaultValue={editingId ? selected?.supportedOperatingSystems?.join(",") : ""} /></label>
+        <label className="space-y-1 text-sm">Architectures<input name="supportedArchitectures" className="input w-full" placeholder="amd64,arm64" defaultValue={editingId ? selected?.supportedArchitectures?.join(",") : ""} /></label>
+        <label className="space-y-1 text-sm">Required runtime<input name="requiredRuntime" className="input w-full" placeholder="Java 21, Node.js 22" defaultValue={editingId ? selected?.requiredRuntime : ""} /></label>
+        <label className="space-y-1 text-sm">Default version<input name="defaultVersion" className="input w-full" defaultValue={editingId ? selected?.defaultVersion : ""} /></label>
         <label className="space-y-1 text-sm">Enabled<select name="enabled" className="input w-full" defaultValue={editingId ? String(selected?.enabled ?? true) : "true"}><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
         <label className="space-y-1 text-sm">Customer availability<select name="customerAvailable" className="input w-full" defaultValue={editingId ? String(selected?.customerAvailable ?? true) : "true"}><option value="true">Available</option><option value="false">Admin only</option></select></label>
         <label className="space-y-1 text-sm">Automatic publishing<select name="autoPublish" className="input w-full" defaultValue={editingId ? String(selected?.autoPublish ?? false) : "false"}><option value="false">Approval required</option><option value="true">Publish stable releases automatically</option></select></label>
