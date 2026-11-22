@@ -681,6 +681,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     const supportedVersionProbes = ["minecraft-log", "nodejs-version", "python-version", "php-version", "go-version", "java-version", "dotnet-version", "mongodb-version"];
     if (typeof versionProbe === "string" && versionProbe !== "" && !supportedVersionProbes.includes(versionProbe)) throw new BadRequestException("Unsupported application version verification probe");
     if (versionProbe === "minecraft-log" && !((environment as Record<string, unknown>).VERSION as string | undefined)?.includes("{version}")) throw new BadRequestException("Minecraft log verification requires VERSION={version} in the installer environment");
+    if (environmentHasVersion && !imageHasVersion && !versionProbe) throw new BadRequestException("Environment-based version placeholders require an application version verification probe");
     if (method !== "docker-image-template" || !template || !/^[A-Za-z0-9._:/-]+$/.test(normalizedImage) || (!imageHasVersion && !environmentHasVersion)) {
       throw new BadRequestException("Installer must use a safe Docker image template or a version placeholder in its environment");
     }
