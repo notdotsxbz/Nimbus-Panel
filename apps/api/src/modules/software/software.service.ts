@@ -602,7 +602,7 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
       const rows = (response.data as { versions?: any[] })?.versions;
       if (!Array.isArray(rows)) throw new BadRequestException("MongoDB returned an invalid current release index");
       return rows
-        .filter(row => typeof row.version === "string" && /^\\d+\\.\\d+\\.\\d+$/.test(row.version))
+        .filter(row => typeof row.version === "string" && /^\d+\.\d+\.\d+$/.test(row.version))
         .map(row => {
           const packages = (Array.isArray(row.downloads) ? row.downloads : []).filter((download: any) =>
             download.edition === "targeted" &&
