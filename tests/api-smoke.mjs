@@ -298,6 +298,8 @@ async function call(path, { method = "GET", token, body } = {}) {
   // workload blocking: assign the service to a different active customer so the custToken checks below genuinely test cross-customer access.
   const serviceOwner = await call("/users", { method: "POST", token: ownerToken, body: { email: `service-owner-${suffix}@example.com`, username: `svcowner${suffix}`, password: "smokepass123", role: "customer" } });
   check("separate service owner created", serviceOwner.status === 201 && !!serviceOwner.body?._id, `status=${serviceOwner.status}`);
+  const dockerOnlyVps = await call("/services", { method: "POST", token: ownerToken, body: { name: "Test VPS", type: "vps", ramMb: 1024, diskGb: 10 } });
+  check("VPS provisioning is not falsely routed through Docker", dockerOnlyVps.status === 400 && String(dockerOnlyVps.body?.message ?? "").includes("KVM/libvirt"), "status=" + dockerOnlyVps.status);
   const svc = await call("/services", { method: "POST", token: ownerToken, body: { name: "smoke-svc-" + suffix, type: "docker", ownerId: serviceOwner.body?._id, nodeId: n2id, cpuPercent: 50, ramMb: 512, diskGb: 5, dockerImage: "nginx:alpine" } });
   check("workload created on node (agent offline, error state)", svc.status === 201, `status=${svc.status}`);
 

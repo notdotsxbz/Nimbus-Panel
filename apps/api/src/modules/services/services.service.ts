@@ -55,6 +55,7 @@ export class ServicesService {
 
   async create(dto: CreateServiceDto, actor: AuthUser) {
     if (dto.ramMb <= 0 || dto.diskGb <= 0) throw new BadRequestException("Invalid resource limits");
+    if (["vps", "vds"].includes(String(dto.type ?? "").toLowerCase())) throw new BadRequestException("VPS/VDS provisioning is unavailable until a KVM/libvirt provider and virtualization Node Agent are installed and verified. This endpoint provisions Docker workloads only.");
     const customer = await this.users.findById(dto.ownerId);
     if (!customer || customer.role !== "customer" || customer.suspended || customer.deletedAt) throw new BadRequestException("Choose an active customer account");
     const node = await this.nodes.get(dto.nodeId);
