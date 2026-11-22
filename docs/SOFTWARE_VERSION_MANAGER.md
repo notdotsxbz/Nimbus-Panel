@@ -57,6 +57,12 @@ The Admin form also accepts KVM/libvirt OS-image metadata. This is catalog metad
 
 Each software entry can use manual-only, 6-hour, 12-hour, 24-hour or 7-day synchronization. The API scheduler checks due entries every 15 seconds and enqueues jobs in the persistent MongoDB `software_sync_jobs` collection. Jobs have unique time-bucket keys, bounded retries, retry delays, worker leases and a retry action in the Admin UI. Job state survives an API restart; the scheduler/worker itself currently runs inside the API process rather than a separate worker service.
 
+## Initial service provisioning from the catalog
+
+The Admin **Assign Service** wizard now selects an enabled catalog entry and a published compatible version for the chosen service type. It no longer asks the Admin to type an arbitrary Docker image for catalog-managed services. The backend resolves the image tag and version-bearing environment from the catalog, checks the service type and version publication state, and keeps VPS/VDS requests out of the Docker path.
+
+The Node Agent verifies the initial container image, running state, configured environment and Docker health check when present. When the catalog configures a supported application version probe, the agent runs that fixed probe before returning success. If the probe does not confirm the requested version, the newly created container is removed and the service is left in an error state rather than being recorded as successfully installed. Only Owner/Admin accounts can use the initial catalog provisioning endpoint.
+
 ## Customer software changes
 
 The existing service page includes a **Software** tab. The API filters catalog options by the service's exact type and checks service ownership. Customers cannot access Admin catalog endpoints, import/publish versions or change another customer's service. VPS/VDS software changes are rejected by the backend as well as hidden from the customer selector.
