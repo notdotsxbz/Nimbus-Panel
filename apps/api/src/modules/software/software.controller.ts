@@ -46,6 +46,16 @@ export class SoftwareController {
     return this.software.addVersion(id, body as never, actor);
   }
 
+  @Post(":id/preview")
+  @Roles("owner", "admin")
+  preview(@Param("id") id: string, @CurrentUser() actor: AuthUser) { return this.software.previewVersions(id, actor); }
+
+  @Post(":id/import")
+  @Roles("owner", "admin")
+  importPreview(@Param("id") id: string, @Body() body: { versions?: string[]; all?: boolean }, @CurrentUser() actor: AuthUser) {
+    return this.software.importPreviewVersions(id, body.versions, body.all === true, actor);
+  }
+
   @Post(":id/fetch")
   @Roles("owner", "admin")
   discover(@Param("id") id: string, @CurrentUser() actor: AuthUser) {

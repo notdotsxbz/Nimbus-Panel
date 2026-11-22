@@ -25,6 +25,8 @@ export class Software {
   @Prop({ default: null }) nextSyncAt?: Date;
   @Prop({ type: Date, default: null }) syncLeaseUntil?: Date | null;
   @Prop({ default: "never" }) lastSyncStatus!: string;
+  @Prop({ type: [Object], default: [] }) discoveryPreview!: Record<string, unknown>[];
+  @Prop({ type: Date, default: null }) discoveryPreviewAt?: Date;
   @Prop({ type: [{ startedAt: Date, completedAt: Date, status: String, discovered: Number, imported: Number, skipped: Number, failed: Number, error: String }], default: [] })
   syncHistory!: { startedAt: Date; completedAt?: Date; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }[];
   @Prop() createdAt!: Date;

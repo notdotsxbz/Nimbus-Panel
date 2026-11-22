@@ -128,6 +128,46 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     return version;
   }
 
+  async previewVersions(id: string, actor: AuthUser) {
+    const software = await this.getSoftware(id);
+    const discovered = await this.fetchSource(software);
+    const identifiers = discovered.map(item => item.version).filter(Boolean);
+    const existing = await this.versions.find({ softwareId: software._id, version: { $in: identifiers } }).select("version").lean();
+    const existingSet = new Set(existing.map(item => item.version));
+    const unique = new Map<string, DiscoveredVersion>();
+    for (const item of discovered) if (item.version && item.version.length <= 100 && !unique.has(item.version)) unique.set(item.version, item);
+    const preview = [...unique.values()].map(item => ({ ...item, alreadyImported: existingSet.has(item.version) }));
+    software.discoveryPreview = preview as unknown as Record<string, unknown>[];
+    software.discoveryPreviewAt = new Date();
+    await software.save();
+    await this.audit.log({ actorId: actor.id, action: "software.versions.previewed", targetType: "software", targetId: id, detail: "discovered=" + preview.length, sensitive: true });
+    return { discovered: preview.length, newVersions: preview.filter(item => !item.alreadyImported).length, existingVersions: preview.filter(item => item.alreadyImported).length, versions: preview };
+  }
+
+  async importPreviewVersions(id: string, versionNames: string[] | undefined, importAll: boolean, actor: AuthUser) {
+    const software = await this.getSoftware(id);
+    if (!software.discoveryPreviewAt || Date.now() - software.discoveryPreviewAt.getTime() > 24 * 60 * 60_000) throw new BadRequestException("Version preview expired. Fetch versions again.");
+    const preview = software.discoveryPreview as unknown as (DiscoveredVersion & { alreadyImported?: boolean })[];
+    const selected = importAll ? preview : preview.filter(item => Array.isArray(versionNames) && versionNames.includes(item.version));
+    if (!selected.length || selected.length > 1000) throw new BadRequestException("Select between 1 and 1,000 discovered versions");
+    let imported = 0, skipped = 0, failed = 0;
+    for (const item of selected) {
+      try {
+        const result = await this.versions.updateOne({ softwareId: software._id, version: item.version }, { $setOnInsert: {
+          softwareId: software._id, version: item.version, releaseName: item.releaseName ?? "", releaseDate: item.releaseDate ? new Date(item.releaseDate) : undefined,
+          channel: item.prerelease ? "prerelease" : "stable", prerelease: !!item.prerelease, publicationStatus: software.autoPublish && !item.prerelease ? "published" : "pending",
+          sourceUrl: item.sourceUrl ?? "", sourceId: item.sourceId ?? "", compatibility: item.compatibility ?? [], metadata: item.metadata ?? {}, importedAt: new Date(),
+        } }, { upsert: true });
+        if (result.upsertedCount) imported++; else skipped++;
+      } catch { failed++; }
+    }
+    software.lastSyncedAt = new Date(); software.lastSyncAttemptAt = new Date(); software.lastSyncStatus = failed ? "partial" : "success";
+    software.syncHistory.push({ startedAt: software.discoveryPreviewAt, completedAt: new Date(), status: software.lastSyncStatus, discovered: selected.length, imported, skipped, failed });
+    software.syncHistory = software.syncHistory.slice(-50); software.discoveryPreview = []; software.discoveryPreviewAt = undefined;
+    await software.save();
+    await this.audit.log({ actorId: actor.id, action: "software.versions.imported", targetType: "software", targetId: id, detail: "imported=" + imported + " skipped=" + skipped + " failed=" + failed, sensitive: true });
+    return { discovered: selected.length, imported, skipped, failed };
+  }
   async discover(id: string, actor: AuthUser) {
     const software = await this.getSoftware(id);
     const startedAt = new Date();

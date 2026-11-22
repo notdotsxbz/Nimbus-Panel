@@ -10,6 +10,7 @@ type SoftwareRow = {
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; lastSyncedAt?: string; lastSyncStatus: string;
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
+type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
 
 export default function AdminSoftwarePage() {
   const [items, setItems] = useState<SoftwareRow[]>([]);
@@ -18,6 +19,8 @@ export default function AdminSoftwarePage() {
   const [busy, setBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [manualVersion, setManualVersion] = useState("");
+  const [preview, setPreview] = useState<PreviewRow[]>([]);
+  const [selectedPreview, setSelectedPreview] = useState<string[]>([]);
   const [selectedVersionIds, setSelectedVersionIds] = useState<string[]>([]);
   const { show, node } = useToast();
 
@@ -38,10 +41,10 @@ export default function AdminSoftwarePage() {
     if (!selected) return;
     setBusy(true);
     try {
-      const result = await api.post<{ discovered: number; imported: number; skipped: number; failed: number }>(`/software/${selected._id}/fetch`);
-      show(`Found ${result.discovered}; imported ${result.imported}; already present ${result.skipped}; failed ${result.failed}`, result.failed ? "info" : "ok");
-      await openSoftware(selected);
-      await load();
+      const result = await api.post<{ discovered: number; newVersions: number; existingVersions: number; versions: PreviewRow[] }>(`/software/${selected._id}/preview`);
+      setPreview(result.versions);
+      setSelectedPreview(result.versions.filter(item => !item.alreadyImported).map(item => item.version));
+      show("Discovered " + result.discovered + " versions; " + result.newVersions + " new and " + result.existingVersions + " already imported.", "ok");
     } catch (e) { show(e instanceof Error ? e.message : "Version fetch failed", "err"); }
     finally { setBusy(false); }
   };
@@ -67,6 +70,14 @@ export default function AdminSoftwarePage() {
     } catch (e) { show(e instanceof Error ? e.message : "Could not save software", "err"); }
   };
 
+  const importPreview = async (all: boolean) => {
+    if (!selected) return;
+    try {
+      const result = await api.post<{ discovered: number; imported: number; skipped: number; failed: number }>("/software/" + selected._id + "/import", { versions: selectedPreview, all });
+      show("Imported " + result.imported + "; already present " + result.skipped + "; failed " + result.failed, result.failed ? "info" : "ok");
+      setPreview([]); setSelectedPreview([]); await openSoftware(selected); await load();
+    } catch (e) { show(e instanceof Error ? e.message : "Version import failed", "err"); }
+  };
   const editSoftware = async () => {
     if (!selected) return;
     const name = window.prompt("Software name", selected.name);
@@ -156,6 +167,15 @@ export default function AdminSoftwarePage() {
       <GlassCard className="p-5">
         {selected ? <>
           <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">{selected.name}</h2><p className="text-xs text-muted">Last sync: {selected.lastSyncedAt ? new Date(selected.lastSyncedAt).toLocaleString() : "Never"} · {selected.lastSyncStatus}</p></div><div className="flex flex-wrap gap-2"><button className="btn-ghost" onClick={() => void editSoftware()}>Edit</button><button className="btn-ghost" onClick={() => void toggleSoftware("enabled", selected.enabled)}>{selected.enabled ? "Disable software" : "Enable software"}</button><button className="btn-ghost" onClick={() => void deleteSoftware()}>Delete software</button><button className="btn-ghost" onClick={() => void toggleSoftware("customerAvailable", selected.customerAvailable)}>{selected.customerAvailable ? "Hide from customers" : "Show to customers"}</button><button className="btn-primary" disabled={busy || selected.sourceType === "manual"} onClick={() => void fetchVersions()}>{busy ? "Fetching…" : "Fetch versions"}</button></div></div>
+          {preview.length > 0 && <div className="mt-4 rounded-lg border border-white/10 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">Discovered versions</strong><div className="flex gap-2"><button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void importPreview(false)} disabled={!selectedPreview.length}>Import selected</button><button className="btn-primary !px-2 !py-1 text-xs" onClick={() => void importPreview(true)}>Import all</button></div></div>
+            <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+              {preview.map(item => <label key={item.version} className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={selectedPreview.includes(item.version)} disabled={item.alreadyImported} onChange={e => setSelectedPreview(current => e.target.checked ? [...current, item.version] : current.filter(version => version !== item.version))} />
+                <span className="font-mono">{item.version}</span><span className="text-muted">{item.releaseName ?? ""} {item.prerelease ? "· Prerelease" : ""}</span>{item.alreadyImported ? <span className="ml-auto text-muted">Already imported</span> : null}
+              </label>)}
+            </div>
+          </div>}
           <form onSubmit={addManualVersion} className="mt-4 flex gap-2">
             <input className="input min-w-0 flex-1" value={manualVersion} onChange={e => setManualVersion(e.target.value)} placeholder="Add version manually" aria-label="Version number" />
             <button className="btn-ghost" type="submit">Add version</button>

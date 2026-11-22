@@ -28,8 +28,9 @@ Do not configure an image template unless the image is trusted and the tag conve
 
 ## Fetch and publish versions
 
-- **Fetch versions** calls the configured official source and imports newly discovered records.
-- Existing software/version pairs are detected by a unique database index and are not duplicated.
+- **Fetch versions** calls the configured official source and stages a preview of discovered releases.
+- Admins can import selected new versions or import all discovered versions in one operation. Existing versions are identified in the preview and are not duplicated.
+- Existing software/version pairs are detected by a unique database index and are not duplicated. Preview data expires after 24 hours.
 - New versions are pending approval by default.
 - If auto-publishing is enabled, only non-prerelease discoveries are published automatically. Prereleases remain pending.
 - Select individual versions to publish or disable them. The bulk actions support publishing, disabling, and deprecating selected versions.
