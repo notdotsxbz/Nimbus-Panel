@@ -236,6 +236,17 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   async addVersion(id: string, input: Partial<SoftwareVersion>, actor: AuthUser) {
     const software = await this.getSoftware(id);
     if (!input.version?.trim() || input.version.length > 100) throw new BadRequestException("A version identifier is required");
+    if (input.releaseName !== undefined && (typeof input.releaseName !== "string" || input.releaseName.length > 200)) throw new BadRequestException("Release name must be 200 characters or fewer");
+    if (input.channel !== undefined && !["stable", "beta", "alpha", "prerelease"].includes(input.channel)) throw new BadRequestException("Invalid release channel");
+    if (input.releaseDate !== undefined && Number.isNaN(new Date(input.releaseDate).getTime())) throw new BadRequestException("Invalid release date");
+    if (input.sourceUrl) {
+      let source: URL;
+      try { source = new URL(input.sourceUrl); } catch { throw new BadRequestException("Invalid release source URL"); }
+      if (source.protocol !== "https:" || source.username || source.password) throw new BadRequestException("Release source must be an HTTPS URL");
+    }
+    if (input.compatibility !== undefined && (!Array.isArray(input.compatibility) || input.compatibility.length > 50 || input.compatibility.some(value => typeof value !== "string" || value.length > 100))) {
+      throw new BadRequestException("Invalid compatibility metadata");
+    }
     const existing = await this.versions.findOne({ softwareId: software._id, version: input.version.trim() });
     if (existing) throw new BadRequestException("That version already exists");
     const version = await this.versions.create({
