@@ -10,6 +10,8 @@ The currently implemented official-source adapters are:
 - **Node.js releases** — the official Node.js distribution index.
 - **Go releases** — the official `go.dev` distribution index, including Linux archive checksums and architecture metadata.
 - **MongoDB current releases** — MongoDB's official `current.json` feed, limited to Community (`targeted`) Linux packages, with per-platform URLs and SHA-256 metadata. This feed reports current releases per series, not every historical patch.
+- **PaperMC builds** — the official PaperMC Fill v3 API for a configured Minecraft version, including stable/experimental channel and download metadata.
+- **Purpur builds** — the official Purpur API for a configured Minecraft version, including build identifiers and direct release URLs.
 - **Modrinth** — versions from a configured Modrinth project ID.
 - **Docker Hub tags** — tags from a configured public Docker Hub namespace/repository.
 - **Manual** — fallback for software without an implemented source adapter.
@@ -23,7 +25,7 @@ Catalog metadata also supports an HTTPS official website, HTTPS logo URL, suppor
 1. Open **Admin → Software & Versions → Add Software**.
 2. Enter a unique lowercase identifier and a name.
 3. Enter service type values exactly as used by NIMBUS (for example `minecraft`, `discord`, `website`, `backend`, `database`, or `docker`).
-4. Select an implemented source adapter and fill its repository/project fields.
+4. Select an implemented source adapter and fill its repository/project fields. PaperMC and Purpur adapters additionally require the exact Minecraft version (for example `1.21.11`) whose server builds should be discovered.
 5. Optionally configure a Docker image template ending in `:{version}`, such as `example/application:{version}`. Use this only when the upstream project's published Docker tags actually match the version identifiers returned by the selected source. You may also supply installer environment overrides (for example `{"TYPE":"PAPER","EULA":"TRUE"}`); keys and values are validated and passed to the Node Agent, which merges them over the existing container environment.
 6. Choose auto-sync frequency and whether stable discoveries may be published automatically.
 7. Save the entry and select it in the catalog.
