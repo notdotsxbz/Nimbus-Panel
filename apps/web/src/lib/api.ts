@@ -142,7 +142,7 @@ export async function firebaseLogin(email: string, password: string): Promise<{ 
   return session;
 }
 
-export async function firebaseRegister(email: string, password: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
+export async function firebaseRegister(email: string, password: string, username: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
   const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
   const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + encodeURIComponent(config.apiKey), {
     method: "POST", headers: { "content-type": "application/json" },
@@ -150,13 +150,13 @@ export async function firebaseRegister(email: string, password: string): Promise
   });
   const result = await response.json() as { idToken?: string; error?: { message?: string } };
   if (!response.ok || !result.idToken) throw new ApiError(response.status, (result.error?.message ?? "Registration failed").replaceAll("_", " ").toLowerCase());
-  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/register", { idToken: result.idToken });
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/register", { idToken: result.idToken, username });
   localStorage.setItem("nimbus.token", session.token);
   localStorage.setItem("nimbus.user", JSON.stringify(session.user));
   return session;
 }
 
-export async function firebaseGoogleRegister(googleIdToken: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
+export async function firebaseGoogleRegister(googleIdToken: string, username?: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
   const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
   const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=" + encodeURIComponent(config.apiKey), {
     method: "POST", headers: { "content-type": "application/json" },
@@ -164,7 +164,7 @@ export async function firebaseGoogleRegister(googleIdToken: string): Promise<{ t
   });
   const result = await response.json() as { idToken?: string; error?: { message?: string } };
   if (!response.ok || !result.idToken) throw new ApiError(response.status, (result.error?.message ?? "Google sign-in failed").replaceAll("_", " ").toLowerCase());
-  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/register", { idToken: result.idToken });
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>(username ? "/auth/register" : "/auth/firebase", username ? { idToken: result.idToken, username } : { idToken: result.idToken });
   localStorage.setItem("nimbus.token", session.token);
   localStorage.setItem("nimbus.user", JSON.stringify(session.user));
   return session;
