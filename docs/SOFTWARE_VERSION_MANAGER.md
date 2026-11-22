@@ -76,7 +76,8 @@ Never share enrollment tokens or node credentials in support tickets or public c
 - Customer software changes cannot target VPS/VDS services. Customer OS changes are rejected by the backend, not merely hidden in the UI.
 - The current work does **not** implement an Admin VPS/VDS OS-image management workflow.
 - Dedicated source adapters are not yet implemented for every software family in the master prompt (including MongoDB, arbitrary Docker registries, PHP, Go, Java, .NET, and Lavalink). Use an approved GitHub release source only when that project's official release metadata is authoritative; otherwise keep the entry manual until a proper adapter is added.
-- The complete catalog approval workflow, durable job queue, source-specific compatibility matrix, and application-level health probes remain follow-up work.
+- Source discovery now includes Go, .NET, PaperMC, Purpur, Fabric, Quilt, Temurin Java, Forge and NeoForge official metadata. Python, PHP, MongoDB and Lavalink can use the generic GitHub Releases or Docker Hub tags adapters when the configured official source and image tag convention are verified; there are not dedicated source-specific adapters for each of those products yet.
+- The current installer still supports Docker image-template operations only. It does not implement native installers for every runtime, a virtualization provider for Admin VPS/VDS OS replacement, or application-specific health probes for every software family.
 - Do not use the existing **Reinstall** action to change software. Reinstall is destructive and removes the service data directory.
 
 
