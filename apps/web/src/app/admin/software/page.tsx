@@ -10,8 +10,8 @@ type SoftwareRow = {
   logoUrl?: string; officialUrl?: string; supportedOperatingSystems?: string[]; supportedArchitectures?: string[]; requiredRuntime?: string; defaultVersion?: string;
   enabled: boolean; customerAvailable: boolean; autoPublish: boolean; autoSync: boolean; syncFrequency: string; lastSyncedAt?: string; nextSyncAt?: string; lastSyncStatus: string; syncHistory?: Array<{ startedAt: string; completedAt?: string; status: string; discovered?: number; imported?: number; skipped?: number; failed?: number; error?: string }>;
 };
-type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
-type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
+type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean; sourceUrl?: string; compatibility?: string[]; metadata?: Record<string, unknown> };
+type PreviewRow = { version: string; releaseName?: string; releaseDate?: string; sourceUrl?: string; compatibility?: string[]; prerelease?: boolean; alreadyImported: boolean };
 type SyncJobRow = { _id: string; softwareId: { name?: string; identifier?: string } | string; status: string; attempts: number; maxAttempts: number; runAt: string; lastError?: string; discovered?: number; imported?: number; failed?: number };
 type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; warning?: string; verification?: { previousContainerRemoved?: boolean; previousContainerName?: string }; createdAt: string };
 
@@ -248,7 +248,7 @@ export default function AdminSoftwarePage() {
             <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
               {preview.map(item => <label key={item.version} className="flex items-center gap-2 text-xs">
                 <input type="checkbox" checked={selectedPreview.includes(item.version)} disabled={item.alreadyImported} onChange={e => setSelectedPreview(current => e.target.checked ? [...current, item.version] : current.filter(version => version !== item.version))} />
-                <span className="font-mono">{item.version}</span><span className="text-muted">{item.releaseName ?? ""} {item.prerelease ? "· Prerelease" : ""}</span>{item.alreadyImported ? <span className="ml-auto text-muted">Already imported</span> : null}
+                <span className="font-mono">{item.version}</span><span className="min-w-0 flex-1 text-muted">{item.releaseName ?? ""}{item.releaseDate ? " · " + new Date(item.releaseDate).toLocaleDateString() : ""}{item.prerelease ? " · Prerelease" : ""}{item.compatibility?.length ? " · " + item.compatibility.slice(0, 4).join(", ") : ""}</span>{item.sourceUrl ? <a className="text-cyan-300 hover:underline" href={item.sourceUrl} target="_blank" rel="noreferrer">Source</a> : null}{item.alreadyImported ? <span className="ml-auto text-muted">Already imported</span> : null}
               </label>)}
             </div>
           </div>}
@@ -274,7 +274,7 @@ export default function AdminSoftwarePage() {
           <div className="mt-4 space-y-2">
             {versions.map(version => <div key={version._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3">
               <input type="checkbox" checked={selectedVersionIds.includes(version._id)} onChange={e => setSelectedVersionIds(current => e.target.checked ? [...current, version._id] : current.filter(id => id !== version._id))} aria-label={"Select version " + version.version} />
-              <div><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p></div>
+              <div className="min-w-0"><strong className="font-mono text-sm">{version.version}</strong><p className="text-xs text-muted">{version.releaseName} · {version.releaseDate ? new Date(version.releaseDate).toLocaleDateString() + " · " : ""}{version.prerelease ? "Prerelease" : "Stable"} · {version.publicationStatus}{version.recommended ? " · Recommended" : ""}{version.deprecated ? " · Deprecated" : ""}</p>{version.compatibility?.length ? <p className="mt-1 text-[11px] text-muted">Compatibility: {version.compatibility.join(", ")}</p> : null}{version.sourceUrl ? <a className="mt-1 inline-block text-[11px] text-cyan-300 hover:underline" href={version.sourceUrl} target="_blank" rel="noreferrer">Release source</a> : null}</div>
               <div className="flex gap-2">{version.publicationStatus !== "published" ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "published")}>Publish</button> : <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void setVersionStatus(version, "disabled")}>Disable</button>}<button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => void deleteVersion(version)}>Delete</button></div>
             </div>)}
             {!versions.length && <p className="text-sm text-muted">No versions imported yet. Fetch releases or add them manually through the API.</p>}
