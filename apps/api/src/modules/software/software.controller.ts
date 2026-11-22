@@ -10,6 +10,10 @@ export class SoftwareController {
   @Roles("owner", "admin")
   list() { return this.software.list(); }
 
+  @Get("operations")
+  @Roles("owner", "admin")
+  listOperations() { return this.software.listOperations(); }
+
   @Post()
   @Roles("owner", "admin")
   create(@Body() body: Record<string, unknown>, @CurrentUser() actor: AuthUser) {

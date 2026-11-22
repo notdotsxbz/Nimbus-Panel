@@ -11,6 +11,7 @@ type SoftwareRow = {
 };
 type VersionRow = { _id: string; version: string; releaseName: string; releaseDate?: string; prerelease: boolean; publicationStatus: string; recommended: boolean; deprecated: boolean };
 type PreviewRow = { version: string; releaseName?: string; prerelease?: boolean; alreadyImported: boolean };
+type OperationRow = { _id: string; serviceId: { name?: string; type?: string } | string; requestedSoftware: string; requestedVersion: string; status: string; progress: number; error?: string; createdAt: string };
 
 export default function AdminSoftwarePage() {
   const [items, setItems] = useState<SoftwareRow[]>([]);
@@ -22,10 +23,11 @@ export default function AdminSoftwarePage() {
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<string[]>([]);
   const [selectedVersionIds, setSelectedVersionIds] = useState<string[]>([]);
+  const [recentOperations, setRecentOperations] = useState<OperationRow[]>([]);
   const { show, node } = useToast();
 
   const load = async () => {
-    try { setItems(await api.get<SoftwareRow[]>("/software")); }
+    try { const [catalog, operations] = await Promise.all([api.get<SoftwareRow[]>("/software"), api.get<OperationRow[]>("/software/operations")]); setItems(catalog); setRecentOperations(operations); }
     catch (e) { show(e instanceof Error ? e.message : "Could not load catalog", "err"); }
   };
   useEffect(() => { void load(); }, []);
@@ -214,6 +216,17 @@ export default function AdminSoftwarePage() {
         </> : <p className="py-12 text-center text-sm text-muted">Select software to view versions.</p>}
       </GlassCard>
     </div>
+        <GlassCard className="p-5">
+      <h2 className="font-semibold">Recent software operations</h2>
+      <div className="mt-3 space-y-2">
+        {recentOperations.map(operation => <div key={operation._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-3 text-sm">
+          <div><strong>{operation.requestedSoftware} · {operation.requestedVersion}</strong><p className="text-xs text-muted">{typeof operation.serviceId === "object" ? operation.serviceId?.name ?? "Service" : operation.serviceId} · {new Date(operation.createdAt).toLocaleString()}</p></div>
+          <span className="text-xs text-muted">{operation.status} · {operation.progress}%</span>
+          {operation.error ? <p className="w-full text-xs text-rose-300">{operation.error}</p> : null}
+        </div>)}
+        {!recentOperations.length && <p className="text-sm text-muted">No software operations yet.</p>}
+      </div>
+    </GlassCard>
     {node}
   </div>;
 }

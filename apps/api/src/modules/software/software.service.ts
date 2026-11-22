@@ -43,6 +43,11 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
   }
   onModuleDestroy() { if (this.syncTimer) clearInterval(this.syncTimer); }
   list() { return this.catalog.find().sort({ name: 1 }).lean(); }
+
+  listOperations() {
+    return this.operations.find().sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("softwareId", "name identifier").lean();
+  }
+
   private async runDueSyncs() {
     const rows = await this.catalog.find({ autoSync: true, syncFrequency: { $in: ["6h", "12h", "24h", "7d"] } }).select("_id syncFrequency lastSyncAttemptAt").lean();
     const intervals: Record<string, number> = { "6h": 21600000, "12h": 43200000, "24h": 86400000, "7d": 604800000 };
