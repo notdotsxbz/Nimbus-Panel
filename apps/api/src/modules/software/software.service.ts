@@ -150,7 +150,23 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     await this.audit.log({ actorId: actor.id, action: "software.sync.retry_requested", targetType: "software", targetId: job.softwareId.toString(), detail: job._id.toString(), sensitive: true });
     return job;
   }
-  list() { return this.catalog.find().sort({ name: 1 }).lean(); }
+  async list() {
+    const catalog = await this.catalog.find().sort({ name: 1 }).lean();
+    if (!catalog.length) return catalog;
+    const ids = catalog.map(item => item._id);
+    const versions = await this.versions.find({ softwareId: { $in: ids } }).select("softwareId version recommended publicationStatus deprecated releaseDate importedAt").sort({ releaseDate: -1, importedAt: -1 }).lean();
+    const summary = new Map<string, { latestDiscoveredVersion: string | null; latestPublishedVersion: string | null; recommendedVersion: string | null; versionCount: number }>();
+    for (const item of catalog) summary.set(item._id.toString(), { latestDiscoveredVersion: null, latestPublishedVersion: null, recommendedVersion: null, versionCount: 0 });
+    for (const version of versions) {
+      const entry = summary.get(version.softwareId.toString());
+      if (!entry) continue;
+      entry.versionCount++;
+      if (!entry.latestDiscoveredVersion) entry.latestDiscoveredVersion = version.version;
+      if (!entry.latestPublishedVersion && version.publicationStatus === "published" && !version.deprecated && version.compatible !== false) entry.latestPublishedVersion = version.version;
+      if (version.recommended) entry.recommendedVersion = version.version;
+    }
+    return catalog.map(item => ({ ...item, ...summary.get(item._id.toString()) }));
+  }
 
   listOperations() {
     return this.operations.find().sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("softwareId", "name identifier").populate("requestedBy", "username").lean();
