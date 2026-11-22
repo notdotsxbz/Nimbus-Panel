@@ -243,14 +243,14 @@ export class AppearanceService implements OnModuleInit {
 
     if (dto.backgroundImageData !== undefined) {
       const image = typeof dto.backgroundImageData === "string" ? dto.backgroundImageData.trim() : "";
-      const isDataImage = /^data:image\\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(image);
+      const isDataImage = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(image);
       let isAnimationUrl = false;
       if (image && !isDataImage) {
         try {
           const url = new URL(image);
           isAnimationUrl = url.protocol === "https:" &&
             !url.username && !url.password &&
-            /\\.(mp4|webm|ogg|ogv|gif)$/i.test(url.pathname);
+            /\.(mp4|webm|ogg|ogv|gif)$/i.test(url.pathname);
         } catch {
           isAnimationUrl = false;
         }
