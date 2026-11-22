@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +92,31 @@ func minecraftLogHasVersion(logs, expected string) bool {
 		}
 	}
 	return false
+}
+
+func versionOutputHasExpected(output, expected string) bool {
+	expected = strings.TrimSpace(strings.TrimPrefix(expected, "v"))
+	if expected == "" || len(expected) > 100 { return false }
+	pattern := regexp.MustCompile(`(?i)(?:^|[^0-9])v?` + regexp.QuoteMeta(expected) + `(?:$|[^0-9])`)
+	return pattern.MatchString(output)
+}
+
+func runContainerVersionProbe(container, probe string) (string, error) {
+	var command []string
+	switch probe {
+	case "nodejs-version": command = []string{"node", "--version"}
+	case "python-version":
+		output, err := docker("exec", container, "python", "--version")
+		if err == nil { return output, nil }
+		return docker("exec", container, "python3", "--version")
+	case "php-version": command = []string{"php", "--version"}
+	case "go-version": command = []string{"go", "version"}
+	case "java-version": command = []string{"java", "-version"}
+	case "mongodb-version": command = []string{"mongod", "--version"}
+	default: return "", fmt.Errorf("unsupported application version probe")
+	}
+	args := append([]string{"exec", container}, command...)
+	return docker(args...)
 }
 
 func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
@@ -241,13 +267,15 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(2 * time.Second)
 			}
 		} else if req.VersionProbe != "" {
-			if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "unsupported version probe and rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }
-			http.Error(w, "unsupported application version verification probe; previous container restored", http.StatusBadRequest)
-			return
+			for attempt := 0; attempt < 5; attempt++ {
+				output, probeErr := runContainerVersionProbe(oldName, req.VersionProbe)
+				if probeErr == nil && versionOutputHasExpected(output, req.ExpectedVersion) { versionVerified = true; break }
+				time.Sleep(2 * time.Second)
+			}
 		}
 		if !versionVerified {
 			if rollbackErr := rollback(); rollbackErr != nil { http.Error(w, "application version verification failed and rollback needs administrator attention: "+rollbackErr.Error(), http.StatusInternalServerError); return }
-			http.Error(w, "requested Minecraft version was not confirmed in server startup logs; previous container restored", http.StatusBadGateway)
+			http.Error(w, "requested application version was not confirmed by the configured runtime probe; previous container restored", http.StatusBadGateway)
 			return
 		}
 		// Keep the previous stopped container until the API commits its database update.
