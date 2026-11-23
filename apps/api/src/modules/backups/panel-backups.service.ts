@@ -458,7 +458,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       if (record.trigger === "scheduled") {
         await this.panelSchedules.updateOne(
           { ownerId: record.createdBy },
-          { $set: { lastStatus: record.status, lastError: record.status === "failed" ? record.error : undefined } },
+          { $set: { lastStatus: record.status, lastError: undefined } },
         ).catch(() => undefined);
       }
 
