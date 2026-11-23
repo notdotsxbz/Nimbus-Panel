@@ -119,6 +119,13 @@ export class BackupsService {
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
   }
 
+  async listForRetention(user: AuthUser, serviceId: string) {
+    await this.services.get(serviceId, user);
+    const filter: Record<string, unknown> = { serviceId: new Types.ObjectId(serviceId) };
+    if (user.role === "customer") filter.driveOwnerType = "customer";
+    return this.backups.find(filter).sort({ createdAt: -1 }).limit(5000);
+  }
+
   async create(serviceId: string, user: AuthUser, trigger: string, destination = "local") {
     const service = await this.services.get(serviceId, user);
     const node = await this.nodes.get(service.nodeId.toString());
