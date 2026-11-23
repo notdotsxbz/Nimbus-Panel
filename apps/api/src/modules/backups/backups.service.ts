@@ -214,15 +214,17 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runScheduledFullPanelBackups(now: Date) {
-    const due = await this.fullPanelSchedules.find({ enabled: true, nextRunAt: { $lte: now } }).sort({ nextRunAt: 1 }).limit(5);
+    const due = await this.fullPanelSchedules.find({ enabled: true, $or: [{ nextRunAt: { $lte: now } }, { leaseUntil: { $lt: now } }] }).sort({ nextRunAt: 1 }).limit(5);
     for (const candidate of due) {
       const nextRunAt = this.nextScheduleRun(candidate.frequency, candidate.time, now);
       const claimed = await this.fullPanelSchedules.findOneAndUpdate(
         {
           _id: candidate._id,
           enabled: true,
-          nextRunAt: { $lte: now },
-          $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: null }, { leaseUntil: { $lt: now } }],
+          $or: [
+            { nextRunAt: { $lte: now }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: null }, { leaseUntil: { $lt: now } }] },
+            { leaseUntil: { $lt: now } },
+          ],
         },
         { $set: { leaseUntil: new Date(now.getTime() + 30 * 60 * 1000), lastRunAt: now, nextRunAt: nextRunAt ?? null } },
         { new: true },
