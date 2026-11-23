@@ -93,6 +93,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("Admin can read full backup scope summary", adminBackupScope.status === 200 && typeof adminBackupScope.body?.serviceCount === "number", `status=${adminBackupScope.status}`);
   const adminBackupCustomers = await call("/backups/admin/customers", { token: owner });
   check("Admin can list customer backup targets", adminBackupCustomers.status === 200 && Array.isArray(adminBackupCustomers.body), `status=${adminBackupCustomers.status}`);
+  const adminFullPanelSchedule = await call("/backups/admin/full-schedule", { token: owner });
+  check("Admin can read Full Panel schedule settings", adminFullPanelSchedule.status === 200 && typeof adminFullPanelSchedule.body?.frequency === "string", `status=${adminFullPanelSchedule.status}`);
+  const savedFullPanelSchedule = await call("/backups/admin/full-schedule", { method: "PATCH", token: owner, body: { enabled: false, frequency: "daily", time: "02:00", retention: 5, notifyOnCompletion: true } });
+  check("Admin can save Full Panel schedule settings", savedFullPanelSchedule.status === 200 && savedFullPanelSchedule.body?.retention === 5, `status=${savedFullPanelSchedule.status}`);
   const adminDriveBackupSummary = await call("/backups/drive-summary", { token: owner });
   check("Admin can read Admin Drive backup summary", adminDriveBackupSummary.status === 200 && typeof adminDriveBackupSummary.body?.totalBackups === "number", `status=${adminDriveBackupSummary.status}`);
   const adminBackupJobs = await call("/backups/jobs", { token: owner });
@@ -157,6 +161,8 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("customer cannot read Admin backup scope", customerAdminBackupSummary.status === 403, `status=${customerAdminBackupSummary.status}`);
   const customerAdminList = await call("/backups/admin/customers", { token: cust });
   check("customer cannot list Admin backup customers", customerAdminList.status === 403, `status=${customerAdminList.status}`);
+  const customerFullPanelSchedule = await call("/backups/admin/full-schedule", { token: cust });
+  check("customer cannot read Admin Full Panel schedule", customerFullPanelSchedule.status === 403, `status=${customerFullPanelSchedule.status}`);
   const customerFullBackup = await call("/backups/admin/full", { method: "POST", token: cust, body: {} });
   check("customer cannot start Full Panel Backup", customerFullBackup.status === 403, `status=${customerFullBackup.status}`);
   const customerAdminBatch = await call("/backups/admin/batch", { method: "POST", token: cust, body: { mode: "all-customers" } });
