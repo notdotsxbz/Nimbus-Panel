@@ -172,20 +172,24 @@ export class IntegrationsService implements OnModuleInit {
   async googleDriveStatus(actor: AuthUser) {
     const keys = this.googleDriveSettingKeys(actor);
     const [saved, config] = await Promise.all([
-      this.settings.findOne({ key: keys.driveKey }).select("connectedAt").lean(),
+      this.settings.findOne({ key: keys.driveKey }).select("connectedAt encryptedValue").lean(),
       this.settings.findOne({ key: keys.configKey }).select("_id").lean(),
     ]);
     // Existing installations stored the Admin refresh token under the
     // unscoped legacy key. It remains Admin-only during migration.
     const legacySaved = !saved && keys.ownerType === "admin"
-      ? await this.settings.findOne({ key: "google-drive" }).select("connectedAt").lean()
+      ? await this.settings.findOne({ key: "google-drive" }).select("connectedAt encryptedValue").lean()
       : null;
     if ((!saved && !legacySaved) || !config) {
       return { connected: false, connectedAt: null, oauthConfigured: Boolean(config) };
     }
     try {
       await this.googleDriveAccessToken(actor);
-      return { connected: true, connectedAt: saved?.connectedAt ?? legacySaved?.connectedAt ?? null, oauthConfigured: true };
+      const tokenRecord = saved ?? legacySaved;
+      const accountEmail = tokenRecord?.encryptedValue
+        ? ((JSON.parse(this.decrypt(tokenRecord.encryptedValue)) as { email?: string }).email ?? null)
+        : null;
+      return { connected: true, connectedAt: tokenRecord?.connectedAt ?? null, accountEmail, oauthConfigured: true };
     } catch {
       return { connected: false, connectedAt: saved?.connectedAt ?? legacySaved?.connectedAt ?? null, reconnectRequired: true, oauthConfigured: true };
     }
@@ -231,7 +235,7 @@ export class IntegrationsService implements OnModuleInit {
       client_id: oauthConfig.clientId,
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "https://www.googleapis.com/auth/drive.file",
+      scope: "openid email https://www.googleapis.com/auth/drive.file",
       access_type: "offline",
       prompt: "consent",
       state,
@@ -273,14 +277,28 @@ export class IntegrationsService implements OnModuleInit {
       throw new BadRequestException(tokens.error_description ?? tokens.error ?? "Google rejected the OAuth authorization code");
     }
     const previous = await this.settings.findOne({ key: pendingData.driveKey });
-    const previousToken = previous ? (JSON.parse(this.decrypt(previous.encryptedValue)) as { refreshToken?: string }).refreshToken : undefined;
-    const refreshToken = tokens.refresh_token ?? previousToken;
+    const previousData = previous ? JSON.parse(this.decrypt(previous.encryptedValue)) as { refreshToken?: string; email?: string } : {};
+    const refreshToken = tokens.refresh_token ?? previousData.refreshToken;
     if (!refreshToken) {
       throw new BadRequestException("Google did not provide a refresh token. Remove Nimbus from your Google Account connections, then reconnect and approve Drive access.");
     }
+    let accountEmail = previousData.email ?? null;
+    if (tokens.access_token) {
+      try {
+        const identityResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+          headers: { authorization: "Bearer " + tokens.access_token },
+        });
+        if (identityResponse.ok) {
+          const identity = await identityResponse.json() as { email?: string };
+          if (identity.email) accountEmail = identity.email;
+        }
+      } catch {
+        // Drive access remains usable if Google's optional identity lookup is unavailable.
+      }
+    }
     await this.settings.findOneAndUpdate(
       { key: pendingData.driveKey },
-      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken })), connectedAt: new Date(), updatedBy: actor.id } },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken, email: accountEmail })), connectedAt: new Date(), updatedBy: actor.id } },
       { upsert: true, new: true },
     );
     return { connected: true };
