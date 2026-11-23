@@ -127,7 +127,7 @@ export default function AdminSettings() {
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Firebase Authentication</h2>
             <span className={`rounded-full px-2.5 py-1 text-xs ${firebase.connected && firebase.webConfigured ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>
-              {firebase.connected && firebase.webConfigured ? "Connected for all owners" : "Setup required"}
+              {firebase.connected && firebase.webConfigured ? "Admin Drive connected" : "Setup required"}
             </span>
           </div>
           <p className="mt-2 text-sm text-muted">Shared Firebase Authentication for every owner account on this Nimbus installation. One owner connects it once; all other owners can see the same connection status and use the same project. Customer registration and Google sign-in use this shared project.</p>
@@ -156,7 +156,7 @@ export default function AdminSettings() {
             <h2 className="font-semibold">Google Drive Backups</h2>
             <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected for all owners" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
           </div>
-          <p className="mt-2 text-sm text-muted">One shared Google Drive connection is used by backups for every owner account. Nimbus verifies backup checksums before upload.</p>
+          <p className="mt-2 text-sm text-muted">This separate Admin Google Drive is used for staff-triggered service backups and Admin backup operations. Customer accounts connect their own Google Drive. Nimbus verifies backup checksums before upload.</p>
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
           <div className="mt-4 flex gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
