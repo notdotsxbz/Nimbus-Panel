@@ -1,14 +1,15 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import axios from "axios";
 import { AuditService } from "../audit/audit.service";
-import { Backup, BackupDocument } from "./backup.schema";
+import { Backup, BackupDocument, BackupSchedule, BackupScheduleDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
 import { IntegrationsService } from "../integrations/integrations.service";
 import { env } from "../../config/env";
+import { NotificationsService } from "../notifications/notifications.service";
 
 /**
  * Backup orchestration. Heavy lifting (tar + integrity) happens on the node
@@ -17,14 +18,150 @@ import { env } from "../../config/env";
  * agent extracts to a staging directory first and the API records the restore.
  */
 @Injectable()
-export class BackupsService {
+export class BackupsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectModel(Backup.name) private readonly backups: Model<BackupDocument>,
+    @InjectModel(BackupSchedule.name) private readonly schedules: Model<BackupScheduleDocument>,
     private readonly nodes: NodesService,
     private readonly services: ServicesService,
     private readonly audit: AuditService,
     private readonly integrations: IntegrationsService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  private scheduleTimer?: NodeJS.Timeout;
+  private scheduleWorkerRunning = false;
+
+  onModuleInit() {
+    this.scheduleTimer = setInterval(() => { void this.runScheduledBackups(); }, 30_000);
+    this.scheduleTimer.unref?.();
+    void this.runScheduledBackups();
+  }
+
+  onModuleDestroy() {
+    if (this.scheduleTimer) clearInterval(this.scheduleTimer);
+  }
+
+  private nextScheduleRun(frequency: string, time: string, from = new Date()): Date | undefined {
+    if (frequency === "manual") return undefined;
+    if (frequency === "every6h") return new Date(from.getTime() + 6 * 60 * 60 * 1000);
+    if (frequency === "every12h") return new Date(from.getTime() + 12 * 60 * 60 * 1000);
+    const match = /^(\\d{2}):(\\d{2})$/.exec(time);
+    const hour = match ? Number(match[1]) : 2;
+    const minute = match ? Number(match[2]) : 0;
+    const next = new Date(from);
+    next.setUTCHours(hour, minute, 0, 0);
+    if (next.getTime() <= from.getTime()) next.setUTCDate(next.getUTCDate() + (frequency === "weekly" ? 7 : 1));
+    return next;
+  }
+
+  async getSchedule(serviceId: string, user: { id: string; role: string }) {
+    const service = await this.services.get(serviceId, user as never);
+    const schedule = await this.schedules.findOne({ serviceId: service._id });
+    return schedule ?? {
+      serviceId: service._id,
+      ownerId: service.ownerId,
+      enabled: false,
+      frequency: "manual",
+      time: "02:00",
+      retention: 5,
+      notifyOnCompletion: true,
+      nextRunAt: null,
+      lastRunAt: null,
+    };
+  }
+
+  async saveSchedule(dto: {
+    serviceId: string; enabled?: boolean; frequency?: string; time?: string;
+    retention?: number; notifyOnCompletion?: boolean;
+  }, user: { id: string; role: string }) {
+    const service = await this.services.get(dto.serviceId, user as never);
+    const frequency = dto.frequency ?? "manual";
+    if (!["manual", "every6h", "every12h", "daily", "weekly"].includes(frequency)) {
+      throw new BadRequestException("Invalid backup frequency");
+    }
+    const time = dto.time ?? "02:00";
+    if (!/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(time)) throw new BadRequestException("Backup time must be in 24-hour HH:mm format (UTC)");
+    const retention = dto.retention ?? 5;
+    if (![0, 5, 10, 30].includes(retention)) throw new BadRequestException("Retention must be 5, 10, 30 or 0 for never delete");
+    const enabled = dto.enabled === true && frequency !== "manual";
+    const nextRunAt = enabled ? this.nextScheduleRun(frequency, time) : undefined;
+    const schedule = await this.schedules.findOneAndUpdate(
+      { serviceId: service._id },
+      {
+        $set: {
+          ownerId: service.ownerId,
+          enabled,
+          frequency,
+          time,
+          retention,
+          notifyOnCompletion: dto.notifyOnCompletion !== false,
+          nextRunAt: nextRunAt ?? null,
+          leaseUntil: null,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    await this.audit.log({
+      actorId: user.id,
+      action: "backups.schedule.update",
+      targetType: "service",
+      targetId: service._id!.toString(),
+      detail: `enabled=${enabled} frequency=${frequency} retention=${retention}`,
+      sensitive: true,
+    });
+    return schedule;
+  }
+
+  private async runScheduledBackups() {
+    if (this.scheduleWorkerRunning) return;
+    this.scheduleWorkerRunning = true;
+    try {
+      const now = new Date();
+      const due = await this.schedules.find({ enabled: true, nextRunAt: { $lte: now } }).sort({ nextRunAt: 1 }).limit(10);
+      for (const candidate of due) {
+        const nextRunAt = this.nextScheduleRun(candidate.frequency, candidate.time, now);
+        const claimed = await this.schedules.findOneAndUpdate(
+          {
+            _id: candidate._id,
+            enabled: true,
+            nextRunAt: { $lte: now },
+            $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: null }, { leaseUntil: { $lt: now } }],
+          },
+          { $set: { leaseUntil: new Date(now.getTime() + 30 * 60 * 1000), lastRunAt: now, nextRunAt: nextRunAt ?? null } },
+          { new: true },
+        );
+        if (!claimed) continue;
+        const owner = { id: claimed.ownerId.toString(), role: "customer" };
+        try {
+          const result = await this.create(claimed.serviceId.toString(), owner, "scheduled", "gdrive");
+          if (result.status === "completed") {
+            if (claimed.notifyOnCompletion) await this.notifications.notify(owner.id, "backup", "Scheduled backup completed", "A scheduled backup for your service has completed and was verified.");
+            await this.applyScheduleRetention(claimed, owner);
+          } else if (claimed.notifyOnCompletion) {
+            await this.notifications.notify(owner.id, "backup", "Scheduled backup failed", result.error || "The scheduled backup could not be completed. Check your Google Drive connection.");
+          }
+        } catch (error) {
+          if (claimed.notifyOnCompletion) await this.notifications.notify(owner.id, "backup", "Scheduled backup failed", error instanceof Error ? error.message : "The scheduled backup failed.");
+        } finally {
+          await this.schedules.updateOne({ _id: claimed._id }, { $set: { leaseUntil: null } });
+        }
+      }
+    } catch (error) {
+      console.error("[backup-scheduler] worker failed:", error instanceof Error ? error.message : "unknown error");
+    } finally {
+      this.scheduleWorkerRunning = false;
+    }
+  }
+
+  private async applyScheduleRetention(schedule: BackupScheduleDocument, user: { id: string; role: string }) {
+    if (!schedule.retention || schedule.retention <= 0) return;
+    const completed = await this.backups.find({ serviceId: schedule.serviceId, status: "completed" }).sort({ createdAt: -1 }).select("_id").lean();
+    for (const old of completed.slice(schedule.retention)) {
+      try { await this.delete(String(old._id), user); }
+      catch (error) { console.error("[backup-retention] could not delete expired backup:", error instanceof Error ? error.message : "unknown error"); }
+    }
+  }
 
   async list(user: { id: string; role: string }, serviceId?: string) {
     const filter: Record<string, unknown> = {};
