@@ -35,6 +35,10 @@ export class BackupsService {
     private readonly integrations: IntegrationsService,
   ) {}
 
+  assertBackupEncryptionConfigured(): void {
+    this.backupKey();
+  }
+
   private backupKey(): Buffer {
     const configured = env.backupEncryptionKey;
     if (!/^[a-f0-9]{64}$/i.test(configured)) {
