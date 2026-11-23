@@ -258,8 +258,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         timeout: 4 * 60 * 60 * 1000,
         maxBuffer: 4 * 1024 * 1024,
       });
-      const archive = await readFile(archivePath);
-      return this.uploadPanelArtifact(archive, "nimbus-database-" + jobId + ".archive.gz.enc", "Database", jobId, "database");
+      return this.uploadPanelArtifactFile(archivePath, "nimbus-database-" + jobId + ".archive.gz.enc", "Database", jobId, "database");
     } catch (error) {
       const message = error instanceof Error ? error.message : "mongodump failed";
       if (message.includes("ENOENT") || message.includes("not found")) {
@@ -301,6 +300,66 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       jobId,
       "system-metadata",
     );
+  }
+
+  private async uploadPanelArtifactFile(
+    sourcePath: string,
+    filename: string,
+    folder: "Database" | "Configuration" | "System Metadata" | "Full Backup Manifests",
+    jobId: string,
+    artifactType: string,
+  ) {
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-panel-artifact-"));
+    try {
+      const encryptedPath = join(tempDir, "artifact.enc");
+      const [sourceStat, checksum, folderId, accessToken] = await Promise.all([
+        stat(sourcePath),
+        this.hashFile(sourcePath, "hex"),
+        this.integrations.googleDriveAdminPanelFolder(folder),
+        this.integrations.googleDriveAccessToken("admin"),
+      ]);
+      const encryptionMetadata = await this.encryptArchiveFile(sourcePath, encryptedPath);
+      const encryptedStat = await stat(encryptedPath);
+      const metadata = {
+        name: filename,
+        mimeType: "application/octet-stream",
+        parents: [folderId],
+        appProperties: {
+          nimbusPanelBackupId: jobId,
+          nimbusArtifactType: artifactType,
+          nimbusSha256: checksum,
+          nimbusIv: encryptionMetadata.iv,
+          nimbusTag: encryptionMetadata.authTag,
+          nimbusKeyVersion: encryptionMetadata.keyVersion,
+          nimbusAlgorithm: encryptionMetadata.algorithm,
+        },
+      };
+      const fileId = await this.uploadResumableDriveFile(accessToken, metadata, encryptedPath, encryptedStat.size);
+      const downloaded = await axios.get(
+        "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media",
+        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
+      );
+      const actualHash = createHash("sha256");
+      for await (const chunk of downloaded.data as NodeJS.ReadableStream) actualHash.update(chunk as Buffer);
+      const expectedHash = await this.hashFile(encryptedPath, "hex");
+      if (actualHash.digest("hex") !== expectedHash) {
+        await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId), {
+          headers: { authorization: "Bearer " + accessToken },
+        }).catch(() => undefined);
+        throw new BadRequestException("Admin panel artifact upload verification failed");
+      }
+      return {
+        fileId,
+        filename,
+        folderId,
+        checksum,
+        sizeBytes: sourceStat.size,
+        encryptionMetadata,
+        verificationStatus: "verified",
+      };
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   }
 
   private async uploadPanelArtifact(
