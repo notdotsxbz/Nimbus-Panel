@@ -97,6 +97,22 @@ func TestSafeExtractArchiveRejectsEscapingSymlinks(t *testing.T) {
 	}
 }
 
+func TestSafeExtractArchiveRejectsDirectoryThroughSymlink(t *testing.T) {
+	root := t.TempDir()
+	archive := filepath.Join(root, "symlink-directory.tar")
+	destination := filepath.Join(root, "restore")
+	if err := os.MkdirAll(destination, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeRestoreTestArchive(t, archive, []restoreTestEntry{
+		{header: tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "inside"}},
+		{header: tar.Header{Name: "link", Typeflag: tar.TypeDir, Mode: 0o750}},
+	})
+	if err := safeExtractArchive(archive, destination); err == nil {
+		t.Fatal("expected directory entry over symbolic link to be rejected")
+	}
+}
+
 func TestSafeExtractArchiveRejectsWritesThroughSymlinks(t *testing.T) {
 	root := t.TempDir()
 	archive := filepath.Join(root, "symlink-parent.tar")
