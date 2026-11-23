@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { GlassCard, Modal, useToast } from "@/components/glass";
 
-type DriveStats = { totalBackups: number; lastSuccessfulBackup: string | null; totalSizeBytes: number };
+type DriveStats = { totalBackups: number; lastSuccessfulBackup: string | null; totalSizeBytes: number; fullPanelBackupCount: number; lastFullPanelBackupAt: string | null };
 type FirebaseStatus = { connected: boolean; projectId: string | null; webConfigured?: boolean; connectedAt: string | null };
 type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; accountEmail?: string | null; folderId?: string | null; reconnectRequired?: boolean };
 
@@ -181,7 +181,12 @@ export default function AdminSettings() {
           <p className="mt-2 text-sm text-muted">This separate Drive is reserved for administrator backups and full-panel recovery. Each customer connects an independent personal Drive from Account Settings.</p>
           {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Connected account: <span className="font-mono">{drive.accountEmail}</span></p> : null}
           {drive.connectedAt ? <p className="mt-1 text-xs text-muted">Connected {new Date(drive.connectedAt).toLocaleString()}</p> : null}
-          {driveStats ? <p className="mt-1 text-xs text-muted">{driveStats.totalBackups} Admin Drive backups · {driveStats.lastSuccessfulBackup ? "Last successful backup " + new Date(driveStats.lastSuccessfulBackup).toLocaleString() : "No successful backups yet"}</p> : null}
+          {driveStats ? (
+            <div className="mt-2 space-y-1 text-xs text-muted">
+              <p>{driveStats.totalBackups} Admin Drive service backups · {driveStats.lastSuccessfulBackup ? "Last service backup " + new Date(driveStats.lastSuccessfulBackup).toLocaleString() : "No service backups yet"}</p>
+              <p>{driveStats.fullPanelBackupCount} successful Full Panel Backups · {driveStats.lastFullPanelBackupAt ? "Last full backup " + new Date(driveStats.lastFullPanelBackupAt).toLocaleString() : "No full panel backups yet"}</p>
+            </div>
+          ) : null}
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
