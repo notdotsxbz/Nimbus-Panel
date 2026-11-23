@@ -586,6 +586,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       backup.verificationStatus = "pending";
       backup.backupName = service.name + " backup";
       backup.backupType = "service";
+      backup.progressStage = "queued";
       backup.manifest = {
         backupId: backup._id!.toString(),
         serviceId,
@@ -605,6 +606,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         ...(driveOwnerId ? { driveOwnerId } : {}),
         destination,
         status: "running",
+        progressStage: "queued",
         trigger,
         createdBy: new Types.ObjectId(user.id),
         backupName: service.name + " backup",
@@ -622,13 +624,17 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       backup.manifest = { ...(backup.manifest ?? {}), backupId: backup._id!.toString() };
     }
     try {
-      // Agent creates tar.zst, computes sha256, reports back.
+      backup.progressStage = "creating_snapshot";
+      await backup.save();
+      // Node Agent creates a gzip-compressed tar archive and computes SHA-256.
       const result = await this.nodes.agentCall(node, "/backups/create", {
         serviceId,
         backupId: backup._id!.toString(),
       }, "POST", 10 * 60 * 1000);
       backup.sizeBytes = result.sizeBytes;
       backup.checksum = result.checksum;
+      backup.progressStage = "encrypting";
+      await backup.save();
       if (destination === "gdrive") {
         const archive = await this.nodes.downloadBackupArchive(node, serviceId, backup._id!.toString());
         if (!this.verifyChecksum(archive, result.checksum)) throw new BadRequestException("Downloaded archive failed checksum verification");
@@ -652,6 +658,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
           backup._id!.toString(),
           result.checksum,
           encrypted.metadata,
+          async (stage) => { backup.progressStage = stage; await backup.save(); },
         );
         backup.verificationStatus = "verified";
         // Remove the temporary plaintext node archive only after Drive read-back verification succeeds.
@@ -660,9 +667,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       }
       if (destination !== "gdrive") backup.verificationStatus = "verified";
       backup.status = "completed";
+      backup.progressStage = "completed";
       backup.completedAt = new Date();
     } catch (err) {
       backup.status = "failed";
+      backup.progressStage = "failed";
       backup.verificationStatus = "failed";
       backup.error = (err as Error).message;
     }
@@ -1039,6 +1048,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     backupId: string,
     checksum: string,
     encryptionMetadata: { algorithm: string; iv: string; authTag: string; keyVersion: string },
+    onStage?: (stage: "uploading" | "verifying") => Promise<void>,
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
     const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, customerId, serviceType, serviceName, customerFolderName);
@@ -1080,7 +1090,9 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     };
     let fileId: string;
     try {
+      await onStage?.("uploading");
       fileId = await this.uploadResumableDriveUpload(accessToken, fileMetadata, archive);
+      await onStage?.("verifying");
     } catch (error) {
       const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
       throw new BadRequestException(details ?? (error instanceof Error ? error.message : "Google Drive resumable upload failed"));
