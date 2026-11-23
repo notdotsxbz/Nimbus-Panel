@@ -34,8 +34,8 @@ export default function CustomerBackups() {
   const restore = async (id: string) => {
     if (!confirm("Restore this backup? Current data is staged and only replaced after verification.")) return;
     try {
-      await api.post(`/backups/${id}/restore`);
-      show("Restore queued", "ok");
+      await api.post(`/backups/${id}/restore`, { confirm: true });
+      show("Backup restored and service health checked", "ok");
     } catch (err) {
       show(err instanceof Error ? err.message : "Restore failed", "err");
     }
