@@ -50,66 +50,9 @@ chmod 600 "$SAFETY_DIR/env-before-restore.bak"
 extract_mongo_uri() {
   local file="$1"
   local line value
-  line="$(grep -m1 '^MONGODB_URI=' "$file" || true)"
+  line="$(grep -m1 '^MONGODB_URI=' "$file" | tr -d '\r' || true)"
   [[ -n "$line" ]] || return 1
   value="${line#*=}"
-  value="${value%
-
-OLD_MONGO_CONFIG="$SAFETY_DIR/mongo-before.yml"
-write_mongo_config "$MONGODB_URI" "$OLD_MONGO_CONFIG"
-
-log "Creating a safety dump of the current panel database…"
-mongodump --quiet --config "$OLD_MONGO_CONFIG" --archive="$SAFETY_DIR/database-before.archive.gz" --gzip
-[[ -s "$SAFETY_DIR/database-before.archive.gz" ]] || fail "Could not create the safety database dump."
-
-rollback() {
-  local exit_code=$?
-  trap - EXIT
-  if [[ "$RESTORE_STARTED" -eq 1 && "$RESTORE_COMPLETE" -eq 0 ]]; then
-    log "Restore failed. Attempting to roll back the database and .env…"
-    systemctl stop nimbus-web nimbus-api || true
-    cp -a "$SAFETY_DIR/env-before-restore.bak" "$ENV_FILE"
-    chown nimbus:nimbus "$ENV_FILE" || true
-    chmod 600 "$ENV_FILE" || true
-    mongorestore --quiet --config "$OLD_MONGO_CONFIG" --archive="$SAFETY_DIR/database-before.archive.gz" --gzip --drop || log "WARNING: database rollback failed; administrator intervention is required."
-    systemctl start nimbus-api || true
-    systemctl start nimbus-web || true
-    log "Safety files are in $SAFETY_DIR"
-  fi
-  exit "$exit_code"
-}
-trap rollback EXIT
-
-RESTORE_STARTED=1
-log "Stopping NIMBUS web and API services…"
-systemctl stop nimbus-web nimbus-api
-
-log "Installing the backed-up environment file…"
-install -o nimbus -g nimbus -m 600 "$RESTORE_DIR/environment.env" "$ENV_FILE"
-
-MONGODB_URI="$(extract_mongo_uri "$ENV_FILE")" || fail "Restored .env does not contain MONGODB_URI."
-[[ -n "$MONGODB_URI" ]] || fail "Restored MONGODB_URI is empty."
-
-NEW_MONGO_CONFIG="$SAFETY_DIR/mongo-restored.yml"
-write_mongo_config "$MONGODB_URI" "$NEW_MONGO_CONFIG"
-
-log "Restoring the panel database…"
-mongorestore --quiet --config "$NEW_MONGO_CONFIG" --archive="$RESTORE_DIR/database.archive.gz" --gzip --drop
-
-log "Starting NIMBUS API and web services…"
-systemctl start nimbus-api
-systemctl start nimbus-web
-sleep 5
-systemctl is-active --quiet nimbus-api || fail "NIMBUS API did not become active."
-systemctl is-active --quiet nimbus-web || fail "NIMBUS web did not become active."
-
-RESTORE_COMPLETE=1
-trap - EXIT
-log "Panel database and configuration restore completed."
-log "Safety backup: $SAFETY_DIR"
-rm -rf -- "$RESTORE_DIR" || log "WARNING: could not remove decrypted staging files at $RESTORE_DIR"
-log "Next: open the Admin Backups page and restore the service backups listed in the restored backup manifest."
-\\r'}"
   if [[ "$value" == \"*\" ]]; then value="${value:1:${#value}-2}"; fi
   if [[ "$value" == \'*\' ]]; then value="${value:1:${#value}-2}"; fi
   printf '%s' "$value"
