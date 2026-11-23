@@ -289,7 +289,17 @@ export class IntegrationsService implements OnModuleInit {
     customerFolderName?: string,
   ): Promise<string> {
     const key = this.googleDriveConnectionKey(ownerType, ownerId);
-    const connection = await this.settings.findOne({ key });
+    let connection = await this.settings.findOne({ key });
+    if (!connection && ownerType === "admin") {
+      const legacy = await this.settings.findOne({ key: "google-drive" });
+      if (legacy) {
+        connection = await this.settings.findOneAndUpdate(
+          { key },
+          { $setOnInsert: { encryptedValue: legacy.encryptedValue, connectedAt: legacy.connectedAt, updatedBy: legacy.updatedBy } },
+          { upsert: true, new: true },
+        );
+      }
+    }
     if (!connection) throw new BadRequestException("Connect your Google Drive before creating backups");
     const accessToken = await this.googleDriveAccessToken(ownerType, ownerId);
     const rootId = connection.folderId || await this.ensureDriveRootFolder(accessToken, ownerType);
