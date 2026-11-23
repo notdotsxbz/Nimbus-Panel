@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { GlassCard, Modal, useToast } from "@/components/glass";
 
+type DriveStats = { totalBackups: number; lastSuccessfulBackup: string | null; totalSizeBytes: number };
 type FirebaseStatus = { connected: boolean; projectId: string | null; webConfigured?: boolean; connectedAt: string | null };
 type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; accountEmail?: string | null; folderId?: string | null; reconnectRequired?: boolean };
 
@@ -13,6 +14,7 @@ export default function AdminSettings() {
   const [firebase, setFirebase] = useState<FirebaseStatus>({ connected: false, projectId: null, webConfigured: false, connectedAt: null });
   const [cloudflare, setCloudflare] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
   const [drive, setDrive] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
+  const [driveStats, setDriveStats] = useState<DriveStats | null>(null);
   const [backgroundImageData, setBackgroundImageData] = useState("");
   const [backgroundAnimationUrl, setBackgroundAnimationUrl] = useState("");
   const [firebaseJson, setFirebaseJson] = useState("");
@@ -33,10 +35,12 @@ export default function AdminSettings() {
       api.get<ConnectionStatus>("/integrations/cloudflare"),
       api.get<ConnectionStatus>("/integrations/google-drive"),
       api.get<{ backgroundImageData?: string }>("/appearance/settings"),
+      api.get<DriveStats>("/backups/drive-summary"),
     ]);
     if (results[0].status === "fulfilled") setFirebase(results[0].value);
     if (results[1].status === "fulfilled") setCloudflare(results[1].value);
     if (results[2].status === "fulfilled") setDrive(results[2].value);
+    if (results[4].status === "fulfilled") setDriveStats(results[4].value);
     if (results[3].status === "fulfilled") {
       const background = results[3].value.backgroundImageData ?? "";
       if (/^https:\/\//i.test(background)) {
@@ -176,6 +180,8 @@ export default function AdminSettings() {
           </div>
           <p className="mt-2 text-sm text-muted">This separate Drive is reserved for administrator backups and full-panel recovery. Each customer connects an independent personal Drive from Account Settings.</p>
           {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Connected account: <span className="font-mono">{drive.accountEmail}</span></p> : null}
+          {drive.connectedAt ? <p className="mt-1 text-xs text-muted">Connected {new Date(drive.connectedAt).toLocaleString()}</p> : null}
+          {driveStats ? <p className="mt-1 text-xs text-muted">{driveStats.totalBackups} Admin Drive backups · {driveStats.lastSuccessfulBackup ? "Last successful backup " + new Date(driveStats.lastSuccessfulBackup).toLocaleString() : "No successful backups yet"}</p> : null}
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
