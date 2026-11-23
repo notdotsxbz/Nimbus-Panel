@@ -21,8 +21,6 @@ export default function CustomerBackups() {
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [serviceId, setServiceId] = useState("");
   const [drive, setDrive] = useState<DriveStatus>({ connected: false, connectedAt: null });
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const { show, node } = useToast();
 
@@ -62,7 +60,7 @@ export default function CustomerBackups() {
   const connectDrive = async () => {
     setBusy(true);
     try {
-      const result = await api.post<{ url: string }>("/integrations/google-drive/connect", { clientId, clientSecret });
+      const result = await api.post<{ url: string }>("/integrations/google-drive/connect", {});
       window.location.href = result.url;
     } catch (error) {
       show(error instanceof Error ? error.message : "Could not start Google connection", "err");
@@ -130,19 +128,9 @@ export default function CustomerBackups() {
         {drive.connected ? (
           <p className="mt-3 text-xs text-emerald-400">Connected{drive.connectedAt ? ` · ${new Date(drive.connectedAt).toLocaleString()}` : ""}</p>
         ) : (
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div>
-              <label className="label">Google OAuth Client ID</label>
-              <input className="input w-full" value={clientId} onChange={e => setClientId(e.target.value)} placeholder="...apps.googleusercontent.com" autoComplete="off" />
-            </div>
-            <div>
-              <label className="label">Google OAuth Client Secret</label>
-              <input className="input w-full" type="password" value={clientSecret} onChange={e => setClientSecret(e.target.value)} autoComplete="off" />
-            </div>
-            <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-muted">Use the same OAuth web application and redirect URI configured for Nimbus. Credentials are encrypted on the server.</p>
-              <button className="btn-primary" disabled={busy || !clientId.trim() || !clientSecret.trim()} onClick={() => void connectDrive()}>{busy ? "Connecting…" : "Connect Google Drive"}</button>
-            </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted">Nimbus securely handles the OAuth application setup. You only need to choose your Google account and approve Drive access. The customer callback URI must be authorized by the Nimbus administrator.</p>
+            <button className="btn-primary" disabled={busy} onClick={() => void connectDrive()}>{busy ? "Connecting…" : "Connect Google Drive"}</button>
           </div>
         )}
       </GlassCard>
