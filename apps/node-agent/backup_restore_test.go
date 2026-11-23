@@ -2,6 +2,8 @@ package main
 
 import (
 	"archive/tar"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,6 +62,48 @@ func TestSafeExtractArchiveRestoresRegularFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(got) != "safe" {
+		t.Fatalf("unexpected restored contents %q", string(got))
+	}
+}
+
+func TestSafeExtractArchiveSupportsGzip(t *testing.T) {
+	root := t.TempDir()
+	plain := filepath.Join(root, "plain.tar")
+	compressed := filepath.Join(root, "compressed.tar.gz")
+	destination := filepath.Join(root, "restore")
+	if err := os.MkdirAll(destination, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeRestoreTestArchive(t, plain, []restoreTestEntry{
+		{header: tar.Header{Name: "compressed.txt", Typeflag: tar.TypeReg, Mode: 0o600}, body: "gzip archive"},
+	})
+	in, err := os.Open(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(out)
+	if _, err := io.Copy(gz, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = in.Close()
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := safeExtractArchive(compressed, destination); err != nil {
+		t.Fatalf("gzip archive rejected: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(destination, "compressed.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "gzip archive" {
 		t.Fatalf("unexpected restored contents %q", string(got))
 	}
 }
