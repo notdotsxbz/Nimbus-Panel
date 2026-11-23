@@ -69,6 +69,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     ]);
     const record = await this.panelBackups.create({
       createdBy: new Types.ObjectId(user.id),
+      mode: "full",
       status: "queued",
       progress: 0,
       currentStep: "Queued",
@@ -83,6 +84,48 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       targetType: "panel-backup",
       targetId: record._id!.toString(),
       detail: `queued; customers=${customerCount}; services=${services.length}; nodes=${nodes.length}`,
+      sensitive: true,
+    });
+    return record;
+  }
+
+  async createSelectedBackup(user: AuthUser, dto: { customerIds?: string[]; serviceIds?: string[] }) {
+    this.assertAdmin(user);
+    this.backups.assertBackupEncryptionConfigured();
+    await this.integrations.googleDriveAccessToken(user);
+    const customerIds = [...new Set(dto.customerIds ?? [])];
+    const serviceIds = [...new Set(dto.serviceIds ?? [])];
+    if (customerIds.length > 50 || serviceIds.length > 100) throw new BadRequestException("Select no more than 50 customers or 100 services at a time");
+    if ((customerIds.length === 0) === (serviceIds.length === 0)) {
+      throw new BadRequestException("Select either customers or services for this backup job");
+    }
+    const validId = (id: string) => /^[a-f0-9]{24}$/i.test(id);
+    if (![...customerIds, ...serviceIds].every(validId)) throw new BadRequestException("One or more selected IDs are invalid");
+    const allServices = await this.services.listAllForStaff(user);
+    const selected = customerIds.length
+      ? allServices.filter(service => customerIds.includes(service.ownerId.toString()))
+      : allServices.filter(service => serviceIds.includes(service._id!.toString()));
+    if (selected.length === 0) throw new NotFoundException("No eligible services were found for the selection");
+    if (serviceIds.length && selected.length !== serviceIds.length) throw new NotFoundException("One or more selected services were not found");
+    const record = await this.panelBackups.create({
+      createdBy: new Types.ObjectId(user.id),
+      mode: customerIds.length ? "customers" : "services",
+      selectedCustomerIds: customerIds.map(id => new Types.ObjectId(id)),
+      selectedServiceIds: serviceIds.map(id => new Types.ObjectId(id)),
+      status: "queued",
+      progress: 0,
+      currentStep: "Queued",
+      customerCount: new Set(selected.map(service => service.ownerId.toString())).size,
+      serviceCount: selected.length,
+      nodeCount: new Set(selected.map(service => service.nodeId.toString())).size,
+      serviceBackupIds: [],
+    });
+    await this.audit.log({
+      actorId: user.id,
+      action: customerIds.length ? "backups.panel.customers.started" : "backups.panel.services.started",
+      targetType: "panel-backup",
+      targetId: record._id!.toString(),
+      detail: `queued; customers=${record.customerCount}; services=${record.serviceCount}`,
       sensitive: true,
     });
     return record;
@@ -108,7 +151,8 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       const actor = { id: claimed.createdBy.toString(), role: creator.role } as AuthUser;
-      await this.performFullPanelBackup(claimed, actor);
+      if (claimed.mode === "full") await this.performFullPanelBackup(claimed, actor);
+      else await this.performSelectedBackups(claimed, actor);
     } catch (error) {
       if (claimed) {
         claimed.status = "failed";
@@ -315,6 +359,107 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         targetId: record._id!.toString(),
         sensitive: true,
       });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private async performSelectedBackups(record: PanelBackupDocument, user: AuthUser) {
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-selected-backup-"));
+    try {
+      const allServices = await this.services.listAllForStaff(user);
+      const customerIds = (record.selectedCustomerIds ?? []).map(id => id.toString());
+      const serviceIds = (record.selectedServiceIds ?? []).map(id => id.toString());
+      const selected = customerIds.length
+        ? allServices.filter(service => customerIds.includes(service.ownerId.toString()))
+        : allServices.filter(service => serviceIds.includes(service._id!.toString()));
+      const eligible = selected.filter(service => !["vps", "vds"].includes(String(service.type).toLowerCase()));
+      const excluded = selected.filter(service => ["vps", "vds"].includes(String(service.type).toLowerCase()));
+      const serviceBackups: Array<Record<string, unknown>> = [];
+      const backupIds: Types.ObjectId[] = [];
+      let failures = excluded.length;
+      for (let index = 0; index < eligible.length; index += 1) {
+        const service = eligible[index];
+        const backup = await this.backups.create(service._id!.toString(), user, "manual", "gdrive");
+        backupIds.push(backup._id as Types.ObjectId);
+        serviceBackups.push({
+          backupId: backup._id!.toString(),
+          serviceId: service._id!.toString(),
+          ownerId: service.ownerId.toString(),
+          nodeId: service.nodeId.toString(),
+          serviceName: service.name,
+          serviceType: String(service.type),
+          status: backup.status,
+          sizeBytes: backup.sizeBytes ?? null,
+          checksum: backup.checksum ?? null,
+          remoteFileId: backup.remoteFileId ?? null,
+          encryptionAlgorithm: backup.encryptionAlgorithm ?? null,
+          encryptionIv: backup.encryptionIv ?? null,
+          encryptionTag: backup.encryptionTag ?? null,
+          storedSizeBytes: backup.storedSizeBytes ?? null,
+        });
+        if (backup.status !== "completed") failures += 1;
+        record.currentStep = `Backing up selected service ${index + 1} of ${eligible.length}: ${service.name}`;
+        record.progress = 10 + Math.round(((index + 1) / Math.max(eligible.length, 1)) * 75);
+        await record.save();
+      }
+      const manifest = {
+        format: "nimbus-selected-backup",
+        formatVersion: 1,
+        backupId: record._id!.toString(),
+        mode: record.mode,
+        createdAt: new Date().toISOString(),
+        customerIds,
+        serviceIds,
+        serviceBackups,
+        excludedServices: excluded.map(service => ({
+          serviceId: service._id!.toString(),
+          serviceName: service.name,
+          serviceType: String(service.type),
+          reason: "Full VM/disk snapshots are not supported by the current Docker-only Node Agent",
+        })),
+        result: failures ? "partial" : "complete",
+      };
+      const manifestPath = join(tempDir, "selected-backup-manifest.json");
+      await writeFile(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
+      record.currentStep = "Uploading selected backup manifest";
+      record.progress = 95;
+      await record.save();
+      const artifact = await this.backups.uploadAdminPanelArtifact(
+        manifestPath,
+        `nimbus-selected-manifest-${record._id!.toString()}.json`,
+        ["Panel", "Backup Manifest"],
+        user,
+      );
+      record.manifestFileId = artifact.fileId;
+      record.serviceBackupIds = backupIds;
+      record.manifest = manifest;
+      record.totalSizeBytes = serviceBackups.reduce((sum, item) => sum + (Number(item.sizeBytes) || 0), 0);
+      record.status = failures ? "partial" : "completed";
+      record.currentStep = record.status === "completed" ? "Completed" : "Completed with exclusions or failures";
+      record.progress = 100;
+      record.completedAt = new Date();
+      await record.save();
+      await this.audit.log({
+        actorId: user.id,
+        action: record.mode === "customers" ? "backups.panel.customers.completed" : "backups.panel.services.completed",
+        targetType: "panel-backup",
+        targetId: record._id!.toString(),
+        detail: `status=${record.status}; services=${selected.length}`,
+        sensitive: true,
+      }).catch(() => undefined);
+    } catch (error) {
+      record.status = "failed";
+      record.currentStep = "Failed";
+      record.error = error instanceof Error ? error.message : "Selected backup failed";
+      await record.save();
+      await this.audit.log({
+        actorId: user.id,
+        action: "backups.panel.selected.failed",
+        targetType: "panel-backup",
+        targetId: record._id!.toString(),
+        sensitive: true,
+      }).catch(() => undefined);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
