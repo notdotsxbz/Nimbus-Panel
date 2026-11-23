@@ -80,8 +80,9 @@ export default function CustomerBackups() {
   const restore = async (id: string) => {
     if (!confirm("Restore this backup? The service may be stopped briefly. Its current data will be preserved as a safety copy, and the selected backup will replace the active service files.")) return;
     try {
-      await api.post(`/backups/${id}/restore`, { confirm: true });
-      show("Backup restored. Previous service data was preserved as a safety copy.", "ok");
+      const result = await api.post<{ jobId: string }>(`/backups/${id}/restore`, { confirm: true });
+      show(`Restore job queued (${result.jobId.slice(0, 8)}). Track progress in Backup jobs.`, "info");
+      await load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Restore failed", "err");
     }
