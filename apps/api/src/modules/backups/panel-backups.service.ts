@@ -6,15 +6,15 @@ import { tmpdir } from "node:os";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
-import { AuthUser } from "../../common/auth.decorators";
+import type { AuthUser } from "../../common/auth.decorators";
 import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
 import { IntegrationsService } from "../integrations/integrations.service";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
-import { User, UserDocument } from "../users/user.schema";
+import { User, type UserDocument } from "../users/user.schema";
 import { BackupsService } from "./backups.service";
-import { PanelBackup, PanelBackupDocument } from "./panel-backup.schema";
+import { PanelBackup, type PanelBackupDocument } from "./panel-backup.schema";
 
 const execFileAsync = promisify(execFile);
 
