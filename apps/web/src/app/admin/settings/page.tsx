@@ -108,6 +108,26 @@ export default function AdminSettings() {
     } catch (error) { show(error instanceof Error ? error.message : "Could not start Google connection", "err"); setBusy(false); }
   };
 
+  const testDrive = async () => {
+    setBusy(true);
+    try {
+      const result = await api.post<{ connected: boolean; accountEmail?: string | null }>("/integrations/google-drive/test");
+      show(`Admin Google Drive verified${result.accountEmail ? ` as ${result.accountEmail}` : ""}`, "ok");
+    } catch (error) { show(error instanceof Error ? error.message : "Google Drive test failed", "err"); }
+    finally { setBusy(false); }
+  };
+
+  const openDriveFolder = async () => {
+    const tab = window.open("about:blank", "_blank");
+    setBusy(true);
+    try {
+      const result = await api.get<{ url: string }>("/backups/drive-folder");
+      if (tab) tab.location.href = result.url;
+      else show("Allow pop-ups to open your Google Drive folder", "err");
+    } catch (error) { tab?.close(); show(error instanceof Error ? error.message : "Could not open backup folder", "err"); }
+    finally { setBusy(false); }
+  };
+
   const disconnectDrive = async () => {
     if (!window.confirm("Disconnect Google Drive? New Drive backups will no longer upload.")) return;
     setBusy(true);
@@ -159,8 +179,10 @@ export default function AdminSettings() {
           <p className="mt-2 text-sm text-muted">This separate Admin Google Drive is used for Admin backup operations. Customer accounts connect their own Drive with individual encrypted tokens. In Google Cloud Console, authorize both redirect URIs: https://panel.qubixhost.cyou/admin/settings and https://panel.qubixhost.cyou/dashboard/backups. Nimbus encrypts archives and verifies uploads.</p>
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
           {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Admin account: {drive.accountEmail}</p> : null}
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
+            {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void testDrive()}>Test Connection</button> : null}
+            {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void openDriveFolder()}>Open Backup Folder</button> : null}
             {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
           </div>
         </GlassCard>
