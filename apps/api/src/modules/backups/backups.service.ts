@@ -775,7 +775,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     let backupIds = dto.backupIds ?? [];
     if (dto.mode === "selected-customer") {
       if (!dto.customerId || !Types.ObjectId.isValid(dto.customerId)) throw new BadRequestException("Select a valid customer");
-      const backups = await this.backups.find({ ownerId: new Types.ObjectId(dto.customerId), status: "completed" }).sort({ createdAt: -1 });
+      const backups = await this.backups.find({ ownerId: new Types.ObjectId(dto.customerId), status: "completed", trigger: { $in: ["manual", "scheduled"] } }).sort({ createdAt: -1 });
       const latestByService = new Map<string, string>();
       for (const backup of backups) {
         const serviceId = backup.serviceId.toString();
