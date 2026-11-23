@@ -42,13 +42,13 @@ export class IntegrationsController {
   }
 
   @Post("google-drive/connect")
-  @Roles("owner")
+  @Roles("owner", "admin")
   beginGoogleDriveConnect(@Body() dto: { clientId: string; clientSecret: string }, @CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
     return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user.id, origin);
   }
 
   @Post("google-drive/exchange")
-  @Roles("owner")
+  @Roles("owner", "admin")
   exchangeGoogleDriveCode(@Body() dto: { code: string; state: string }, @CurrentUser() user: AuthUser) {
     return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state, user.id);
   }
@@ -78,7 +78,7 @@ export class IntegrationsController {
   }
 
   @Delete("google-drive")
-  @Roles("owner")
+  @Roles("owner", "admin")
   disconnectGoogleDrive(@CurrentUser() user: AuthUser) {
     return this.integrations.disconnectGoogleDrive(user.id);
   }
