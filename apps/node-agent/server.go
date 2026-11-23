@@ -387,11 +387,21 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if !regexp.MustCompile("^[a-fA-F0-9]{24}$").MatchString(req.BackupID) {
+		http.Error(w, "invalid backup id", http.StatusBadRequest)
+		return
+	}
 	backupDir := filepath.Join(s.cfg.DataDir, "backups")
 	_ = os.MkdirAll(backupDir, 0o750)
 	target := filepath.Join(backupDir, req.BackupID+".tar.zst")
 
 	switch op {
+	case "delete":
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			http.Error(w, "could not delete backup archive", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"deleted": true, "backupId": req.BackupID})
 	case "create":
 		out, err := os.Create(target)
 		if err != nil {
