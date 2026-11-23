@@ -454,7 +454,7 @@ func minecraftLogHasVersion(logs, expected string) bool {
 func versionOutputHasExpected(output, expected string) bool {
 	expected = strings.TrimSpace(strings.TrimPrefix(expected, "v"))
 	if expected == "" || len(expected) > 100 { return false }
-	pattern := regexp.MustCompile(`(?i)(?:^|[^0-9])v?` + regexp.QuoteMeta(expected) + `(?:$|[^0-9])`)
+	pattern := regexp.MustCompile(`(?i)(^|[^0-9])v?` + regexp.QuoteMeta(expected) + `($|[^0-9])`)
 	return pattern.MatchString(output)
 }
 
@@ -809,7 +809,7 @@ func minecraftLogHasVersion(logs, expected string) bool {
 func versionOutputHasExpected(output, expected string) bool {
 	expected = strings.TrimSpace(strings.TrimPrefix(expected, "v"))
 	if expected == "" || len(expected) > 100 { return false }
-	pattern := regexp.MustCompile(`(?i)(?:^|[^0-9])v?` + regexp.QuoteMeta(expected) + `(?:$|[^0-9])`)
+	pattern := regexp.MustCompile(`(?i)(^|[^0-9])v?` + regexp.QuoteMeta(expected) + `($|[^0-9])`)
 	return pattern.MatchString(output)
 }
 
@@ -1164,7 +1164,7 @@ func minecraftLogHasVersion(logs, expected string) bool {
 func versionOutputHasExpected(output, expected string) bool {
 	expected = strings.TrimSpace(strings.TrimPrefix(expected, "v"))
 	if expected == "" || len(expected) > 100 { return false }
-	pattern := regexp.MustCompile(`(?i)(?:^|[^0-9])v?` + regexp.QuoteMeta(expected) + `(?:$|[^0-9])`)
+	pattern := regexp.MustCompile(`(?i)(^|[^0-9])v?` + regexp.QuoteMeta(expected) + `($|[^0-9])`)
 	return pattern.MatchString(output)
 }
 
