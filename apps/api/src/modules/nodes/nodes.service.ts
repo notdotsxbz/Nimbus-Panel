@@ -389,6 +389,41 @@ export class NodesService {
     return response.data as Readable;
   }
 
+  /** Stream a verified Drive archive to the node's private backup store. */
+  async uploadBackupArchiveStream(
+    node: NodeDocument,
+    serviceId: string,
+    backupId: string,
+    checksum: string,
+    sizeBytes: number,
+    archive: Readable,
+  ): Promise<{ uploaded: boolean; alreadyPresent?: boolean; checksum: string; sizeBytes: number }> {
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
+    const params = new URLSearchParams({
+      serviceId,
+      backupId,
+      checksum,
+      sizeBytes: String(sizeBytes),
+    });
+    const response = await axios({
+      method: "PUT",
+      url: `${node.agentUrl}/backups/upload?${params.toString()}`,
+      data: archive,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-nimbus-node": node._id!.toString(),
+        "content-type": "application/octet-stream",
+        "content-length": String(sizeBytes),
+      },
+      timeout: 10 * 60 * 1000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
+    });
+    return response.data as { uploaded: boolean; alreadyPresent?: boolean; checksum: string; sizeBytes: number };
+  }
+
   async markOffline(id: string) {
     await this.nodes.updateOne({ _id: id }, { online: false });
   }
