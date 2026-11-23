@@ -6,6 +6,8 @@ export class IntegrationSetting {
   @Prop({ required: true, unique: true }) key!: string;
   @Prop({ required: true }) encryptedValue!: string;
   @Prop() projectId?: string;
+  @Prop() accountEmail?: string;
+  @Prop() folderId?: string;
   @Prop() connectedAt?: Date;
   @Prop() updatedBy?: string;
 }
