@@ -21,6 +21,13 @@ interface PublicSettings {
   defaultAnimationPreset: string;
 }
 
+interface DriveStatus {
+  connected: boolean;
+  connectedAt: string | null;
+  accountEmail?: string | null;
+  reconnectRequired?: boolean;
+}
+
 interface MeAppearance {
   themeKey: string;
   colorMode: "light" | "dark" | "system";
@@ -35,6 +42,8 @@ export default function AccountSettings() {
   const [themes, setThemes] = useState<ThemeRow[]>([]);
   const [pub, setPub] = useState<PublicSettings | null>(null);
   const [prefs, setPrefs] = useState<MeAppearance | null>(null);
+  const [drive, setDrive] = useState<DriveStatus>({ connected: false, connectedAt: null });
+  const [driveBusy, setDriveBusy] = useState(false);
   const { show, node } = useToast();
   // Visible Back navigation — Settings must never be a dead end.
   const goBack = () => {
@@ -64,6 +73,53 @@ export default function AccountSettings() {
       }
     })();
   }, [router]);
+
+  useEffect(() => {
+    void api.get<DriveStatus>("/integrations/customer/google-drive").then(setDrive).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (!code || !state) return;
+    setDriveBusy(true);
+    api.post("/integrations/customer/google-drive/exchange", { code, state })
+      .then(() => {
+        show("Your Google Drive is connected. Your backups will be stored in your Drive.", "ok");
+        return api.get<DriveStatus>("/integrations/customer/google-drive").then(setDrive);
+      })
+      .catch((error) => show(error instanceof Error ? error.message : "Google Drive connection failed", "err"))
+      .finally(() => {
+        setDriveBusy(false);
+        router.replace("/account");
+      });
+  }, [router, show]);
+
+  const connectDrive = async () => {
+    setDriveBusy(true);
+    try {
+      const result = await api.post<{ url: string }>("/integrations/customer/google-drive/connect");
+      window.location.href = result.url;
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not start Google Drive connection", "err");
+      setDriveBusy(false);
+    }
+  };
+
+  const disconnectDrive = async () => {
+    if (!window.confirm("Disconnect your Google Drive? Existing Drive backups will not be deleted.")) return;
+    setDriveBusy(true);
+    try {
+      await api.del("/integrations/customer/google-drive");
+      setDrive({ connected: false, connectedAt: null });
+      show("Google Drive disconnected. Existing backups remain in your Drive.", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not disconnect Google Drive", "err");
+    } finally {
+      setDriveBusy(false);
+    }
+  };
 
   const savePrefs = async (patch: Partial<MeAppearance>) => {
     try {
@@ -124,6 +180,25 @@ export default function AccountSettings() {
           {user ? `${user.email} · ${user.role}` : "Loading…"}
         </p>
       </header>
+
+      {user?.role === "customer" ? (
+        <GlassCard className="p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Personal Google Drive</h2>
+              <p className="mt-1 text-sm text-muted">Your service backups are stored in your own Google Drive, separate from the panel administrator's backups.</p>
+              {drive.accountEmail ? <p className="mt-2 text-xs text-muted">{drive.accountEmail}</p> : null}
+              {drive.connectedAt ? <p className="mt-1 text-xs text-muted">Connected {new Date(drive.connectedAt).toLocaleString()}</p> : null}
+              {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">Authorization expired. Reconnect your Drive.</p> : null}
+            </div>
+            <div className="flex gap-2">
+              <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected" : "Not connected"}</span>
+              <button className="btn-primary" disabled={driveBusy} onClick={() => void connectDrive()}>{driveBusy ? "Please wait…" : drive.connected ? "Reconnect" : "Connect Google Drive"}</button>
+              {drive.connected ? <button className="btn-ghost" disabled={driveBusy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
+            </div>
+          </div>
+        </GlassCard>
+      ) : null}
 
       <GlassCard className="p-6">
         <h2 className="mb-4 font-semibold">Change password</h2>
