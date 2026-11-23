@@ -403,6 +403,12 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 		w.Header().Set("Content-Disposition", "attachment; filename="+req.BackupID+".tar")
 		_, _ = io.Copy(w, in)
+	case "delete":
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			http.Error(w, "could not delete local backup archive", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"deleted": true})
 	case "restore":
 		if req.Checksum == "" {
 			http.Error(w, "expected archive checksum is required", http.StatusBadRequest)
