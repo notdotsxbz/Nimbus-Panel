@@ -370,6 +370,31 @@ export class NodesService {
     return Buffer.from(response.data);
   }
 
+  /** Stream a verified Drive archive back to its owning node for staged restoration. */
+  async uploadBackupArchive(node: NodeDocument, serviceId: string, backupId: string, archive: Buffer, checksum: string): Promise<void> {
+    if (!/^[a-f\\d]{24}$/i.test(serviceId) || !/^[a-f\\d]{24}$/i.test(backupId)) {
+      throw new BadRequestException("Invalid service or backup identifier");
+    }
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
+    await axios({
+      method: "PUT",
+      url: `${node.agentUrl}/backups/restore-upload/${encodeURIComponent(serviceId)}/${encodeURIComponent(backupId)}`,
+      data: archive,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-nimbus-node": node._id!.toString(),
+        "x-nimbus-sha256": checksum,
+        "content-type": "application/octet-stream",
+        "content-length": String(archive.length),
+      },
+      timeout: 10 * 60 * 1000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
+    });
+  }
+
   async markOffline(id: string) {
     await this.nodes.updateOne({ _id: id }, { online: false });
   }
