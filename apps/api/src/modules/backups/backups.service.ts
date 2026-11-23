@@ -4,7 +4,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import axios from "axios";
 import { AuditService } from "../audit/audit.service";
-import { Backup, BackupDocument, BackupSchedule, BackupScheduleDocument } from "./backup.schema";
+import { Backup, BackupDocument, BackupSchedule, BackupScheduleDocument, BackupJob, BackupJobDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
 import { IntegrationsService } from "../integrations/integrations.service";
@@ -22,6 +22,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectModel(Backup.name) private readonly backups: Model<BackupDocument>,
     @InjectModel(BackupSchedule.name) private readonly schedules: Model<BackupScheduleDocument>,
+    @InjectModel(BackupJob.name) private readonly jobs: Model<BackupJobDocument>,
     private readonly nodes: NodesService,
     private readonly services: ServicesService,
     private readonly audit: AuditService,
@@ -30,16 +31,22 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   private scheduleTimer?: NodeJS.Timeout;
+  private backupJobTimer?: NodeJS.Timeout;
   private scheduleWorkerRunning = false;
+  private backupJobWorkerRunning = false;
 
   onModuleInit() {
     this.scheduleTimer = setInterval(() => { void this.runScheduledBackups(); }, 30_000);
     this.scheduleTimer.unref?.();
+    this.backupJobTimer = setInterval(() => { void this.runBackupJobs(); }, 10_000);
+    this.backupJobTimer.unref?.();
     void this.runScheduledBackups();
+    void this.runBackupJobs();
   }
 
   onModuleDestroy() {
     if (this.scheduleTimer) clearInterval(this.scheduleTimer);
+    if (this.backupJobTimer) clearInterval(this.backupJobTimer);
   }
 
   private nextScheduleRun(frequency: string, time: string, from = new Date()): Date | undefined {
@@ -178,11 +185,118 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async enqueueBackupJob(
+    serviceIds: string[],
+    user: { id: string; role: string },
+    trigger = "manual",
+    destination = "gdrive",
+  ) {
+    if (!serviceIds.length || serviceIds.length > 500) throw new BadRequestException("Select between 1 and 500 services");
+    if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
+    if (user.role === "customer" && destination !== "gdrive") throw new BadRequestException("Customer backups must use the customer's connected Google Drive");
+    const uniqueIds = [...new Set(serviceIds)];
+    const services = [];
+    for (const serviceId of uniqueIds) services.push(await this.services.get(serviceId, user as never));
+    const ownerType = user.role === "customer" ? "customer" : "admin";
+    const job = await this.jobs.create({
+      requestedBy: new Types.ObjectId(user.id),
+      ownerId: new Types.ObjectId(user.id),
+      ownerType,
+      requesterRole: user.role,
+      serviceIds: services.map((service) => service._id!),
+      trigger,
+      destination,
+      status: "queued",
+      total: services.length,
+      completed: 0,
+      failed: 0,
+      results: [],
+    });
+    return { jobId: job._id!.toString(), status: job.status, total: job.total };
+  }
+
+  async listJobs(user: { id: string; role: string }) {
+    const filter = user.role === "customer" ? { ownerId: new Types.ObjectId(user.id) } : {};
+    return this.jobs.find(filter).sort({ createdAt: -1 }).limit(50);
+  }
+
+  async getJob(jobId: string, user: { id: string; role: string }) {
+    const filter: Record<string, unknown> = { _id: jobId };
+    if (user.role === "customer") filter.ownerId = new Types.ObjectId(user.id);
+    const job = await this.jobs.findOne(filter);
+    if (!job) throw new NotFoundException("Backup job not found");
+    return job;
+  }
+
+  private async runBackupJobs() {
+    if (this.backupJobWorkerRunning) return;
+    this.backupJobWorkerRunning = true;
+    try {
+      const now = new Date();
+      const job = await this.jobs.findOneAndUpdate(
+        { $or: [{ status: "queued" }, { status: "running", leaseUntil: { $lt: now } }] },
+        { $set: { status: "running", leaseUntil: new Date(now.getTime() + 2 * 60 * 60 * 1000), startedAt: now } },
+        { sort: { createdAt: 1 }, new: true },
+      );
+      if (!job) return;
+      const user = { id: job.requestedBy.toString(), role: job.requesterRole };
+      const completedServiceIds = new Set((job.results ?? []).map((result) => result.serviceId));
+      for (const serviceObjectId of job.serviceIds) {
+        const serviceId = serviceObjectId.toString();
+        if (completedServiceIds.has(serviceId)) continue;
+        job.currentServiceId = serviceObjectId;
+        job.leaseUntil = new Date(Date.now() + 2 * 60 * 60 * 1000);
+        await job.save();
+        try {
+          const backup = await this.create(serviceId, user, job.trigger, job.destination, false, job._id!.toString());
+          job.results.push({
+            serviceId,
+            status: backup.status,
+            backupId: backup._id!.toString(),
+            ...(backup.error ? { error: backup.error } : {}),
+          });
+          if (backup.status === "completed") job.completed += 1;
+          else job.failed += 1;
+        } catch (error) {
+          job.results.push({ serviceId, status: "failed", error: error instanceof Error ? error.message : "Backup failed" });
+          job.failed += 1;
+        }
+        await job.save();
+      }
+      job.status = job.failed === job.total ? "failed" : "completed";
+      job.currentServiceId = undefined;
+      job.leaseUntil = undefined;
+      job.completedAt = new Date();
+      await job.save();
+      if (job.requesterRole === "customer") {
+        await this.notifications.notify(
+          job.ownerId.toString(),
+          "backup",
+          job.status === "completed" ? "Backup job completed" : "Backup job failed",
+          `${job.completed} of ${job.total} service backups completed; ${job.failed} failed.`,
+        );
+      }
+      await this.audit.log({
+        actorId: job.requestedBy.toString(),
+        action: "backups.job.completed",
+        targetType: "backup-job",
+        targetId: job._id!.toString(),
+        detail: `total=${job.total} completed=${job.completed} failed=${job.failed}`,
+        sensitive: true,
+      });
+    } catch (error) {
+      console.error("[backup-job-worker] worker failed:", error instanceof Error ? error.message : "unknown error");
+    } finally {
+      this.backupJobWorkerRunning = false;
+    }
+  }
+
   async createAdminBatch(
     dto: { mode: "all-customers" | "selected-customers" | "selected-services"; customerIds?: string[]; serviceIds?: string[] },
     user: { id: string; role: string },
   ) {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    if (!["all-customers", "selected-customers", "selected-services"].includes(dto.mode)) throw new BadRequestException("Invalid Admin backup mode");
     const allServices = await this.services.listFor(user as never);
     let selected = allServices;
     if (dto.mode === "selected-services") {
@@ -196,26 +310,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       selected = allServices.filter((service) => ids.has(service.ownerId.toString()));
       if (selected.length === 0) throw new BadRequestException("The selected customers have no eligible services");
     }
-    const results: Array<{ serviceId: string; status: string; backupId?: string; error?: string }> = [];
-    for (const service of selected) {
-      try {
-        const backup = await this.create(service._id!.toString(), user, "manual", "gdrive");
-        results.push({ serviceId: service._id!.toString(), status: backup.status, backupId: backup._id!.toString(), ...(backup.error ? { error: backup.error } : {}) });
-      } catch (error) {
-        results.push({ serviceId: service._id!.toString(), status: "failed", error: error instanceof Error ? error.message : "Backup failed" });
-      }
-    }
-    const completed = results.filter((result) => result.status === "completed").length;
-    const failed = results.length - completed;
-    await this.audit.log({
-      actorId: user.id,
-      action: "backups.admin-batch",
-      targetType: "backup-batch",
-      targetId: new Types.ObjectId().toString(),
-      detail: `mode=${dto.mode} total=${results.length} completed=${completed} failed=${failed}`,
-      sensitive: true,
-    });
-    return { mode: dto.mode, total: results.length, completed, failed, results };
+    if (!selected.length) throw new BadRequestException("No eligible services were found");
+    return this.enqueueBackupJob(selected.map((service) => service._id!.toString()), user, "manual", "gdrive");
   }
 
   async list(user: { id: string; role: string }, serviceId?: string) {
@@ -231,18 +327,23 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type");
   }
 
-  async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local", internal = false) {
+  async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local", internal = false, jobId?: string) {
     if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
     if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
     if (user.role === "customer" && destination !== "gdrive" && !internal) {
       throw new BadRequestException("Customer backups must be stored in the customer's connected Google Drive");
     }
     const service = await this.services.get(serviceId, user as never);
+    if (jobId) {
+      const existing = await this.backups.findOne({ jobId: new Types.ObjectId(jobId), serviceId: service._id });
+      if (existing) return existing;
+    }
     const node = await this.nodes.get(service.nodeId.toString());
     const driveOwnerType = user.role === "customer" ? "customer" : "admin";
     const driveOwnerId = driveOwnerType === "customer" ? service.ownerId : undefined;
     const backup = await this.backups.create({
       serviceId: new Types.ObjectId(serviceId),
+      ...(jobId ? { jobId: new Types.ObjectId(jobId) } : {}),
       ownerId: service.ownerId,
       requestedBy: new Types.ObjectId(user.id),
       driveOwnerType,
