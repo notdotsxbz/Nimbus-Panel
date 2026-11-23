@@ -53,7 +53,19 @@ export class BackupsService {
       status: "running",
       trigger,
       createdBy: new Types.ObjectId(user.id),
+      backupName: service.name + " backup",
+      backupType: "service",
+      verificationStatus: "pending",
+      manifest: {
+        backupId: "pending",
+        serviceId,
+        ownerId: service.ownerId.toString(),
+        serviceName: service.name,
+        serviceType: service.type,
+        createdAt: new Date().toISOString(),
+      },
     });
+    backup.manifest = { ...(backup.manifest ?? {}), backupId: backup._id!.toString() };
     try {
       // Agent creates tar.zst, computes sha256, reports back.
       const result = await this.nodes.agentCall(node, "/backups/create", {
@@ -65,6 +77,11 @@ export class BackupsService {
       if (destination === "gdrive") {
         const archive = await this.nodes.downloadBackupArchive(node, serviceId, backup._id!.toString());
         if (!this.verifyChecksum(archive, result.checksum)) throw new BadRequestException("Downloaded archive failed checksum verification");
+        const ownerRecord = await this.backups.db.collection("users").findOne(
+          { _id: service.ownerId },
+          { projection: { displayName: 1, username: 1, email: 1 } },
+        );
+        const ownerName = String(ownerRecord?.displayName || ownerRecord?.username || ownerRecord?.email || service.ownerId.toString());
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           archive,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
@@ -72,12 +89,19 @@ export class BackupsService {
           driveOwnerId?.toString(),
           service.type,
           service.name,
+          ownerName,
+          service.ownerId.toString(),
+          backup._id!.toString(),
+          result.checksum,
         );
+        backup.verificationStatus = "verified";
       }
+      if (destination !== "gdrive") backup.verificationStatus = "verified";
       backup.status = "completed";
       backup.completedAt = new Date();
     } catch (err) {
       backup.status = "failed";
+      backup.verificationStatus = "failed";
       backup.error = (err as Error).message;
     }
     await backup.save();
@@ -112,14 +136,23 @@ export class BackupsService {
     ownerId: string | undefined,
     serviceType: string,
     serviceName: string,
+    customerFolderName: string,
+    customerId: string,
+    backupId: string,
+    checksum: string,
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
-    const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, ownerId, serviceType, serviceName);
+    const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, ownerId, serviceType, serviceName, customerFolderName);
     let metadata;
     try {
       metadata = await axios.post(
         "https://www.googleapis.com/drive/v3/files?fields=id,name",
-        { name: filename, mimeType: "application/octet-stream", parents: [parentFolderId] },
+        {
+          name: filename,
+          mimeType: "application/octet-stream",
+          parents: [parentFolderId],
+          appProperties: { nimbusBackupId: backupId, nimbusServiceId: filename.split("-")[1] ?? "", nimbusCustomerId: customerId, nimbusSha256: checksum },
+        },
         { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
       );
     } catch (error) {
