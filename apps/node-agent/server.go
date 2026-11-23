@@ -593,7 +593,7 @@ func (s *AgentServer) handleBackupUpload(w http.ResponseWriter, r *http.Request)
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 	hash := sha256.New()
-	size, copyErr := io.Copy(io.MultiWriter(temp, hash), r.Body)
+	size, copyErr := io.Copy(io.MultiWriter(temp, hash), http.MaxBytesReader(w, r.Body, expectedSize+1))
 	syncErr := temp.Sync()
 	closeErr := temp.Close()
 	if copyErr != nil || syncErr != nil || closeErr != nil {
@@ -607,8 +607,8 @@ func (s *AgentServer) handleBackupUpload(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "uploaded archive size or checksum did not match the backup manifest", http.StatusBadRequest)
 		return
 	}
-	if err := os.Rename(tempPath, target); err != nil {
-		http.Error(w, "could not finalize uploaded backup archive", http.StatusInternalServerError)
+	if err := os.Link(tempPath, target); err != nil {
+		http.Error(w, "could not finalize uploaded backup archive without overwriting an existing file", http.StatusConflict)
 		return
 	}
 	writeJSON(w, map[string]any{"uploaded": true, "sizeBytes": size, "checksum": base64Checksum})
