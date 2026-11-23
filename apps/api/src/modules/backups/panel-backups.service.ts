@@ -85,7 +85,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       targetId: record._id!.toString(),
       detail: `queued; customers=${customerCount}; services=${services.length}; nodes=${nodes.length}`,
       sensitive: true,
-    });
+    }).catch(() => undefined);
     return record;
   }
 
@@ -131,7 +131,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       targetId: record._id!.toString(),
       detail: `queued; customers=${record.customerCount}; services=${record.serviceCount}`,
       sensitive: true,
-    });
+    }).catch(() => undefined);
     return record;
   }
 
@@ -362,7 +362,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         targetType: "panel-backup",
         targetId: record._id!.toString(),
         sensitive: true,
-      });
+      }).catch(() => undefined);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
