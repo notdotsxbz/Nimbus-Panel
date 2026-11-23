@@ -4,7 +4,7 @@ import { JwtService } from "@nestjs/jwt";
 import { Model, Types } from "mongoose";
 import * as bcrypt from "bcryptjs";
 import axios from "axios";
-import { Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import { Agent as HttpsAgent } from "node:https";
 import { createHmac, randomBytes, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from "node:crypto";
 import { env } from "../../config/env";
