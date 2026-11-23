@@ -14,22 +14,33 @@ interface BackupRow {
   createdAt: string;
 }
 interface ServiceOption { _id: string; name: string; type: string; }
+interface AdminBackupSummary {
+  customerCount: number;
+  serviceCount: number;
+  nodeCount: number;
+  estimatedBackupSizeBytes: number | null;
+  included: string[];
+  excluded: string[];
+}
 
 export default function AdminBackups() {
   const [rows, setRows] = useState<BackupRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [serviceId, setServiceId] = useState("");
+  const [summary, setSummary] = useState<AdminBackupSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const { show, node } = useToast();
 
   const load = async () => {
     try {
-      const [backupRows, serviceRows] = await Promise.all([
+      const [backupRows, serviceRows, backupSummary] = await Promise.all([
         api.get<BackupRow[]>("/backups"),
         api.get<ServiceOption[]>("/services"),
+        api.get<AdminBackupSummary>("/backups/admin/summary"),
       ]);
       setRows(backupRows);
       setServices(serviceRows);
+      setSummary(backupSummary);
       if (!serviceId && serviceRows.length) setServiceId(serviceRows[0]._id);
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load backups", "err");
@@ -50,6 +61,21 @@ export default function AdminBackups() {
     } finally { setBusy(false); }
   };
 
+  const backupAllCustomerServices = async () => {
+    if (!summary?.serviceCount) return;
+    if (!confirm(`Start Admin Drive backups for ${summary.serviceCount} services across ${summary.customerCount} customers? This does not include the panel database or configuration.`)) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ total: number; completed: number; failed: number }>("/backups/admin/batch", { mode: "all-customers" });
+      show(`Service backups finished: ${result.completed}/${result.total} completed, ${result.failed} failed`, result.failed === 0 ? "ok" : "err");
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Batch backup failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -58,12 +84,26 @@ export default function AdminBackups() {
           <p className="mt-1 text-sm text-muted">Create verified snapshots and upload them to the connected Google Drive.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button className="btn-ghost" disabled={busy || !summary?.serviceCount} onClick={() => void backupAllCustomerServices()}>Back up all customer services</button>
           <select className="input min-w-48" value={serviceId} onChange={e => setServiceId(e.target.value)} aria-label="Select service">
             {services.length === 0 ? <option value="">No services available</option> : services.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
           </select>
           <button className="btn-primary" disabled={busy || !serviceId} onClick={() => void createBackup()}>{busy ? "Creating backup…" : "Back up to Google Drive"}</button>
         </div>
       </header>
+
+      {summary ? (
+        <GlassCard className="p-5">
+          <h2 className="font-semibold">Admin backup scope</h2>
+          <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+            <div><p className="text-xs text-muted">Customers</p><p className="tnum text-xl font-semibold">{summary.customerCount}</p></div>
+            <div><p className="text-xs text-muted">Services</p><p className="tnum text-xl font-semibold">{summary.serviceCount}</p></div>
+            <div><p className="text-xs text-muted">Nodes</p><p className="tnum text-xl font-semibold">{summary.nodeCount}</p></div>
+          </div>
+          <p className="mt-4 text-xs text-muted">Service batch backups include: {summary.included.join(" · ")}</p>
+          <p className="mt-2 text-xs text-amber-400">Not included in this operation: {summary.excluded.join(" · ")}. This is not a full panel/database backup.</p>
+        </GlassCard>
+      ) : null}
 
       <GlassCard className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
