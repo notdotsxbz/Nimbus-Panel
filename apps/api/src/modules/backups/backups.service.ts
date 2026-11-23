@@ -203,6 +203,10 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (!serviceIds.length || serviceIds.length > 200) throw new BadRequestException("Select between 1 and 200 services");
     if (destination !== "gdrive") throw new BadRequestException("User-requested backups must be stored in Google Drive");
     if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
+    const driveStatus = user.role === "customer"
+      ? await this.integrations.googleDriveStatus("customer", user.id)
+      : await this.integrations.googleDriveStatus("admin");
+    if (!driveStatus.connected) throw new BadRequestException("Connect the correct Google Drive account before starting backups");
     const uniqueIds = [...new Set(serviceIds)];
     const requested = new Set(uniqueIds);
     const available = await this.services.listFor(user as never);
@@ -491,6 +495,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
 
   async createFullPanelBackup(user: { id: string; role: string }) {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    const driveStatus = await this.integrations.googleDriveStatus("admin");
+    if (!driveStatus.connected) throw new BadRequestException("Connect the Admin Google Drive before creating a Full Panel Backup");
     const services = await this.services.listFor(user as never);
     if (services.length > 200) throw new BadRequestException("This panel has more than 200 services; create service batches in smaller groups.");
     const job = await this.jobs.create({
