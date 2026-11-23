@@ -456,6 +456,96 @@ export class BackupsService {
     }
   }
 
+  async retryUpload(backupId: string, user: AuthUser) {
+    const backup = await this.backups.findById(backupId);
+    if (!backup) throw new NotFoundException("Backup not found");
+    const service = await this.services.get(backup.serviceId.toString(), user);
+    if (backup.driveOwnerType !== (user.role === "customer" ? "customer" : "admin")) throw new NotFoundException("Backup not found");
+    if (backup.destination !== "gdrive" || backup.status !== "failed" || backup.remoteFileId || !backup.checksum || !backup.sizeBytes) {
+      throw new BadRequestException("This backup does not have a preserved source archive that can be retried");
+    }
+    this.assertBackupEncryptionConfigured();
+    const node = await this.nodes.get(service.nodeId.toString());
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-backup-retry-"));
+    const archivePath = join(tempDir, `${backupId}.tar`);
+    const encryptedPath = join(tempDir, `${backupId}.tar.enc`);
+    try {
+      const hash = createHash("sha256");
+      const digestStream = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      });
+      backup.currentStep = "Rechecking preserved node archive";
+      backup.progress = 10;
+      await backup.save();
+      await pipeline(
+        await this.nodes.downloadBackupArchiveStream(node, service._id!.toString(), backupId),
+        digestStream,
+        createWriteStream(archivePath, { flags: "wx", mode: 0o600 }),
+      );
+      const digest = hash.digest();
+      const archiveInfo = await stat(archivePath);
+      if (archiveInfo.size !== backup.sizeBytes ||
+        (digest.toString("base64") !== backup.checksum && digest.toString("hex") !== backup.checksum)) {
+        throw new BadRequestException("Preserved node archive failed SHA-256 verification");
+      }
+      backup.currentStep = "Encrypting preserved archive";
+      backup.progress = 35;
+      await backup.save();
+      const encrypted = await this.encryptArchiveFile(archivePath, encryptedPath);
+      const customer = await this.users.findById(service.ownerId).select("displayName username").lean();
+      const driveOwner = user.role === "customer"
+        ? { id: service.ownerId.toString(), role: "customer" as const }
+        : user;
+      backup.currentStep = "Retrying Google Drive upload";
+      backup.progress = 50;
+      await backup.save();
+      backup.remoteFileId = await this.uploadGoogleDriveArchive(
+        encryptedPath,
+        `nimbus-${service._id!.toString()}-${backupId}.tar.enc`,
+        driveOwner,
+        {
+          serviceId: service._id!.toString(),
+          serviceName: service.name,
+          serviceType: String(service.type),
+          customerName: customer?.displayName || customer?.username || "customer",
+          customerId: service.ownerId.toString(),
+        },
+        async percent => {
+          backup.progress = 50 + Math.round(percent * 0.45);
+          backup.currentStep = "Uploading to Google Drive";
+          await backup.save();
+        },
+      );
+      backup.encryptionAlgorithm = "aes-256-gcm";
+      backup.encryptionIv = encrypted.iv;
+      backup.encryptionTag = encrypted.tag;
+      backup.storedSizeBytes = encrypted.sizeBytes;
+      backup.status = "completed";
+      backup.progress = 100;
+      backup.currentStep = "Completed";
+      backup.completedAt = new Date();
+      backup.error = undefined;
+      await backup.save();
+      await this.nodes.agentCall(node, "/backups/delete", { serviceId: service._id!.toString(), backupId }).catch(() => {
+        backup.localArchiveCleanupPending = true;
+        return backup.save();
+      });
+      await this.audit.log({ actorId: user.id, action: "backups.retry-upload", targetId: backupId, sensitive: true }).catch(() => undefined);
+      return backup;
+    } catch (error) {
+      backup.status = "failed";
+      backup.currentStep = "Upload retry failed";
+      backup.error = error instanceof Error ? error.message : "Backup upload retry failed";
+      await backup.save();
+      throw error;
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
   async download(backupId: string, user: AuthUser): Promise<{ stream: import("node:stream").Readable; filename: string; sizeBytes?: number }> {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
