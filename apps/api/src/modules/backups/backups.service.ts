@@ -800,8 +800,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
         const encryptedPath = join(tempDir, "download.enc");
         const response = await axios.get(
-          \`https://www.googleapis.com/drive/v3/files/\${encodeURIComponent(backup.remoteFileId)}?alt=media\`,
-          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 60 * 60 * 1000 },
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+          { headers: { authorization: `Bearer ${accessToken}` }, responseType: "stream", timeout: 60 * 60 * 1000 },
         );
         await pipeline(response.data, createWriteStream(encryptedPath, { mode: 0o600 }));
         if (backup.encryptionMetadata) {
@@ -828,7 +828,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       };
       stream.once("close", () => { void cleanup(); });
       stream.once("error", () => { void cleanup(); });
-      return { stream, filename: \`nimbus-\${safeName}-\${backupId}.tar.gz\`, cleanup };
+      return { stream, filename: `nimbus-${safeName}-${backupId}.tar.gz`, cleanup };
     } catch (error) {
       await rm(tempDir, { recursive: true, force: true });
       throw error;
@@ -989,8 +989,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         const encryptedPath = join(tempDir, "drive-archive.enc");
         const archivePath = join(tempDir, "restore.tar.gz");
         const response = await axios.get(
-          \`https://www.googleapis.com/drive/v3/files/\${encodeURIComponent(backup.remoteFileId)}?alt=media\`,
-          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 60 * 60 * 1000 },
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+          { headers: { authorization: `Bearer ${accessToken}` }, responseType: "stream", timeout: 60 * 60 * 1000 },
         );
         await pipeline(response.data, createWriteStream(encryptedPath, { mode: 0o600 }));
         if (backup.encryptionMetadata) {
@@ -1322,7 +1322,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
     const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, customerId, serviceType, serviceName, customerFolderName);
     const existingQuery = new URLSearchParams({
-      q: \`'\${parentFolderId}' in parents and appProperties has { key='nimbusBackupId' and value='\${backupId}' } and trashed = false\`,
+      q: `'${parentFolderId}' in parents and appProperties has { key='nimbusBackupId' and value='${backupId}' } and trashed = false`,
       pageSize: "1",
       fields: "files(id)",
     });
