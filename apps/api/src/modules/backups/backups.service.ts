@@ -444,7 +444,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     }
     await this.audit.log({ actorId: user.id, action: "backups.download", targetType: "backup", targetId: backupId, sensitive: true });
     const safeName = service.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80) || "service";
-    return { buffer: archive, filename: `nimbus-${safeName}-${backupId}.tar` };
+    return { buffer: archive, filename: `nimbus-${safeName}-${backupId}.tar.gz` };
   }
 
   async delete(backupId: string, user: { id: string; role: string }) {
