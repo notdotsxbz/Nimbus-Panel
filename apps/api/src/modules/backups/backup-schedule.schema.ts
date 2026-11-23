@@ -19,7 +19,7 @@ export class BackupSchedule {
   @Prop({ default: true }) notifyOnCompletion!: boolean;
   @Prop({ default: Date.now, index: true }) nextRunAt!: Date;
   @Prop() lastRunAt?: Date;
-  @Prop() lastStatus?: "completed" | "failed";
+  @Prop({ enum: ["running", "completed", "failed"] }) lastStatus?: "running" | "completed" | "failed";
   @Prop() lastError?: string;
   @Prop() createdAt!: Date;
   @Prop() updatedAt!: Date;
