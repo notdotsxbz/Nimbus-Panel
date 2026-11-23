@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, StreamableFile } from "@nestjs/common";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
 
@@ -17,6 +17,19 @@ export class BackupsController {
     @Body() dto: { serviceId: string; trigger?: string; destination?: string },
   ) {
     return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
+  }
+
+  @Get("schedule")
+  getSchedule(@Query("serviceId") serviceId: string, @CurrentUser() user: AuthUser) {
+    return this.backups.getSchedule(serviceId, user);
+  }
+
+  @Put("schedule")
+  saveSchedule(
+    @Body() dto: { serviceId: string; enabled?: boolean; frequency?: string; time?: string; retention?: number; notifyOnCompletion?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.saveSchedule(dto, user);
   }
 
   @Get(":id/download")
