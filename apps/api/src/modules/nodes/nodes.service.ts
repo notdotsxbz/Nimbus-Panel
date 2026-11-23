@@ -4,6 +4,7 @@ import { JwtService } from "@nestjs/jwt";
 import { Model, Types } from "mongoose";
 import * as bcrypt from "bcryptjs";
 import axios from "axios";
+import { Readable } from "node:stream";
 import { Agent as HttpsAgent } from "node:https";
 import { createHmac, randomBytes, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from "node:crypto";
 import { env } from "../../config/env";
@@ -368,6 +369,24 @@ export class NodesService {
       httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
     });
     return Buffer.from(response.data);
+  }
+
+  /** Stream a node archive to disk or an uploader without buffering it in RAM. */
+  async downloadBackupArchiveStream(node: NodeDocument, serviceId: string, backupId: string): Promise<Readable> {
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
+    const response = await axios({
+      method: "POST",
+      url: `${node.agentUrl}/backups/download`,
+      data: { serviceId, backupId },
+      headers: { authorization: `Bearer ${token}`, "x-nimbus-node": node._id!.toString() },
+      timeout: 10 * 60 * 1000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      responseType: "stream",
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
+    });
+    return response.data as Readable;
   }
 
   async markOffline(id: string) {
