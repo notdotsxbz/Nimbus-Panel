@@ -122,7 +122,7 @@ export class BackupsService {
   async listForRetention(user: AuthUser, serviceId: string) {
     await this.services.get(serviceId, user);
     const filter: Record<string, unknown> = { serviceId: new Types.ObjectId(serviceId) };
-    if (user.role === "customer") filter.driveOwnerType = "customer";
+    filter.driveOwnerType = user.role === "customer" ? "customer" : "admin";
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(5000);
   }
 
@@ -244,7 +244,7 @@ export class BackupsService {
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user);
-    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
+    if (backup.driveOwnerType !== (user.role === "customer" ? "customer" : "admin")) throw new NotFoundException("Backup not found");
     const node = await this.nodes.get(service.nodeId.toString());
     if (!backup.checksum) throw new BadRequestException("Backup has no integrity checksum and cannot be restored safely");
     if (backup.destination === "gdrive") {
