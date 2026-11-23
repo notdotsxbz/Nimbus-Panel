@@ -39,7 +39,12 @@ export class BackupsService {
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type");
   }
 
-  async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local") {
+  async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local", internal = false) {
+    if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
+    if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
+    if (user.role === "customer" && destination !== "gdrive" && !internal) {
+      throw new BadRequestException("Customer backups must be stored in the customer's connected Google Drive");
+    }
     const service = await this.services.get(serviceId, user as never);
     const node = await this.nodes.get(service.nodeId.toString());
     const driveOwnerType = user.role === "customer" ? "customer" : "admin";
@@ -165,8 +170,9 @@ export class BackupsService {
       }
     }
     const node = await this.nodes.get(service.nodeId.toString());
-    await this.nodes.agentCall(node, "/backups/delete", { serviceId: service._id!.toString(), backupId }, "POST", 30_000)
-      .catch(() => undefined); // The remote Drive copy is authoritative; local cache may already be absent.
+    const removeLocal = this.nodes.agentCall(node, "/backups/delete", { serviceId: service._id!.toString(), backupId }, "POST", 30_000);
+    if (backup.remoteFileId) await removeLocal.catch(() => undefined); // Remote Drive is authoritative; local cache may be absent.
+    else await removeLocal;
     await this.backups.deleteOne({ _id: backup._id });
     await this.audit.log({ actorId: user.id, action: "backups.delete", targetType: "backup", targetId: backupId, sensitive: true });
     return { deleted: true };
@@ -206,7 +212,7 @@ export class BackupsService {
     }
 
     // Keep a fresh node-local safety snapshot before replacing service data.
-    const safetyBackup = await this.create(service._id!.toString(), user, "pre-restore", "local");
+    const safetyBackup = await this.create(service._id!.toString(), user, "pre-restore", "local", true);
     if (safetyBackup.status !== "completed") {
       throw new BadRequestException("Could not create a safety backup. The existing service data was not changed.");
     }
