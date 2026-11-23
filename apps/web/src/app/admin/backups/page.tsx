@@ -6,7 +6,8 @@ import { GlassCard, useToast } from "@/components/glass";
 
 interface BackupRow {
   _id: string;
-  serviceId: { name?: string } | string;
+  serviceId: { name?: string; type?: string } | string;
+  ownerId: { _id?: string; displayName?: string; username?: string; email?: string } | string;
   destination: string;
   status: string;
   trigger: string;
@@ -36,6 +37,8 @@ export default function AdminBackups() {
   const [jobs, setJobs] = useState<BackupJobRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [serviceId, setServiceId] = useState("");
+  const [selectedBackupIds, setSelectedBackupIds] = useState<string[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [summary, setSummary] = useState<AdminBackupSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const { show, node } = useToast();
@@ -87,6 +90,42 @@ export default function AdminBackups() {
     }
   };
 
+  const restoreSelectedBackups = async () => {
+    if (!selectedBackupIds.length) return;
+    if (!confirm(`Restore ${selectedBackupIds.length} selected service backups? Each affected service may be stopped briefly. Current service data will be preserved as safety backups.`)) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ jobId: string; total: number }>("/backups/admin/restore-selection", {
+        mode: "selected-services", backupIds: selectedBackupIds, confirm: true,
+      });
+      show(`Restore job queued for ${result.total} services (${result.jobId.slice(0, 8)})`, "info");
+      setSelectedBackupIds([]);
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Restore could not be queued", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreSelectedCustomer = async () => {
+    if (!selectedCustomerId) return;
+    const customer = customerOptions.find(([id]) => id === selectedCustomerId);
+    if (!confirm(`Restore the latest available backup for each service belonging to ${customer?.[1] ?? "this customer"}? Services may be stopped briefly. Safety backups will be created first.`)) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ jobId: string; total: number }>("/backups/admin/restore-selection", {
+        mode: "selected-customer", customerId: selectedCustomerId, confirm: true,
+      });
+      show(`Customer restore job queued for ${result.total} services (${result.jobId.slice(0, 8)})`, "info");
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Customer restore could not be queued", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const createFullPanelBackup = async () => {
     if (!summary) return;
     if (!confirm(`Create a Full Panel Backup? This includes the panel database, encrypted configuration, system metadata and all ${summary.serviceCount} eligible customer services. VPS/VDS disk images are not included.`)) return;
@@ -101,6 +140,13 @@ export default function AdminBackups() {
       setBusy(false);
     }
   };
+
+  const customerOptions = Array.from(new Map(rows.map((backup) => {
+    const owner = typeof backup.ownerId === "object" ? backup.ownerId : null;
+    const id = owner?._id ?? (typeof backup.ownerId === "string" ? backup.ownerId : "");
+    const label = owner?.displayName ?? owner?.username ?? owner?.email ?? id;
+    return [id, label] as const;
+  }).filter(([id]) => Boolean(id))).entries());
 
   return (
     <div className="space-y-6">
@@ -146,10 +192,24 @@ export default function AdminBackups() {
         </div>
       </GlassCard>
 
+      <GlassCard className="flex flex-wrap items-end gap-3 p-4">
+        <div className="min-w-52 flex-1">
+          <label className="label" htmlFor="restore-customer">Restore latest backups for customer</label>
+          <select id="restore-customer" className="input" value={selectedCustomerId} onChange={(e) => setSelectedCustomerId(e.target.value)}>
+            <option value="">Select customer…</option>
+            {customerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </div>
+        <button className="btn-ghost" disabled={busy || !selectedCustomerId} onClick={() => void restoreSelectedCustomer()}>Restore customer</button>
+        <button className="btn-primary" disabled={busy || !selectedBackupIds.length} onClick={() => void restoreSelectedBackups()}>Restore selected ({selectedBackupIds.length})</button>
+      </GlassCard>
+
       <GlassCard className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-muted">
+              <th className="px-3 py-3 font-medium">Select</th>
+              <th className="px-5 py-3 font-medium">Customer</th>
               <th className="px-5 py-3 font-medium">Service</th>
               <th className="px-5 py-3 font-medium">Destination</th>
               <th className="px-5 py-3 font-medium">Trigger</th>
@@ -161,6 +221,8 @@ export default function AdminBackups() {
           <tbody>
             {rows.map(b => (
               <tr key={b._id} className="border-b border-white/5 last:border-0">
+                <td className="px-3 py-3"><input type="checkbox" disabled={b.status !== "completed"} checked={selectedBackupIds.includes(b._id)} onChange={(e) => setSelectedBackupIds((current) => e.target.checked ? [...current, b._id] : current.filter((id) => id !== b._id))} /></td>
+                <td className="px-5 py-3 text-xs text-muted">{typeof b.ownerId === "object" ? (b.ownerId.displayName ?? b.ownerId.username ?? b.ownerId.email ?? "Customer") : "—"}</td>
                 <td className="px-5 py-3 font-medium">{typeof b.serviceId === "object" ? b.serviceId?.name : "—"}</td>
                 <td className="px-5 py-3 text-xs uppercase text-muted">{b.destination}</td>
                 <td className="px-5 py-3 text-xs text-muted">{b.trigger}</td>
@@ -169,7 +231,7 @@ export default function AdminBackups() {
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
               </tr>
             ))}
-            {rows.length === 0 ? <tr><td colSpan={6} className="px-5 py-10 text-center text-muted">No backups recorded yet</td></tr> : null}
+            {rows.length === 0 ? <tr><td colSpan={8} className="px-5 py-10 text-center text-muted">No backups recorded yet</td></tr> : null}
           </tbody>
         </table>
       </GlassCard>
