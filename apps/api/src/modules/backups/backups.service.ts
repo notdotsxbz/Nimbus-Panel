@@ -121,6 +121,13 @@ export class BackupsService {
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
   }
 
+  async getDriveFolderUrl(user: AuthUser): Promise<{ url: string }> {
+    const accessToken = await this.integrations.googleDriveAccessToken(user);
+    const folderName = user.role === "customer" ? "NIMBUS Backups" : "NIMBUS Full Panel Backups";
+    const folderId = await this.ensureDriveFolder(accessToken, folderName);
+    return { url: `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}` };
+  }
+
   async listForRetention(user: AuthUser, serviceId: string) {
     await this.services.get(serviceId, user);
     const filter: Record<string, unknown> = { serviceId: new Types.ObjectId(serviceId) };
