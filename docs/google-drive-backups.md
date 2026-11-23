@@ -40,4 +40,4 @@ OAuth refresh tokens are also encrypted at rest using the panel integration encr
 
 Service backups use the existing Node Agent's service data directory. Only service types that are actually provisioned and backed by this storage path can be backed up this way. VPS/VDS full-disk snapshots are not supported until a virtualization provider and VM-aware Node Agent are installed; the panel must not label file-only backups as full VM backups.
 
-Large-file resumable streaming, panel database/full-panel backup, scheduled retention, and broader restore workflows are still under development until the associated implementation and tests are complete.
+Per-service schedules, retention and customer service restore are implemented for the current Node Agent service-data path. Large-file resumable streaming, panel database/full-panel backup and selected-customer restore workflows remain under development until the associated implementation and tests are complete.
