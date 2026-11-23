@@ -760,9 +760,12 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       await this.downloadAdminPanelArtifact(artifact, manifestPath);
       const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
         customers?: Array<{ customerId: string; customerName: string; services?: Array<Record<string, any>> }>;
+        serviceBackupResults?: Array<{ serviceId: string; status: string; error?: string }>;
       };
       const backupIds: string[] = [];
-      const failures: string[] = [];
+      const failures: string[] = (manifest.serviceBackupResults ?? [])
+        .filter((result) => result.status !== "completed")
+        .map((result) => result.serviceId + ": " + (result.error ?? "service backup was not completed"));
       for (const customer of manifest.customers ?? []) {
         if (!Types.ObjectId.isValid(customer.customerId)) continue;
         for (const item of customer.services ?? []) {
