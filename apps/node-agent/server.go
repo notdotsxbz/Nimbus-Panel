@@ -510,6 +510,9 @@ func safeExtractArchive(archivePath, destination string) error {
 		if err := rejectSymlinkParents(root, target); err != nil { return err }
 		switch header.Typeflag {
 		case tar.TypeDir:
+			if info, statErr := os.Lstat(target); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("archive attempts to replace a symbolic link with a directory")
+			}
 			if err := os.MkdirAll(target, 0o750); err != nil { return err }
 		case tar.TypeReg, tar.TypeRegA:
 			if header.Size < 0 || expanded > maxExpanded-header.Size { return fmt.Errorf("archive exceeds expanded-size limit") }
