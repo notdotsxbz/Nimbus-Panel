@@ -174,6 +174,11 @@ export class BackupsService {
             driveOwner,
             { serviceId, serviceName: service.name, serviceType: String(service.type), customerName, customerId: service.ownerId.toString() },
           );
+          try {
+            await this.nodes.agentCall(node, "/backups/delete", { serviceId, backupId: backup._id!.toString() });
+          } catch {
+            backup.localArchiveCleanupPending = true;
+          }
         } finally {
           await rm(tempDir, { recursive: true, force: true });
         }
@@ -276,6 +281,10 @@ export class BackupsService {
     if (result.status !== "restored" || result.checksumVerified !== true) {
       throw new BadRequestException("Node Agent did not confirm a verified restore");
     }
+    await this.nodes.agentCall(node, "/backups/delete", {
+      serviceId: service._id!.toString(),
+      backupId,
+    }).catch(() => undefined);
     await this.audit.log({
       actorId: user.id,
       action: "backups.restore",
