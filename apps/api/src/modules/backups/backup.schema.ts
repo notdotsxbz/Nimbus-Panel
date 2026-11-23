@@ -100,7 +100,7 @@ export class BackupJob {
   @Prop({ type: Object }) panelArtifacts?: Record<string, unknown>;
   @Prop({ enum: ["customer", "admin", "owner", "staff"], required: true })
   requesterRole!: string;
-  @Prop({ type: [Types.ObjectId], ref: "Service", required: true })
+  @Prop({ type: [Types.ObjectId], ref: "Service", default: [] })
   serviceIds!: Types.ObjectId[];
   @Prop({ type: [Types.ObjectId], ref: "Backup", default: [] })
   backupIds!: Types.ObjectId[];
