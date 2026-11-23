@@ -281,22 +281,36 @@ export class IntegrationsService implements OnModuleInit {
     return rootId;
   }
 
-  async googleDriveBackupFolder(ownerType: "admin" | "customer", ownerId: string | undefined, serviceType: string, serviceName: string): Promise<string> {
+  async googleDriveBackupFolder(
+    ownerType: "admin" | "customer",
+    ownerId: string | undefined,
+    serviceType: string,
+    serviceName: string,
+    customerFolderName?: string,
+  ): Promise<string> {
     const key = this.googleDriveConnectionKey(ownerType, ownerId);
     const connection = await this.settings.findOne({ key });
     if (!connection) throw new BadRequestException("Connect your Google Drive before creating backups");
     const accessToken = await this.googleDriveAccessToken(ownerType, ownerId);
     const rootId = connection.folderId || await this.ensureDriveRootFolder(accessToken, ownerType);
     if (!connection.folderId) await this.settings.updateOne({ key }, { $set: { folderId: rootId } });
-    const rootCategory = serviceType.toLowerCase().replace(/[-_]/g, " ");
     const categories: Record<string, string> = {
-      minecraft: "Minecraft", discord: "Discord Bots", website: "Websites", backend: "Backends",
-      nodejs: "Node.js", python: "Python", mongodb: "MongoDB", database: "Databases",
-      docker: "Docker", lavalink: "Lavalink", custom: "Custom Applications", vps: "VPS", vds: "VDS",
+      minecraft: "Minecraft", discord: "Discord Bots", "discord-bot": "Discord Bots",
+      website: "Websites", backend: "Backends", nodejs: "Node.js", python: "Python",
+      mongodb: "MongoDB", database: "Databases", docker: "Docker", lavalink: "Lavalink",
+      custom: "Custom Applications", vps: "VPS", vds: "VDS",
     };
-    const categoryName = categories[serviceType.toLowerCase()] ?? (rootCategory ? rootCategory.replace(/\\b\\w/g, (c) => c.toUpperCase()) : "Custom Applications");
-    const categoryId = await this.findOrCreateDriveFolder(accessToken, categoryName, rootId);
-    return this.findOrCreateDriveFolder(accessToken, serviceName.replace(/[\\/\\\\]/g, "-").slice(0, 100) || "Unnamed Service", categoryId);
+    const categoryName = categories[serviceType.toLowerCase()] ?? serviceType.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    let categoryParentId = rootId;
+    if (ownerType === "admin") {
+      const usersFolderId = await this.findOrCreateDriveFolder(accessToken, "Users", rootId);
+      const safeCustomerName = (customerFolderName || "customer").replace(/[^a-zA-Z0-9._ -]/g, "-").trim().slice(0, 70) || "customer";
+      const customerFolderId = await this.findOrCreateDriveFolder(accessToken, safeCustomerName + "_" + (ownerId || "unknown"), usersFolderId);
+      categoryParentId = customerFolderId;
+    }
+    const categoryId = await this.findOrCreateDriveFolder(accessToken, categoryName, categoryParentId);
+    const safeServiceName = serviceName.replace(/[\\/]/g, "-").replace(/[^a-zA-Z0-9._ -]/g, "-").trim().slice(0, 100) || "Unnamed Service";
+    return this.findOrCreateDriveFolder(accessToken, safeServiceName, categoryId);
   }
 
   async exchangeGoogleDriveCode(code: string, state: string, actorId: string) {
