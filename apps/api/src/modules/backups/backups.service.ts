@@ -902,22 +902,32 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const ownerType = backup.driveOwnerType ?? "admin";
       const ownerId = ownerType === "customer" ? backup.driveOwnerId?.toString() : undefined;
       const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
-      let downloaded: Buffer;
+      const tempDir = await mkdtemp(join(tmpdir(), "nimbus-restore-"));
       try {
+        const encryptedPath = join(tempDir, "drive-archive.enc");
+        const archivePath = join(tempDir, "restore.tar.gz");
         const response = await axios.get(
-          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
-          { headers: { authorization: `Bearer ${accessToken}` }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
+          \`https://www.googleapis.com/drive/v3/files/\${encodeURIComponent(backup.remoteFileId)}?alt=media\`,
+          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 10 * 60 * 1000 },
         );
-        downloaded = Buffer.from(response.data);
+        await pipeline(response.data, createWriteStream(encryptedPath, { mode: 0o600 }));
+        if (backup.encryptionMetadata) {
+          await this.decryptArchiveFile(encryptedPath, archivePath, backup.encryptionMetadata);
+        } else {
+          await pipeline(createReadStream(encryptedPath), createWriteStream(archivePath, { mode: 0o600 }));
+        }
+        const archiveDigest = Buffer.from(await this.hashFile(archivePath, "hex"), "hex");
+        if (!backup.checksum || !this.verifyChecksumDigest(archiveDigest, backup.checksum)) {
+          throw new BadRequestException("Backup integrity verification failed. The service was not changed.");
+        }
+        await this.nodes.uploadBackupArchiveFile(node, service._id!.toString(), backupId, archivePath, backup.checksum);
       } catch (error) {
+        if (error instanceof BadRequestException) throw error;
         const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
-        throw new BadRequestException(details ?? "Could not download this backup from Google Drive");
+        throw new BadRequestException(details ?? (error instanceof Error ? error.message : "Could not download and verify this backup from Google Drive"));
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
       }
-      const archive = backup.encryptionMetadata ? this.decryptArchive(downloaded, backup.encryptionMetadata) : downloaded;
-      if (!backup.checksum || !this.verifyChecksum(archive, backup.checksum)) {
-        throw new BadRequestException("Backup integrity verification failed. The service was not changed.");
-      }
-      await this.nodes.uploadBackupArchive(node, service._id!.toString(), backupId, archive, backup.checksum);
     } else if (!backup.checksum) {
       throw new BadRequestException("This backup has no integrity checksum and cannot be safely restored");
     }
@@ -975,6 +985,24 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       authTag: cipher.getAuthTag().toString("base64"),
       keyVersion: "integration-key-v1",
     };
+  }
+
+  private async decryptArchiveFile(
+    encryptedPath: string,
+    destinationPath: string,
+    metadata: { algorithm: string; iv: string; authTag: string; keyVersion: string },
+  ) {
+    if (metadata.algorithm !== "aes-256-gcm" || metadata.keyVersion !== "integration-key-v1") {
+      throw new BadRequestException("This backup uses an unsupported encryption format");
+    }
+    try {
+      const key = createHash("sha256").update(env.integrationEncryptionKey).digest();
+      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(metadata.iv, "base64"));
+      decipher.setAuthTag(Buffer.from(metadata.authTag, "base64"));
+      await pipeline(createReadStream(encryptedPath), decipher, createWriteStream(destinationPath, { mode: 0o600 }));
+    } catch {
+      throw new BadRequestException("Backup decryption or authentication failed. The encryption key may have changed.");
+    }
   }
 
   private async hashFile(path: string, encoding: "hex" | "base64" = "hex"): Promise<string> {
