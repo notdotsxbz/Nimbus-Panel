@@ -61,6 +61,12 @@ export class BackupsController {
     return this.panelBackups.get(id, user);
   }
 
+  @Post("admin/full/:id/prepare-restore")
+  @Roles("owner", "admin")
+  prepareFullPanelRestore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.panelBackups.prepareRestore(id, user);
+  }
+
   @Post("admin/full")
   @Roles("owner", "admin")
   createFullPanelBackup(@CurrentUser() user: AuthUser) {
