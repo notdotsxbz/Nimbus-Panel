@@ -45,3 +45,8 @@ Per-service schedules, retention and customer service restore are implemented fo
 ## Google Cloud OAuth redirect URIs
 
 Configure the panel origin `https://panel.qubixhost.cyou` as the Authorized JavaScript origin, with no path or trailing slash. Add both exact Authorized redirect URIs: `https://panel.qubixhost.cyou/admin/settings` for Admin Drive and `https://panel.qubixhost.cyou/account` for customer personal Drive.
+
+
+## Admin Full Panel scheduling and retention
+
+Admins can configure a daily or weekly Full Panel Backup schedule in Admin → Backups. The selected time is interpreted as UTC. Retention can keep the latest 5, 10, or 30 completed Full Panel backups, or be set to never delete automatically. Retention deletes only Admin Drive backup artifacts and their corresponding backup records; it never deletes customer service source data. Scheduled Full Panel completion/failure notifications follow the saved notification preference.
