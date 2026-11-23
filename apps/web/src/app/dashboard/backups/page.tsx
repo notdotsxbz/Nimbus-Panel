@@ -64,7 +64,7 @@ export default function CustomerBackups() {
     }
   };
 
-  useEffect(() => { void load(); const timer = setInterval(() => { void load(); }, 10000); return () => clearInterval(timer); }, []);
+  useEffect(() => { const requestedServiceId = new URLSearchParams(window.location.search).get("serviceId"); if (requestedServiceId) setServiceId(requestedServiceId); void load(); const timer = setInterval(() => { void load(); }, 10000); return () => clearInterval(timer); }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
