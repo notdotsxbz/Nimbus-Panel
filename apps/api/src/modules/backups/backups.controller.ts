@@ -45,6 +45,27 @@ export class BackupsController {
     return this.scheduler.remove(user, serviceId);
   }
 
+  @Get("admin/full/schedule")
+  @Roles("owner", "admin")
+  getFullBackupSchedule(@CurrentUser() user: AuthUser) {
+    return this.panelBackups.getFullBackupSchedule(user);
+  }
+
+  @Post("admin/full/schedule")
+  @Roles("owner", "admin")
+  upsertFullBackupSchedule(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: { enabled?: boolean; frequency: "daily" | "weekly"; backupTime?: string },
+  ) {
+    return this.panelBackups.upsertFullBackupSchedule(user, dto);
+  }
+
+  @Delete("admin/full/schedule")
+  @Roles("owner", "admin")
+  removeFullBackupSchedule(@CurrentUser() user: AuthUser) {
+    return this.panelBackups.removeFullBackupSchedule(user);
+  }
+
   @Post("admin/selected")
   @Roles("owner", "admin")
   createSelectedBackups(
