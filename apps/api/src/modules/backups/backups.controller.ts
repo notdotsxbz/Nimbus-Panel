@@ -88,7 +88,7 @@ export class BackupsController {
 
   @Post(":id/restore")
   restore(@Param("id") id: string, @Body() dto: { confirm?: boolean }, @CurrentUser() user: AuthUser) {
-    return this.backups.restore(id, user, dto.confirm === true);
+    return this.backups.enqueueRestoreJob([id], user, dto.confirm === true);
   }
 
 
