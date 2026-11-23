@@ -8,7 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 import { AuditService } from "../audit/audit.service";
 import { Backup, BackupDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
@@ -66,7 +66,7 @@ export class BackupsService {
       createdBy: new Types.ObjectId(user.id),
     });
     try {
-      // Agent creates tar.zst, computes sha256, reports back.
+      // Agent creates a plain tar archive and computes its SHA-256 checksum.
       const result = await this.nodes.agentCall(node, "/backups/create", {
         serviceId,
         backupId: backup._id!.toString(),
@@ -90,6 +90,8 @@ export class BackupsService {
             createWriteStream(archivePath, { flags: "wx", mode: 0o600 }),
           );
           const digest = hash.digest();
+          const downloadedInfo = await stat(archivePath);
+          if (Number(result.sizeBytes) !== downloadedInfo.size) throw new BadRequestException("Downloaded archive size does not match the node manifest");
           if (digest.toString("base64") !== result.checksum && digest.toString("hex") !== result.checksum) {
             throw new BadRequestException("Downloaded archive failed checksum verification");
           }
@@ -232,7 +234,7 @@ export class BackupsService {
           const read = await file.read(chunk, 0, length, offset);
           if (read.bytesRead !== length) throw new BadRequestException("Could not read the complete backup archive for upload");
           const end = offset + length - 1;
-          let response;
+          let response: AxiosResponse;
           let attempt = 0;
           while (true) {
             try {
