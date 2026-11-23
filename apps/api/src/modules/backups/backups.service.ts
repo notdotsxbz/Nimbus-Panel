@@ -337,37 +337,55 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Customer backups must be stored in the customer's connected Google Drive");
     }
     const service = await this.services.get(serviceId, user as never);
-    if (jobId) {
-      const existing = await this.backups.findOne({ jobId: new Types.ObjectId(jobId), serviceId: service._id });
-      if (existing) return existing;
-    }
     const node = await this.nodes.get(service.nodeId.toString());
     const driveOwnerType = user.role === "customer" ? "customer" : "admin";
     const driveOwnerId = driveOwnerType === "customer" ? service.ownerId : undefined;
-    const backup = await this.backups.create({
-      serviceId: new Types.ObjectId(serviceId),
-      ...(jobId ? { jobId: new Types.ObjectId(jobId) } : {}),
-      ownerId: service.ownerId,
-      requestedBy: new Types.ObjectId(user.id),
-      driveOwnerType,
-      ...(driveOwnerId ? { driveOwnerId } : {}),
-      destination,
-      status: "running",
-      trigger,
-      createdBy: new Types.ObjectId(user.id),
-      backupName: service.name + " backup",
-      backupType: "service",
-      verificationStatus: "pending",
-      manifest: {
-        backupId: "pending",
+    let backup = jobId
+      ? await this.backups.findOne({ jobId: new Types.ObjectId(jobId), serviceId: service._id })
+      : null;
+    if (backup?.status === "completed") return backup;
+    if (backup) {
+      backup.status = "running";
+      backup.error = undefined;
+      backup.completedAt = undefined;
+      backup.verificationStatus = "pending";
+      backup.backupName = service.name + " backup";
+      backup.backupType = "service";
+      backup.manifest = {
+        backupId: backup._id!.toString(),
         serviceId,
         ownerId: service.ownerId.toString(),
         serviceName: service.name,
         serviceType: service.type,
         createdAt: new Date().toISOString(),
-      },
-    });
-    backup.manifest = { ...(backup.manifest ?? {}), backupId: backup._id!.toString() };
+      };
+      await backup.save();
+    } else {
+      backup = await this.backups.create({
+        serviceId: new Types.ObjectId(serviceId),
+        ...(jobId ? { jobId: new Types.ObjectId(jobId) } : {}),
+        ownerId: service.ownerId,
+        requestedBy: new Types.ObjectId(user.id),
+        driveOwnerType,
+        ...(driveOwnerId ? { driveOwnerId } : {}),
+        destination,
+        status: "running",
+        trigger,
+        createdBy: new Types.ObjectId(user.id),
+        backupName: service.name + " backup",
+        backupType: "service",
+        verificationStatus: "pending",
+        manifest: {
+          backupId: "pending",
+          serviceId,
+          ownerId: service.ownerId.toString(),
+          serviceName: service.name,
+          serviceType: service.type,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      backup.manifest = { ...(backup.manifest ?? {}), backupId: backup._id!.toString() };
+    }
     try {
       // Agent creates tar.zst, computes sha256, reports back.
       const result = await this.nodes.agentCall(node, "/backups/create", {
@@ -676,6 +694,27 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
     const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, customerId, serviceType, serviceName, customerFolderName);
+    const existingQuery = new URLSearchParams({
+      q: `'${parentFolderId}' in parents and appProperties has { key='nimbusBackupId' and value='${backupId}' } and trashed = false`,
+      pageSize: "1",
+      fields: "files(id)",
+    });
+    const existingResponse = await axios.get("https://www.googleapis.com/drive/v3/files?" + existingQuery.toString(), {
+      headers: { authorization: "Bearer " + accessToken },
+    });
+    const existingFileId = (existingResponse.data?.files?.[0]?.id as string | undefined);
+    if (existingFileId) {
+      const existingBytes = await axios.get(
+        "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(existingFileId) + "?alt=media",
+        { headers: { authorization: "Bearer " + accessToken }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
+      );
+      const existingDigest = createHash("sha256").update(Buffer.from(existingBytes.data)).digest("hex");
+      const newDigest = createHash("sha256").update(archive).digest("hex");
+      if (existingDigest === newDigest) return existingFileId;
+      await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(existingFileId), {
+        headers: { authorization: "Bearer " + accessToken },
+      });
+    }
     const fileMetadata = {
       name: filename,
       mimeType: "application/octet-stream",
