@@ -64,6 +64,16 @@ export class BackupsController {
     return this.backups.createAdminBatch(dto, user);
   }
 
+  @Post("admin/full/:id/restore-services")
+  @Roles("owner", "admin")
+  restoreServicesFromFullPanelManifest(
+    @Param("id") id: string,
+    @Body() dto: { confirm?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.restoreServicesFromFullPanelManifest(id, user, dto.confirm === true);
+  }
+
   @Post("admin/full/:id/prepare-restore")
   @Roles("owner", "admin")
   prepareFullPanelRestore(
