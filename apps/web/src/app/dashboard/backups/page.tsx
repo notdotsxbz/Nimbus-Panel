@@ -403,7 +403,7 @@ export default function CustomerBackups() {
                     </div>
                   ) : b.status === "failed" ? (
                     <div className="flex justify-end gap-1">
-                      <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void retryUpload(b._id)}>Retry upload</button>
+                      {b.checksum && b.sizeBytes ? <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void retryUpload(b._id)}>Retry upload</button> : null}
                       <button className="btn-ghost !px-2.5 !py-1 text-xs text-red-400" disabled={busy} onClick={() => void deleteBackup(b._id)}>Delete</button>
                     </div>
                   ) : null}
