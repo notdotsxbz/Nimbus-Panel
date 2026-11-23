@@ -393,13 +393,21 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	backupDir := filepath.Join(s.cfg.DataDir, "backups")
 	_ = os.MkdirAll(backupDir, 0o750)
-	target := filepath.Join(backupDir, req.BackupID+".tar.zst")
+	target := filepath.Join(backupDir, req.BackupID+".tar.gz")
+	legacyTarget := filepath.Join(backupDir, req.BackupID+".tar.zst")
+	if op == "download" || op == "restore" {
+		if _, statErr := os.Stat(target); os.IsNotExist(statErr) {
+			target = legacyTarget
+		}
+	}
 
 	switch op {
 	case "delete":
-		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-			http.Error(w, "could not delete backup archive", http.StatusInternalServerError)
-			return
+		for _, path := range []string{target, legacyTarget} {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				http.Error(w, "could not delete backup archive", http.StatusInternalServerError)
+				return
+			}
 		}
 		writeJSON(w, map[string]any{"deleted": true, "backupId": req.BackupID})
 	case "create":
