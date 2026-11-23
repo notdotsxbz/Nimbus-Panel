@@ -132,7 +132,7 @@ export default function CustomerBackups() {
               <tr key={b._id} className="border-b border-white/5 last:border-0">
                 <td className="px-5 py-3 font-medium">{typeof b.serviceId === "object" ? b.serviceId?.name : "—"}</td>
                 <td className="tnum px-5 py-3 text-xs">{b.sizeBytes ? `${(b.sizeBytes / 1048576).toFixed(1)} MB` : "—"}</td>
-                <td className="px-5 py-3 text-xs">{b.status}</td>
+                <td className="px-5 py-3 text-xs">{b.status === "running" && b.progressStage ? b.progressStage.replace(/_/g, " ") : b.status}</td>
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
                 <td className="px-5 py-3 text-right">
                   {b.status === "completed" ? (
