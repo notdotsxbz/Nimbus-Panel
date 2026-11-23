@@ -16,7 +16,17 @@ export class BackupsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: { serviceId: string; trigger?: string; destination?: string },
   ) {
-    return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
+    return this.backups.enqueueBackupJob([dto.serviceId], user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
+  }
+
+  @Get("jobs")
+  listJobs(@CurrentUser() user: AuthUser) {
+    return this.backups.listJobs(user);
+  }
+
+  @Get("jobs/:id")
+  getJob(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.backups.getJob(id, user);
   }
 
   @Get("admin/summary")
