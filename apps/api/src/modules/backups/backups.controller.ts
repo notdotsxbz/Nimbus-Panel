@@ -64,6 +64,16 @@ export class BackupsController {
     return this.backups.createAdminBatch(dto, user);
   }
 
+  @Post("admin/full/:id/prepare-restore")
+  @Roles("owner", "admin")
+  prepareFullPanelRestore(
+    @Param("id") id: string,
+    @Body() dto: { confirm?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.prepareFullPanelRestore(id, user, dto.confirm === true);
+  }
+
   @Get("schedule")
   getSchedule(@Query("serviceId") serviceId: string, @CurrentUser() user: AuthUser) {
     return this.backups.getSchedule(serviceId, user);
