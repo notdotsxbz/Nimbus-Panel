@@ -19,11 +19,13 @@ fail() { printf '[nimbus-restore] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [[ "$EUID" -eq 0 ]] || fail "Run this script with sudo."
 [[ "$BACKUP_ID" =~ ^[a-f0-9]{24}$ ]] || fail "Usage: sudo bash installer/restore-panel-backup.sh <backup-id>"
-[[ -d "$RESTORE_DIR" ]] || fail "Restore package not found: $RESTORE_DIR"
-[[ -f "$RESTORE_DIR/database.archive.gz" ]] || fail "Database archive is missing."
-[[ -f "$RESTORE_DIR/environment.env" ]] || fail "Environment snapshot is missing."
-[[ -f "$RESTORE_DIR/manifest.json" ]] || fail "Backup manifest is missing."
-[[ -f "$ENV_FILE" ]] || fail "Current .env file is missing."
+[[ -d "$RESTORE_DIR" && ! -L "$RESTORE_DIR" ]] || fail "Restore package not found or is not a regular directory."
+[[ "$(stat -c %U "$RESTORE_DIR")" == "nimbus" ]] || fail "Restore package must be owned by the nimbus service account."
+for staged_file in database.archive.gz environment.env system-metadata.json manifest.json database.archive.gz.sha256 environment.env.sha256 system-metadata.json.sha256; do
+  [[ -f "$RESTORE_DIR/$staged_file" && ! -L "$RESTORE_DIR/$staged_file" ]] || fail "Restore package file is missing or is not a regular file: $staged_file"
+  [[ "$(stat -c %U "$RESTORE_DIR/$staged_file")" == "nimbus" ]] || fail "Restore package file has an unexpected owner: $staged_file"
+done
+[[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] || fail "Current .env file is missing or is not a regular file."
 
 command -v mongodump >/dev/null 2>&1 || fail "mongodump is not installed."
 command -v mongorestore >/dev/null 2>&1 || fail "mongorestore is not installed."
