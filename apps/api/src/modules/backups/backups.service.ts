@@ -610,6 +610,42 @@ export class BackupsService {
     }
   }
 
+  async downloadAdminPanelArtifact(
+    fileId: string,
+    metadata: { checksum: string; encryptionIv: string; encryptionTag: string; sizeBytes: number; storedSizeBytes: number },
+    actor: AuthUser,
+    outputPath: string,
+  ): Promise<void> {
+    if (actor.role !== "owner" && actor.role !== "admin") throw new BadRequestException("Only Admins can download panel backup artifacts");
+    const accessToken = await this.integrations.googleDriveAccessToken(actor);
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-panel-restore-artifact-"));
+    const encryptedPath = join(tempDir, "artifact.enc");
+    try {
+      const response = await axios.get(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          responseType: "stream",
+          timeout: 30 * 60 * 1000,
+          maxContentLength: Infinity,
+        },
+      );
+      await pipeline(response.data, createWriteStream(encryptedPath, { flags: "wx", mode: 0o600 }));
+      const encryptedInfo = await stat(encryptedPath);
+      if (encryptedInfo.size !== metadata.storedSizeBytes) throw new BadRequestException("Encrypted panel artifact size does not match its manifest");
+      const decryptedSize = await this.decryptArchiveFile(
+        encryptedPath,
+        outputPath,
+        metadata.encryptionIv,
+        metadata.encryptionTag,
+        metadata.checksum,
+      );
+      if (decryptedSize !== metadata.sizeBytes) throw new BadRequestException("Decrypted panel artifact size does not match its manifest");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
   private async checksumArchiveFile(filePath: string): Promise<{ checksum: string; sizeBytes: number }> {
     const hash = createHash("sha256");
     let sizeBytes = 0;
