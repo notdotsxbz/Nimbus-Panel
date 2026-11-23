@@ -270,8 +270,7 @@ export default function ServicePage() {
             Create backup now
           </button>
           <p className="mt-3 text-xs text-muted">
-            Snapshots include sha256 integrity checksums. Scheduled backups can be enabled after
-            connecting Google Drive in Account → Backups.
+            Snapshots include sha256 integrity checksums. Connect your personal Google Drive in Account Settings to store your backups privately.
           </p>
         </GlassCard>
       )}
