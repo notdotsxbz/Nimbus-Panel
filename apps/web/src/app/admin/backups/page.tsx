@@ -257,6 +257,46 @@ export default function AdminBackups() {
         </GlassCard>
       ) : null}
 
+      <GlassCard className="space-y-4 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Scheduled Full Panel Backups</h2>
+            <p className="text-xs text-muted">Schedule complete panel snapshots to the Admin Google Drive. Times are UTC.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={fullPanelSchedule.enabled} onChange={(e) => setFullPanelSchedule((current) => ({ ...current, enabled: e.target.checked }))} />
+            Enabled
+          </label>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="space-y-1 text-xs text-muted">Frequency
+            <select className="input w-full" value={fullPanelSchedule.frequency} onChange={(e) => setFullPanelSchedule((current) => ({ ...current, frequency: e.target.value as "daily" | "weekly" }))}>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-xs text-muted">Backup time (UTC)
+            <input className="input w-full" type="time" value={fullPanelSchedule.time} onChange={(e) => setFullPanelSchedule((current) => ({ ...current, time: e.target.value }))} />
+          </label>
+          <label className="space-y-1 text-xs text-muted">Retention
+            <select className="input w-full" value={fullPanelSchedule.retention} onChange={(e) => setFullPanelSchedule((current) => ({ ...current, retention: Number(e.target.value) as 0 | 5 | 10 | 30 }))}>
+              <option value={5}>Keep latest 5</option>
+              <option value={10}>Keep latest 10</option>
+              <option value={30}>Keep latest 30</option>
+              <option value={0}>Never delete automatically</option>
+            </select>
+          </label>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={fullPanelSchedule.notifyOnCompletion} onChange={(e) => setFullPanelSchedule((current) => ({ ...current, notifyOnCompletion: e.target.checked }))} />
+          Notify me when the scheduled backup finishes or fails
+        </label>
+        <p className="text-xs text-muted">Last run: {fullPanelSchedule.lastRunAt ? new Date(fullPanelSchedule.lastRunAt).toLocaleString() : "Never"} · Next run: {fullPanelSchedule.nextRunAt ? new Date(fullPanelSchedule.nextRunAt).toLocaleString() : "Not scheduled"}</p>
+        <div className="flex justify-end">
+          <button className="btn-primary" disabled={busy} onClick={() => void saveFullPanelSchedule()}>Save Full Panel Schedule</button>
+        </div>
+      </GlassCard>
+
       <GlassCard className="p-5">
         <h2 className="font-semibold">Backup jobs</h2>
         <div className="mt-3 space-y-2">
