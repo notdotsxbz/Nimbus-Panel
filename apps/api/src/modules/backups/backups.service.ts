@@ -407,6 +407,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       if (!job) return;
       const user = { id: job.requestedBy.toString(), role: job.requesterRole };
 
+      if (job.mode === "restore-batch") {
+        await this.processRestoreJob(job, user);
+        return;
+      }
+
       if (job.mode === "full-panel") {
         const artifactTasks: Array<[string, () => Promise<Record<string, unknown>>]> = [
           ["database", () => this.createPanelDatabaseArtifact(job._id!.toString())],
@@ -878,6 +883,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     await this.nodes.agentCall(node, "/backups/restore", restoreRequest, "POST", 10 * 60 * 1000);
     await this.nodes.agentCall(node, "/backups/restore-commit", restoreRequest, "POST", 10 * 60 * 1000);
     await this.nodes.agentCall(node, "/backups/delete", restoreRequest, "POST", 30_000).catch(() => undefined);
+    backup.lastRestoredAt = new Date();
+    await backup.save();
     await this.audit.log({
       actorId: user.id,
       action: "backups.restore",
