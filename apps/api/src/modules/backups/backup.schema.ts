@@ -20,6 +20,7 @@ export class Backup {
   @Prop({ enum: ["aes-256-gcm"] }) encryptionAlgorithm?: "aes-256-gcm";
   @Prop() encryptionIv?: string;
   @Prop() encryptionTag?: string;
+  @Prop({ default: false }) localArchiveCleanupPending?: boolean;
   @Prop() remoteFileId?: string;
   @Prop({ type: Types.ObjectId, ref: "User" }) createdBy?: Types.ObjectId;
   @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall"], default: "manual" })
