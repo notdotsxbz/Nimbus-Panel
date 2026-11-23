@@ -73,7 +73,7 @@ export class BackupsService {
           : user;
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           archive,
-          `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
+          `nimbus-${serviceId}-${backup._id!.toString()}.tar`,
           driveOwner,
         );
       }
@@ -100,12 +100,23 @@ export class BackupsService {
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
     const node = await this.nodes.get(service.nodeId.toString());
-    await this.nodes.agentCall(node, "/backups/restore", {
+    if (!backup.checksum) throw new BadRequestException("Backup has no integrity checksum and cannot be restored safely");
+    const result = await this.nodes.agentCall(node, "/backups/restore", {
       serviceId: service._id!.toString(),
       backupId,
+      checksum: backup.checksum,
+    }) as { status?: string; checksumVerified?: boolean; safetyBackupId?: string; safetyBackupChecksum?: string };
+    if (result.status !== "restored" || result.checksumVerified !== true) {
+      throw new BadRequestException("Node Agent did not confirm a verified restore");
+    }
+    await this.audit.log({
+      actorId: user.id,
+      action: "backups.restore",
+      targetId: backupId,
+      detail: result.safetyBackupId ? `safetyBackupId=${result.safetyBackupId}; safetyChecksum=${result.safetyBackupChecksum ?? "unavailable"}` : "restore verified",
+      sensitive: true,
     });
-    await this.audit.log({ actorId: user.id, action: "backups.restore", targetId: backupId, sensitive: true });
-    return { ok: true };
+    return { ok: true, safetyBackupId: result.safetyBackupId ?? null };
   }
 
   private async uploadGoogleDriveArchive(archive: Buffer, filename: string, driveOwner: Pick<AuthUser, "id" | "role">): Promise<string> {
