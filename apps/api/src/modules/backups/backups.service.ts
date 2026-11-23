@@ -8,6 +8,7 @@ import { Backup, BackupDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
 import { IntegrationsService } from "../integrations/integrations.service";
+import { User, UserDocument } from "../users/user.schema";
 import { isStaffRole, type AuthUser } from "../../common/auth.decorators";
 
 /**
@@ -20,6 +21,7 @@ import { isStaffRole, type AuthUser } from "../../common/auth.decorators";
 export class BackupsService {
   constructor(
     @InjectModel(Backup.name) private readonly backups: Model<BackupDocument>,
+    @InjectModel(User.name) private readonly users: Model<UserDocument>,
     private readonly nodes: NodesService,
     private readonly services: ServicesService,
     private readonly audit: AuditService,
@@ -71,11 +73,13 @@ export class BackupsService {
         const driveOwner = user.role === "customer"
           ? { id: service.ownerId.toString(), role: "customer" as const }
           : user;
+        const customer = await this.users.findById(service.ownerId).select("displayName username").lean();
+        const customerName = customer?.displayName || customer?.username || "customer";
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           archive,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar`,
           driveOwner,
-          { serviceId, serviceName: service.name, serviceType: String(service.type) },
+          { serviceId, serviceName: service.name, serviceType: String(service.type), customerName, customerId: service.ownerId.toString() },
         );
       }
       backup.status = "completed";
@@ -149,13 +153,22 @@ export class BackupsService {
     archive: Buffer,
     filename: string,
     driveOwner: Pick<AuthUser, "id" | "role">,
-    service: { serviceId: string; serviceName: string; serviceType: string },
+    service: { serviceId: string; serviceName: string; serviceType: string; customerName: string; customerId: string },
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
     const rootName = driveOwner.role === "customer" ? "NIMBUS Backups" : "NIMBUS Full Panel Backups";
     const rootId = await this.ensureDriveFolder(accessToken, rootName);
-    const categoryId = await this.ensureDriveFolder(accessToken, this.safeFolderName(service.serviceType), rootId);
-    const serviceId = await this.ensureDriveFolder(
+    let parentId = rootId;
+    if (driveOwner.role !== "customer") {
+      const usersFolderId = await this.ensureDriveFolder(accessToken, "Users", rootId);
+      parentId = await this.ensureDriveFolder(
+        accessToken,
+        `${this.safeFolderName(service.customerName)}_${service.customerId}`,
+        usersFolderId,
+      );
+    }
+    const categoryId = await this.ensureDriveFolder(accessToken, this.safeFolderName(service.serviceType), parentId);
+    const serviceFolderId = await this.ensureDriveFolder(
       accessToken,
       `${this.safeFolderName(service.serviceName)}_${service.serviceId}`,
       categoryId,
@@ -164,7 +177,7 @@ export class BackupsService {
     try {
       metadata = await axios.post(
         "https://www.googleapis.com/drive/v3/files?fields=id,name",
-        { name: filename, mimeType: "application/octet-stream", parents: [serviceId] },
+        { name: filename, mimeType: "application/octet-stream", parents: [serviceFolderId] },
         { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
       );
     } catch (error) {
