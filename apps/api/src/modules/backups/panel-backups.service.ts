@@ -15,6 +15,7 @@ import { ServicesService } from "../services/services.service";
 import { User, type UserDocument } from "../users/user.schema";
 import { BackupsService } from "./backups.service";
 import { PanelBackup, type PanelBackupDocument } from "./panel-backup.schema";
+import { PanelBackupSchedule, type PanelBackupScheduleDocument } from "./panel-backup-schedule.schema";
 
 const execFileAsync = promisify(execFile);
 
@@ -22,9 +23,11 @@ const execFileAsync = promisify(execFile);
 export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
   private workerTimer?: ReturnType<typeof setInterval>;
   private workerBusy = false;
+  private scheduleBusy = false;
   constructor(
     @InjectModel(PanelBackup.name) private readonly panelBackups: Model<PanelBackupDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
+    @InjectModel(PanelBackupSchedule.name) private readonly panelSchedules: Model<PanelBackupScheduleDocument>,
     private readonly backups: BackupsService,
     private readonly services: ServicesService,
     private readonly nodes: NodesService,
@@ -50,15 +53,16 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       { status: "running" },
       { $set: { status: "failed", currentStep: "Interrupted", error: "API restarted while this backup was running. Start a new backup." } },
     );
-    this.workerTimer = setInterval(() => { void this.processNextQueuedBackup(); }, 5000);
+    this.workerTimer = setInterval(() => { void this.processNextQueuedBackup(); void this.processDuePanelSchedule(); }, 5000);
     void this.processNextQueuedBackup();
+    void this.processDuePanelSchedule();
   }
 
   onModuleDestroy() {
     if (this.workerTimer) clearInterval(this.workerTimer);
   }
 
-  async createFullPanelBackup(user: AuthUser) {
+  async createFullPanelBackup(user: AuthUser, trigger: "manual" | "scheduled" = "manual") {
     this.assertAdmin(user);
     this.backups.assertBackupEncryptionConfigured();
     await this.integrations.googleDriveAccessToken(user);
@@ -70,6 +74,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     const record = await this.panelBackups.create({
       createdBy: new Types.ObjectId(user.id),
       mode: "full",
+      trigger,
       status: "queued",
       progress: 0,
       currentStep: "Queued",
@@ -87,6 +92,93 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       sensitive: true,
     }).catch(() => undefined);
     return record;
+  }
+
+  private nextPanelScheduleRun(frequency: "daily" | "weekly", backupTime: string, from: Date): Date {
+    const [hours, minutes] = backupTime.split(":").map(Number);
+    const next = new Date(from);
+    next.setUTCHours(hours, minutes, 0, 0);
+    if (next <= from) next.setUTCDate(next.getUTCDate() + (frequency === "weekly" ? 7 : 1));
+    return next;
+  }
+
+  async getFullBackupSchedule(user: AuthUser) {
+    this.assertAdmin(user);
+    return this.panelSchedules.findOne({ ownerId: new Types.ObjectId(user.id) });
+  }
+
+  async upsertFullBackupSchedule(user: AuthUser, dto: { enabled?: boolean; frequency: "daily" | "weekly"; backupTime?: string }) {
+    this.assertAdmin(user);
+    if (!["daily", "weekly"].includes(dto.frequency)) throw new BadRequestException("Frequency must be daily or weekly");
+    const backupTime = dto.backupTime ?? "03:00";
+    if (!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(backupTime)) throw new BadRequestException("Backup time must use HH:mm in UTC");
+    if (dto.enabled !== false) {
+      this.backups.assertBackupEncryptionConfigured();
+      await this.integrations.googleDriveAccessToken(user);
+    }
+    const schedule = await this.panelSchedules.findOneAndUpdate(
+      { ownerId: new Types.ObjectId(user.id) },
+      {
+        $set: {
+          enabled: dto.enabled ?? true,
+          frequency: dto.frequency,
+          backupTime,
+          timezone: "UTC",
+          nextRunAt: this.nextPanelScheduleRun(dto.frequency, backupTime, new Date()),
+          lastError: undefined,
+        },
+        $setOnInsert: { ownerId: new Types.ObjectId(user.id) },
+      },
+      { upsert: true, new: true, runValidators: true },
+    );
+    await this.audit.log({ actorId: user.id, action: "backups.panel.schedule.upsert", targetType: "panel-backup-schedule", targetId: schedule._id!.toString(), sensitive: true }).catch(() => undefined);
+    return schedule;
+  }
+
+  async removeFullBackupSchedule(user: AuthUser) {
+    this.assertAdmin(user);
+    const result = await this.panelSchedules.deleteOne({ ownerId: new Types.ObjectId(user.id) });
+    await this.audit.log({ actorId: user.id, action: "backups.panel.schedule.delete", targetType: "panel-backup-schedule", sensitive: true }).catch(() => undefined);
+    return { deleted: Boolean(result.deletedCount) };
+  }
+
+  private async processDuePanelSchedule() {
+    if (this.scheduleBusy) return;
+    this.scheduleBusy = true;
+    try {
+      const now = new Date();
+      const candidate = await this.panelSchedules.findOne({ enabled: true, nextRunAt: { $lte: now } }).sort({ nextRunAt: 1 });
+      if (!candidate) return;
+      const nextRunAt = this.nextPanelScheduleRun(candidate.frequency, candidate.backupTime, now);
+      const claimed = await this.panelSchedules.findOneAndUpdate(
+        { _id: candidate._id, enabled: true, nextRunAt: candidate.nextRunAt },
+        { $set: { nextRunAt, lastRunAt: now, lastStatus: "queued", lastError: undefined } },
+        { new: true },
+      );
+      if (!claimed) return;
+      const account = await this.users.findById(claimed.ownerId).select("role suspended deletedAt");
+      if (!account || account.suspended || account.deletedAt || (account.role !== "owner" && account.role !== "admin")) {
+        claimed.enabled = false;
+        claimed.lastStatus = "failed";
+        claimed.lastError = "Admin account is unavailable; scheduled full backups disabled.";
+        await claimed.save();
+        return;
+      }
+      const actor = { id: claimed.ownerId.toString(), role: account.role } as AuthUser;
+      try {
+        await this.createFullPanelBackup(actor, "scheduled");
+        claimed.lastStatus = "queued";
+        claimed.lastError = undefined;
+      } catch (error) {
+        claimed.lastStatus = "failed";
+        claimed.lastError = error instanceof Error ? error.message : "Could not queue scheduled full backup";
+      }
+      await claimed.save();
+    } catch {
+      // Keep the schedule worker alive if one schedule cannot be processed.
+    } finally {
+      this.scheduleBusy = false;
+    }
   }
 
   async createSelectedBackup(user: AuthUser, dto: { customerIds?: string[]; serviceIds?: string[] }) {
