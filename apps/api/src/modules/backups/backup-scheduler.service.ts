@@ -105,7 +105,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
       },
       { upsert: true, new: true, runValidators: true },
     );
-    await this.audit.log({ actorId: user.id, action: "backups.schedule.upsert", targetType: "service", targetId: dto.serviceId, sensitive: true });
+    await this.audit.log({ actorId: user.id, action: "backups.schedule.upsert", targetType: "service", targetId: dto.serviceId, sensitive: true }).catch(() => undefined);
     return schedule;
   }
 
@@ -118,7 +118,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
       ownerId: new Types.ObjectId(user.id),
     });
     if (!result.deletedCount) throw new NotFoundException("Backup schedule not found");
-    await this.audit.log({ actorId: user.id, action: "backups.schedule.delete", targetType: "service", targetId: serviceId, sensitive: true });
+    await this.audit.log({ actorId: user.id, action: "backups.schedule.delete", targetType: "service", targetId: serviceId, sensitive: true }).catch(() => undefined);
     return { deleted: true };
   }
 
