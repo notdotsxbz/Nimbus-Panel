@@ -212,11 +212,13 @@ export default function CustomerBackups() {
   };
 
   const restore = async (id: string) => {
-    if (!confirm("Restore this backup? The current service data may be replaced after the restore is verified.")) return;
+    if (!confirm("Restore this backup? Current service files will be replaced. Nimbus will create a safety snapshot first.")) return;
     setBusy(true);
     try {
-      await api.post(`/backups/${id}/restore`);
-      show("Restore request completed", "ok");
+      const result = await api.post<{ safetyBackupStored?: boolean; safetyBackupError?: string }>(`/backups/${id}/restore`);
+      if (result.safetyBackupStored) show("Restore completed. A safety backup was saved to your Google Drive.", "ok");
+      else show(`Restore completed, but the safety backup needs attention: ${result.safetyBackupError ?? "check the node backup folder"}`, "err");
+      await load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Restore failed", "err");
     } finally { setBusy(false); }
