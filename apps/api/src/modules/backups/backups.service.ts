@@ -10,6 +10,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import axios, { type AxiosResponse } from "axios";
 import { AuditService } from "../audit/audit.service";
+import { env } from "../../config/env";
 import { Backup, BackupDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
