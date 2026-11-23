@@ -46,7 +46,7 @@ export class PanelBackupsService {
     this.backups.assertBackupEncryptionConfigured();
     await this.integrations.googleDriveAccessToken(user);
 
-    const services = await this.services.listFor(user);
+    const services = await this.services.listAllForStaff(user);
     const nodes = await this.nodes.list();
     const customerCount = await this.users.countDocuments({ role: "customer" });
     const eligibleServices = services.filter(service => !["vps", "vds"].includes(String(service.type).toLowerCase()));
