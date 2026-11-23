@@ -44,6 +44,12 @@ export class ServicesService {
     return this.services.find(query).populate("nodeId", "name location online").limit(200);
   }
 
+  /** Full unpaginated inventory for Admin backup orchestration only. */
+  async listAllForStaff(user: AuthUser) {
+    if (!isStaffRole(user.role)) throw new ForbiddenException("Only staff can enumerate all services for panel backups");
+    return this.services.find({}).sort({ createdAt: 1 }).exec();
+  }
+
   /** Ownership-enforced read — the base for every per-service operation. */
   async get(id: string, user: AuthUser): Promise<ServiceDocument> {
     const service = await this.services.findById(id);
