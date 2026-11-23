@@ -154,7 +154,7 @@ export default function AdminSettings() {
         <GlassCard className="p-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Google Drive Backups</h2>
-            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected for all owners" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
+            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Admin Drive connected" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
           </div>
           <p className="mt-2 text-sm text-muted">This separate Admin Google Drive is used for staff-triggered service backups and Admin backup operations. Customer accounts connect their own Google Drive. Nimbus verifies backup checksums before upload.</p>
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
