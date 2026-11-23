@@ -189,8 +189,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       serviceCount: services.length,
       nodeCount,
       estimatedBackupSizeBytes: null,
-      included: ["Eligible service data directories", "Service metadata and SHA-256 checksums"],
-      excluded: ["Panel database", "Panel configuration secrets", "VPS/VDS disk images (not supported by the current Docker-only agent)"],
+      included: ["Panel MongoDB database dump", "Encrypted panel configuration and system metadata", "Eligible customer service archives", "Full backup manifest"],
+      excluded: ["VPS/VDS full-disk images (not supported by the current Docker-only agent)"],
     };
   }
 
@@ -486,6 +486,29 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.backupJobWorkerRunning = false;
     }
+  }
+
+  async createFullPanelBackup(user: { id: string; role: string }) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    const services = await this.services.listFor(user as never);
+    if (services.length > 200) throw new BadRequestException("This panel has more than 200 services; create service batches in smaller groups.");
+    const job = await this.jobs.create({
+      requestedBy: new Types.ObjectId(user.id),
+      ownerId: new Types.ObjectId(user.id),
+      ownerType: "admin",
+      requesterRole: user.role,
+      serviceIds: services.map((service) => service._id!),
+      trigger: "manual",
+      destination: "gdrive",
+      mode: "full-panel",
+      status: "queued",
+      total: services.length + 4,
+      completed: 0,
+      failed: 0,
+      results: [],
+      panelArtifacts: {},
+    });
+    return { jobId: job._id!.toString(), status: job.status, total: job.total, serviceCount: services.length };
   }
 
   async createAdminBatch(
