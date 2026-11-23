@@ -294,7 +294,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   }
   private async applyScheduleRetention(schedule: BackupScheduleDocument, user: { id: string; role: string }) {
     if (!schedule.retention || schedule.retention <= 0) return;
-    const completed = await this.backups.find({ serviceId: schedule.serviceId, driveOwnerType: "customer", status: "completed" }).sort({ createdAt: -1 }).select("_id").lean();
+    const completed = await this.backups.find({ serviceId: schedule.serviceId, driveOwnerType: "customer", destination: "gdrive", status: "completed" }).sort({ createdAt: -1 }).select("_id").lean();
     for (const old of completed.slice(schedule.retention)) {
       try { await this.delete(String(old._id), user); }
       catch (error) { console.error("[backup-retention] could not delete expired backup:", error instanceof Error ? error.message : "unknown error"); }
@@ -1050,8 +1050,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
 
   async driveSummary(user: { id: string; role: string }) {
     const filter = user.role === "customer"
-      ? { ownerId: new Types.ObjectId(user.id), driveOwnerType: "customer", status: "completed" }
-      : { driveOwnerType: "admin", status: "completed" };
+      ? { ownerId: new Types.ObjectId(user.id), driveOwnerType: "customer", destination: "gdrive", status: "completed" }
+      : { driveOwnerType: "admin", destination: "gdrive", status: "completed" };
     const [totalBackups, latest, sizes, fullPanelBackupCount, latestFullPanelBackup] = await Promise.all([
       this.backups.countDocuments(filter),
       this.backups.findOne(filter).sort({ createdAt: -1 }).select("createdAt").lean(),
@@ -1078,7 +1078,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const ids = ownedServices.map((service) => service._id);
       filter.serviceId = { $in: ids };
     }
-    if (user.role === "customer") filter.driveOwnerType = "customer";
+    if (user.role === "customer") { filter.driveOwnerType = "customer"; filter.destination = "gdrive"; }
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("ownerId", "displayName username email");
   }
 
