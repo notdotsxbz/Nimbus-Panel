@@ -120,7 +120,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     this.assertAdmin(user);
     if (!["daily", "weekly"].includes(dto.frequency)) throw new BadRequestException("Frequency must be daily or weekly");
     const backupTime = dto.backupTime ?? "03:00";
-    if (!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(backupTime)) throw new BadRequestException("Backup time must use HH:mm in UTC");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(backupTime)) throw new BadRequestException("Backup time must use HH:mm in UTC");
     if (dto.enabled !== false) {
       this.backups.assertBackupEncryptionConfigured();
       await this.integrations.googleDriveAccessToken(user);
