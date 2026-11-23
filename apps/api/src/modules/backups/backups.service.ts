@@ -388,17 +388,44 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const now = new Date();
       const job = await this.jobs.findOneAndUpdate(
         { $or: [{ status: "queued" }, { status: "running", leaseUntil: { $lt: now } }] },
-        { $set: { status: "running", leaseUntil: new Date(now.getTime() + 2 * 60 * 60 * 1000), startedAt: now } },
+        { $set: { status: "running", leaseUntil: new Date(now.getTime() + 8 * 60 * 60 * 1000), startedAt: now } },
         { sort: { createdAt: 1 }, new: true },
       );
       if (!job) return;
       const user = { id: job.requestedBy.toString(), role: job.requesterRole };
+
+      if (job.mode === "full-panel") {
+        const artifactTasks: Array<[string, () => Promise<Record<string, unknown>>]> = [
+          ["database", () => this.createPanelDatabaseArtifact(job._id!.toString())],
+          ["configuration", () => this.createPanelConfigurationArtifact(job._id!.toString())],
+          ["systemMetadata", () => this.createPanelSystemMetadataArtifact(job._id!.toString())],
+        ];
+        for (const [key, createArtifact] of artifactTasks) {
+          if (job.panelArtifacts?.[key]) continue;
+          job.leaseUntil = new Date(Date.now() + 8 * 60 * 60 * 1000);
+          await job.save();
+          try {
+            const artifact = await createArtifact();
+            job.panelArtifacts = { ...(job.panelArtifacts ?? {}), [key]: artifact };
+            job.completed += 1;
+          } catch (error) {
+            job.failed += 1;
+            job.results.push({
+              serviceId: "panel-" + key,
+              status: "failed",
+              error: error instanceof Error ? error.message : "Panel artifact backup failed",
+            });
+          }
+          await job.save();
+        }
+      }
+
       const completedServiceIds = new Set((job.results ?? []).map((result) => result.serviceId));
       for (const serviceObjectId of job.serviceIds) {
         const serviceId = serviceObjectId.toString();
         if (completedServiceIds.has(serviceId)) continue;
         job.currentServiceId = serviceObjectId;
-        job.leaseUntil = new Date(Date.now() + 2 * 60 * 60 * 1000);
+        job.leaseUntil = new Date(Date.now() + 8 * 60 * 60 * 1000);
         await job.save();
         try {
           const backup = await this.create(serviceId, user, job.trigger, job.destination, false, job._id!.toString());
@@ -416,7 +443,26 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         }
         await job.save();
       }
-      job.status = job.failed === job.total ? "failed" : "completed";
+
+      if (job.mode === "full-panel" && !job.panelArtifacts?.manifest) {
+        try {
+          const manifest = await this.createFullPanelManifest(job);
+          job.panelArtifacts = { ...(job.panelArtifacts ?? {}), manifest };
+          job.completed += 1;
+        } catch (error) {
+          job.failed += 1;
+          job.results.push({
+            serviceId: "panel-manifest",
+            status: "failed",
+            error: error instanceof Error ? error.message : "Full panel manifest creation failed",
+          });
+        }
+        await job.save();
+      }
+
+      job.status = job.mode === "full-panel"
+        ? (job.failed === 0 ? "completed" : "failed")
+        : (job.failed === job.total ? "failed" : "completed");
       job.currentServiceId = undefined;
       job.leaseUntil = undefined;
       job.completedAt = new Date();
@@ -425,14 +471,14 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         job.requestedBy.toString(),
         "backup",
         job.status === "completed" ? "Backup job completed" : "Backup job failed",
-        `${job.completed} of ${job.total} service backups completed; ${job.failed} failed.`,
+        job.completed + " of " + job.total + " backup tasks completed; " + job.failed + " failed.",
       );
       await this.audit.log({
         actorId: job.requestedBy.toString(),
-        action: "backups.job.completed",
+        action: job.mode === "full-panel" ? "backups.full-panel.completed" : "backups.job.completed",
         targetType: "backup-job",
         targetId: job._id!.toString(),
-        detail: `total=${job.total} completed=${job.completed} failed=${job.failed}`,
+        detail: "mode=" + job.mode + " total=" + job.total + " completed=" + job.completed + " failed=" + job.failed,
         sensitive: true,
       });
     } catch (error) {
