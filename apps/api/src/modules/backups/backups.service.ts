@@ -726,6 +726,47 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     return { deleted: true };
   }
 
+  async restoreAdminSelection(
+    dto: { mode: "selected-services" | "selected-customer"; backupIds?: string[]; customerId?: string; confirm?: boolean },
+    user: { id: string; role: string },
+  ) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    if (dto.confirm !== true) throw new BadRequestException("Explicit confirmation is required before restoring customer data");
+    let backupIds = dto.backupIds ?? [];
+    if (dto.mode === "selected-customer") {
+      if (!dto.customerId) throw new BadRequestException("Select a customer");
+      const backups = await this.backups.find({ ownerId: new Types.ObjectId(dto.customerId), status: "completed" }).sort({ createdAt: -1 });
+      const latestByService = new Map<string, string>();
+      for (const backup of backups) {
+        const serviceId = backup.serviceId.toString();
+        if (!latestByService.has(serviceId)) latestByService.set(serviceId, backup._id!.toString());
+      }
+      backupIds = [...latestByService.values()];
+    } else if (dto.mode !== "selected-services") {
+      throw new BadRequestException("Invalid restore mode");
+    }
+    if (!backupIds.length || backupIds.length > 200) throw new BadRequestException("Select between 1 and 200 completed backups");
+    const results: Array<{ backupId: string; restored: boolean; error?: string }> = [];
+    for (const backupId of [...new Set(backupIds)]) {
+      try {
+        await this.restore(backupId, user, true);
+        results.push({ backupId, restored: true });
+      } catch (error) {
+        results.push({ backupId, restored: false, error: error instanceof Error ? error.message : "Restore failed" });
+      }
+    }
+    const restored = results.filter((result) => result.restored).length;
+    await this.audit.log({
+      actorId: user.id,
+      action: "backups.admin-restore",
+      targetType: "backup-selection",
+      targetId: new Types.ObjectId().toString(),
+      detail: `mode=${dto.mode} total=${results.length} restored=${restored}`,
+      sensitive: true,
+    });
+    return { total: results.length, restored, failed: results.length - restored, results };
+  }
+
   /** Restore a verified archive only after explicit UI confirmation. */
   async restore(backupId: string, user: { id: string; role: string }, confirmed = false) {
     if (!confirmed) throw new BadRequestException("Explicit confirmation is required before restoring customer data");
