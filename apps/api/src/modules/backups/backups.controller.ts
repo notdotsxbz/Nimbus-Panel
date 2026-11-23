@@ -34,6 +34,12 @@ export class BackupsController {
     return this.backups.getJob(id, user);
   }
 
+  @Get("admin/customers")
+  @Roles("owner", "admin")
+  adminCustomerOptions(@CurrentUser() user: AuthUser) {
+    return this.backups.adminCustomerOptions(user);
+  }
+
   @Get("admin/summary")
   @Roles("owner", "admin")
   adminBackupSummary(@CurrentUser() user: AuthUser) {
