@@ -75,6 +75,7 @@ export class BackupsService {
           archive,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar`,
           driveOwner,
+          { serviceId, serviceName: service.name, serviceType: String(service.type) },
         );
       }
       backup.status = "completed";
@@ -119,13 +120,51 @@ export class BackupsService {
     return { ok: true, safetyBackupId: result.safetyBackupId ?? null };
   }
 
-  private async uploadGoogleDriveArchive(archive: Buffer, filename: string, driveOwner: Pick<AuthUser, "id" | "role">): Promise<string> {
+  private async ensureDriveFolder(accessToken: string, name: string, parentId?: string): Promise<string> {
+    const escapedName = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const query = new URLSearchParams({
+      q: `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentId ? ` and '${parentId}' in parents` : ""}`,
+      fields: "files(id,name)",
+      pageSize: "100",
+    });
+    const headers = { authorization: `Bearer ${accessToken}` };
+    const existing = await axios.get(`https://www.googleapis.com/drive/v3/files?${query.toString()}`, { headers });
+    const folders = existing.data?.files as Array<{ id?: string }> | undefined;
+    if (folders?.[0]?.id) return folders[0].id;
+    const created = await axios.post(
+      "https://www.googleapis.com/drive/v3/files?fields=id,name",
+      { name, mimeType: "application/vnd.google-apps.folder", ...(parentId ? { parents: [parentId] } : {}) },
+      { headers: { ...headers, "content-type": "application/json" } },
+    );
+    const id = created.data?.id as string | undefined;
+    if (!id) throw new BadRequestException("Google Drive could not create a backup folder");
+    return id;
+  }
+
+  private safeFolderName(value: string): string {
+    return value.replace(/[\\\\/:*?"<>|]/g, "-").replace(/\\s+/g, " ").trim().slice(0, 80) || "Unnamed";
+  }
+
+  private async uploadGoogleDriveArchive(
+    archive: Buffer,
+    filename: string,
+    driveOwner: Pick<AuthUser, "id" | "role">,
+    service: { serviceId: string; serviceName: string; serviceType: string },
+  ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
+    const rootName = driveOwner.role === "customer" ? "NIMBUS Backups" : "NIMBUS Full Panel Backups";
+    const rootId = await this.ensureDriveFolder(accessToken, rootName);
+    const categoryId = await this.ensureDriveFolder(accessToken, this.safeFolderName(service.serviceType), rootId);
+    const serviceId = await this.ensureDriveFolder(
+      accessToken,
+      `${this.safeFolderName(service.serviceName)}_${service.serviceId}`,
+      categoryId,
+    );
     let metadata;
     try {
       metadata = await axios.post(
         "https://www.googleapis.com/drive/v3/files?fields=id,name",
-        { name: filename, mimeType: "application/octet-stream" },
+        { name: filename, mimeType: "application/octet-stream", parents: [serviceId] },
         { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
       );
     } catch (error) {
