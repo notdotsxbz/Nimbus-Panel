@@ -91,6 +91,29 @@ export default function CustomerBackups() {
     }
   };
 
+  const testDrive = async () => {
+    setBusy(true);
+    try {
+      const result = await api.post<{ connected: boolean; accountEmail?: string | null }>("/integrations/google-drive/test");
+      show(`Google Drive connection verified${result.accountEmail ? ` as ${result.accountEmail}` : ""}`, "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Google Drive test failed", "err");
+    } finally { setBusy(false); }
+  };
+
+  const openDriveFolder = async () => {
+    const tab = window.open("about:blank", "_blank");
+    setBusy(true);
+    try {
+      const result = await api.get<{ url: string }>("/backups/drive-folder");
+      if (tab) tab.location.href = result.url;
+      else show("Allow pop-ups to open your Google Drive folder", "err");
+    } catch (error) {
+      tab?.close();
+      show(error instanceof Error ? error.message : "Could not open backup folder", "err");
+    } finally { setBusy(false); }
+  };
+
   const disconnectDrive = async () => {
     if (!window.confirm("Disconnect Google Drive? Existing backups in your Google Drive will not be deleted.")) return;
     setBusy(true);
@@ -245,7 +268,11 @@ export default function CustomerBackups() {
             <p className="mt-1 text-sm text-muted">Your Drive connection is private to your Nimbus account. Backups from your services are sent to your connected account.</p>
           </div>
           {drive.connected ? (
-            <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button>
+            <div className="flex flex-wrap gap-2">
+              <button className="btn-ghost" disabled={busy} onClick={() => void testDrive()}>Test Connection</button>
+              <button className="btn-ghost" disabled={busy} onClick={() => void openDriveFolder()}>Open Backup Folder</button>
+              <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button>
+            </div>
           ) : null}
         </div>
         {drive.connected ? (
