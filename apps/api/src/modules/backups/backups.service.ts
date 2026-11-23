@@ -329,7 +329,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type");
   }
 
-  async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local", internal = false, jobId?: string) {
+  async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "gdrive", internal = false, jobId?: string) {
     if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
     if (destination === "local" && !internal) throw new BadRequestException("User-requested backups must be stored in Google Drive");
     if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
