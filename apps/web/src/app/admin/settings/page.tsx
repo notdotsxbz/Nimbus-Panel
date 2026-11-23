@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { GlassCard, Modal, useToast } from "@/components/glass";
 
 type FirebaseStatus = { connected: boolean; projectId: string | null; webConfigured?: boolean; connectedAt: string | null };
-type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; accountEmail?: string | null; reconnectRequired?: boolean };
+type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; accountEmail?: string | null; folderId?: string | null; reconnectRequired?: boolean };
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -108,6 +108,24 @@ export default function AdminSettings() {
     } catch (error) { show(error instanceof Error ? error.message : "Could not start Google connection", "err"); setBusy(false); }
   };
 
+  const testDriveConnection = async () => {
+    setBusy(true);
+    try {
+      const status = await api.get<ConnectionStatus>("/integrations/google-drive");
+      setDrive(status);
+      if (!status.connected) throw new Error("Admin Google Drive authorization needs to be reconnected");
+      show("Admin Google Drive connection is working", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Google Drive test failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openDriveFolder = () => {
+    if (drive.folderId) window.open(`https://drive.google.com/drive/folders/${encodeURIComponent(drive.folderId)}`, "_blank", "noopener,noreferrer");
+  };
+
   const disconnectDrive = async () => {
     if (!window.confirm("Disconnect Google Drive? New Drive backups will no longer upload.")) return;
     setBusy(true);
@@ -159,9 +177,15 @@ export default function AdminSettings() {
           <p className="mt-2 text-sm text-muted">This separate Drive is reserved for administrator backups and full-panel recovery. Each customer connects an independent personal Drive from Account Settings.</p>
           {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Connected account: <span className="font-mono">{drive.accountEmail}</span></p> : null}
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
-            {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
+            {drive.connected ? (
+              <>
+                <button className="btn-ghost" disabled={busy} onClick={() => void testDriveConnection()}>Test connection</button>
+                {drive.folderId ? <button className="btn-ghost" onClick={openDriveFolder}>Open backup folder</button> : null}
+                <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button>
+              </>
+            ) : null}
           </div>
         </GlassCard>
 
