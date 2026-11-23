@@ -69,8 +69,48 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const minute = match ? Number(match[2]) : 0;
     const next = new Date(from);
     next.setUTCHours(hour, minute, 0, 0);
-    if (next.getTime() <= from.getTime()) next.setUTCDate(next.getUTCDate() + (frequency === "weekly" ? 7 : 1));
+    if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+    else if (next.getTime() <= from.getTime()) next.setUTCDate(next.getUTCDate() + 1);
     return next;
+  }
+
+  async getFullPanelSchedule(user: { id: string; role: string }) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    const schedule = await this.fullPanelSchedules.findOne({ ownerId: new Types.ObjectId(user.id) });
+    return schedule ?? {
+      ownerId: user.id,
+      enabled: false,
+      frequency: "daily",
+      time: "02:00",
+      retention: 5,
+      notifyOnCompletion: true,
+      nextRunAt: null,
+      lastRunAt: null,
+    };
+  }
+
+  async saveFullPanelSchedule(dto: {
+    enabled?: boolean; frequency?: string; time?: string; retention?: number; notifyOnCompletion?: boolean;
+  }, user: { id: string; role: string }) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    const frequency = dto.frequency ?? "daily";
+    if (!["daily", "weekly"].includes(frequency)) throw new BadRequestException("Full Panel frequency must be daily or weekly");
+    const time = dto.time ?? "02:00";
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new BadRequestException("Backup time must be in 24-hour HH:mm format (UTC)");
+    const retention = dto.retention ?? 5;
+    if (![0, 5, 10, 30].includes(retention)) throw new BadRequestException("Retention must be 5, 10, 30 or 0 for never delete");
+    const enabled = dto.enabled === true;
+    const nextRunAt = enabled ? this.nextScheduleRun(frequency, time) : undefined;
+    return this.fullPanelSchedules.findOneAndUpdate(
+      { ownerId: new Types.ObjectId(user.id) },
+      { $set: {
+        enabled, frequency, time, retention,
+        notifyOnCompletion: dto.notifyOnCompletion !== false,
+        nextRunAt: nextRunAt ?? null,
+        leaseUntil: null,
+      } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
   }
 
   async getSchedule(serviceId: string, user: { id: string; role: string }) {
