@@ -32,7 +32,7 @@ Disconnecting a Drive removes only that account's saved Nimbus authorization. It
 
 ## Encryption and recovery
 
-Drive backup archives are encrypted with AES-256-GCM before upload. The API stores the IV, authentication tag, algorithm and key version alongside the backup record. The encryption key is derived from the server's `INTEGRATION_ENCRYPTION_KEY`; keep this secret backed up securely and do not rotate it without a migration plan. If this key is lost, encrypted archives cannot be decrypted.
+Service archives are gzip-compressed, encrypted with AES-256-GCM and uploaded using resumable 8 MiB chunks with retry support. Nimbus reads the uploaded object back and verifies its SHA-256 digest before marking the backup complete. The API stores the IV, authentication tag, algorithm and key version alongside the backup record. The encryption key is derived from the server's `INTEGRATION_ENCRYPTION_KEY`; keep this secret backed up securely and do not rotate it without a migration plan. If this key is lost, encrypted archives cannot be decrypted.
 
 OAuth refresh tokens are also encrypted at rest using the panel integration encryption key. Never place the key, OAuth client secret, refresh tokens or access tokens in Git, support tickets or frontend code.
 
@@ -40,4 +40,4 @@ OAuth refresh tokens are also encrypted at rest using the panel integration encr
 
 Service backups use the existing Node Agent's service data directory. Only service types that are actually provisioned and backed by this storage path can be backed up this way. VPS/VDS full-disk snapshots are not supported until a virtualization provider and VM-aware Node Agent are installed; the panel must not label file-only backups as full VM backups.
 
-Per-service schedules, retention and customer service restore are implemented for the current Node Agent service-data path. Large-file resumable streaming, panel database/full-panel backup and selected-customer restore workflows remain under development until the associated implementation and tests are complete.
+Per-service schedules, retention and customer service restore are implemented for the current Node Agent service-data path. The resumable chunk uploader currently receives a buffered archive from the existing Node Agent download path; fully streaming the source archive through compression/encryption/upload without loading the whole archive into API memory remains under development. Panel database/full-panel backup and selected-customer restore workflows also remain under development until their implementation and tests are complete.
