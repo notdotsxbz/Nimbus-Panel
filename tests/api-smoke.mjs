@@ -384,6 +384,8 @@ async function call(path, { method = "GET", token, body } = {}) {
   const svcId = (Array.isArray(svcRow.body ?? svcRow) ? (svcRow.body ?? svcRow) : []).find?.((s) => s.name === "smoke-svc-" + suffix)?._id
     ?? (Array.isArray(svcRow) ? svcRow : svcRow.items ?? []).find((s) => s.name === "smoke-svc-" + suffix)?._id;
   if (svcId) {
+    const crossBackupList = await call(`/backups?serviceId=${svcId}`, { token: custToken });
+    check("customer cannot list another customer's service backups", crossBackupList.status === 403, `status=${crossBackupList.status}`);
     const xlogs = await call(`/services/${svcId}/console/logs`, { token: custToken });
     check("customer cannot read another customer's console logs", xlogs.status === 403, `status=${xlogs.status}`);
     const xfiles = await call(`/services/${svcId}/files?path=/`, { token: custToken });
