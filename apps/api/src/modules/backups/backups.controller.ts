@@ -40,6 +40,15 @@ export class BackupsController {
     return this.scheduler.remove(user, serviceId);
   }
 
+  @Post("admin/selected")
+  @Roles("owner", "admin")
+  createSelectedBackups(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: { customerIds?: string[]; serviceIds?: string[] },
+  ) {
+    return this.panelBackups.createSelectedBackup(user, dto);
+  }
+
   @Get("admin/full")
   @Roles("owner", "admin")
   listFullPanelBackups(@CurrentUser() user: AuthUser) {
