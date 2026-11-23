@@ -302,7 +302,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         targetId: record._id!.toString(),
         detail: `status=${record.status}; customers=${customerCount}; services=${services.length}; nodes=${nodes.length}`,
         sensitive: true,
-      });
+      }).catch(() => undefined);
     } catch (error) {
       record.status = "failed";
       record.currentStep = "Failed";
