@@ -1,4 +1,4 @@
-import { createCipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
@@ -117,19 +117,57 @@ export class BackupsService {
     return backup;
   }
 
-  /** Restore into a staging dir — data is swapped only after verification. */
-  async restore(backupId: string, user: { id: string; role: string }) {
+  /** Restore a verified archive only after explicit UI confirmation. */
+  async restore(backupId: string, user: { id: string; role: string }, confirmed = false) {
+    if (!confirmed) throw new BadRequestException("Explicit confirmation is required before restoring customer data");
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
     const node = await this.nodes.get(service.nodeId.toString());
-    await this.nodes.agentCall(node, "/backups/restore", {
-      serviceId: service._id!.toString(),
-      backupId,
+
+    if (backup.remoteFileId) {
+      const ownerType = backup.driveOwnerType ?? "admin";
+      const ownerId = ownerType === "customer" ? backup.driveOwnerId?.toString() : undefined;
+      const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
+      let downloaded: Buffer;
+      try {
+        const response = await axios.get(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+          { headers: { authorization: `Bearer ${accessToken}` }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
+        );
+        downloaded = Buffer.from(response.data);
+      } catch (error) {
+        const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
+        throw new BadRequestException(details ?? "Could not download this backup from Google Drive");
+      }
+      const archive = backup.encryptionMetadata ? this.decryptArchive(downloaded, backup.encryptionMetadata) : downloaded;
+      if (!backup.checksum || !this.verifyChecksum(archive, backup.checksum)) {
+        throw new BadRequestException("Backup integrity verification failed. The service was not changed.");
+      }
+      await this.nodes.uploadBackupArchive(node, service._id!.toString(), backupId, archive, backup.checksum);
+    } else if (!backup.checksum) {
+      throw new BadRequestException("This backup has no integrity checksum and cannot be safely restored");
+    }
+
+    // Keep a fresh node-local safety snapshot before replacing service data.
+    const safetyBackup = await this.create(service._id!.toString(), user, "pre-restore", "local");
+    if (safetyBackup.status !== "completed") {
+      throw new BadRequestException("Could not create a safety backup. The existing service data was not changed.");
+    }
+
+    const restoreRequest = { serviceId: service._id!.toString(), backupId };
+    await this.nodes.agentCall(node, "/backups/restore", restoreRequest, "POST", 10 * 60 * 1000);
+    await this.nodes.agentCall(node, "/backups/restore-commit", restoreRequest, "POST", 10 * 60 * 1000);
+    await this.audit.log({
+      actorId: user.id,
+      action: "backups.restore",
+      targetType: "backup",
+      targetId: backupId,
+      detail: `service=${service._id!.toString()} safetyBackup=${safetyBackup._id!.toString()}`,
+      sensitive: true,
     });
-    await this.audit.log({ actorId: user.id, action: "backups.restore", targetId: backupId, sensitive: true });
-    return { ok: true };
+    return { ok: true, restored: true, safetyBackupId: safetyBackup._id!.toString() };
   }
 
   private encryptArchive(archive: Buffer): {
@@ -149,6 +187,23 @@ export class BackupsService {
         keyVersion: "integration-key-v1",
       },
     };
+  }
+
+  private decryptArchive(
+    encrypted: Buffer,
+    metadata: { algorithm: string; iv: string; authTag: string; keyVersion: string },
+  ): Buffer {
+    if (metadata.algorithm !== "aes-256-gcm" || metadata.keyVersion !== "integration-key-v1") {
+      throw new BadRequestException("This backup uses an unsupported encryption format");
+    }
+    try {
+      const key = createHash("sha256").update(env.integrationEncryptionKey).digest();
+      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(metadata.iv, "base64"));
+      decipher.setAuthTag(Buffer.from(metadata.authTag, "base64"));
+      return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    } catch {
+      throw new BadRequestException("Backup decryption failed. The encryption key may have changed.");
+    }
   }
 
   private async uploadGoogleDriveArchive(
