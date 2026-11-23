@@ -1301,7 +1301,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         if (!backup.checksum || !this.verifyChecksumDigest(digest, backup.checksum)) {
           throw new BadRequestException("Local backup integrity verification failed. The service was not changed.");
         }
-        await this.nodes.uploadBackupArchiveFile(node, service._id!.toString(), backupId, archivePath, backup.checksum);
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }
