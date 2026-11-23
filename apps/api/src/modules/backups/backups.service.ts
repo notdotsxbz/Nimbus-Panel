@@ -731,26 +731,49 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (backup.status !== "completed") throw new BadRequestException("Only completed backups can be downloaded");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
     const node = await this.nodes.get(service.nodeId.toString());
-    let archive: Buffer;
-    if (backup.remoteFileId) {
-      const ownerType = backup.driveOwnerType ?? "admin";
-      const ownerId = ownerType === "customer" ? backup.driveOwnerId?.toString() : undefined;
-      const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
-      const response = await axios.get(
-        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
-        { headers: { authorization: `Bearer ${accessToken}` }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
-      );
-      const downloaded = Buffer.from(response.data);
-      archive = backup.encryptionMetadata ? this.decryptArchive(downloaded, backup.encryptionMetadata) : downloaded;
-    } else {
-      archive = await this.nodes.downloadBackupArchive(node, service._id!.toString(), backupId);
+    if (!backup.checksum) throw new BadRequestException("This backup has no integrity checksum and cannot be safely downloaded");
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-download-"));
+    const archivePath = join(tempDir, "download.tar.gz");
+    try {
+      if (backup.remoteFileId) {
+        const ownerType = backup.driveOwnerType ?? "admin";
+        const ownerId = ownerType === "customer" ? backup.driveOwnerId?.toString() : undefined;
+        const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
+        const encryptedPath = join(tempDir, "download.enc");
+        const response = await axios.get(
+          \`https://www.googleapis.com/drive/v3/files/\${encodeURIComponent(backup.remoteFileId)}?alt=media\`,
+          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 10 * 60 * 1000 },
+        );
+        await pipeline(response.data, createWriteStream(encryptedPath, { mode: 0o600 }));
+        if (backup.encryptionMetadata) {
+          await this.decryptArchiveFile(encryptedPath, archivePath, backup.encryptionMetadata);
+        } else {
+          await pipeline(createReadStream(encryptedPath), createWriteStream(archivePath, { mode: 0o600 }));
+        }
+      } else {
+        const source = await this.nodes.downloadBackupArchiveStream(node, service._id!.toString(), backupId);
+        await pipeline(source, createWriteStream(archivePath, { mode: 0o600 }));
+      }
+      const digest = Buffer.from(await this.hashFile(archivePath, "hex"), "hex");
+      if (!this.verifyChecksumDigest(digest, backup.checksum)) {
+        throw new BadRequestException("Backup integrity verification failed. Download was stopped.");
+      }
+      await this.audit.log({ actorId: user.id, action: "backups.download", targetType: "backup", targetId: backupId, sensitive: true });
+      const safeName = service.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80) || "service";
+      const stream = createReadStream(archivePath);
+      let cleaned = false;
+      const cleanup = async () => {
+        if (cleaned) return;
+        cleaned = true;
+        await rm(tempDir, { recursive: true, force: true });
+      };
+      stream.once("close", () => { void cleanup(); });
+      stream.once("error", () => { void cleanup(); });
+      return { stream, filename: \`nimbus-\${safeName}-\${backupId}.tar.gz\`, cleanup };
+    } catch (error) {
+      await rm(tempDir, { recursive: true, force: true });
+      throw error;
     }
-    if (!backup.checksum || !this.verifyChecksum(archive, backup.checksum)) {
-      throw new BadRequestException("Backup integrity verification failed. Download was stopped.");
-    }
-    await this.audit.log({ actorId: user.id, action: "backups.download", targetType: "backup", targetId: backupId, sensitive: true });
-    const safeName = service.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80) || "service";
-    return { buffer: archive, filename: `nimbus-${safeName}-${backupId}.tar.gz` };
   }
 
   async delete(backupId: string, user: { id: string; role: string }) {
