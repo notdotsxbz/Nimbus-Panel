@@ -243,7 +243,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const tempDir = await mkdtemp(join(tmpdir(), "nimbus-panel-db-"));
     try {
       const configPath = join(tempDir, "mongodump.yml");
-      const archivePath = join(tempDir, "nimbus-database.archive.gz");
+      const archivePath = join(tempDir, "nimbus-database.archive.gz.enc");
       // The MongoDB URI is written only to a mode-0600 temporary config file,
       // never passed as a process argument or written to logs.
       await writeFile(configPath, "uri: " + JSON.stringify(env.mongoUri) + "\n", { mode: 0o600 });
@@ -252,7 +252,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         maxBuffer: 4 * 1024 * 1024,
       });
       const archive = await readFile(archivePath);
-      return this.uploadPanelArtifact(archive, "nimbus-database-" + jobId + ".archive.gz", "Database", jobId, "database");
+      return this.uploadPanelArtifact(archive, "nimbus-database-" + jobId + ".archive.gz.enc", "Database", jobId, "database");
     } catch (error) {
       const message = error instanceof Error ? error.message : "mongodump failed";
       if (message.includes("ENOENT") || message.includes("not found")) {
@@ -622,7 +622,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         backup.manifest = { ...(backup.manifest ?? {}), encryption: encrypted.metadata, archiveChecksum: result.checksum };
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           encrypted.data,
-          `nimbus-${serviceId}-${backup._id!.toString()}.tar.gz`,
+          `nimbus-${serviceId}-${backup._id!.toString()}.tar.gz.enc`,
           driveOwnerType,
           driveOwnerId?.toString(),
           service.type,
