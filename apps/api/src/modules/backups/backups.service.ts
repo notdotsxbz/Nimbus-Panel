@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import { mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +33,64 @@ export class BackupsService {
     private readonly audit: AuditService,
     private readonly integrations: IntegrationsService,
   ) {}
+
+  private backupKey(): Buffer {
+    const configured = env.backupEncryptionKey;
+    if (!/^[a-f0-9]{64}$/i.test(configured)) {
+      throw new BadRequestException("Encrypted Drive backups are disabled until BACKUP_ENCRYPTION_KEY is set to 64 hexadecimal characters and escrowed outside this VPS");
+    }
+    return Buffer.from(configured, "hex");
+  }
+
+  private async encryptArchiveFile(inputPath: string, outputPath: string): Promise<{ iv: string; tag: string; sizeBytes: number }> {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.backupKey(), iv);
+    await pipeline(
+      createReadStream(inputPath),
+      cipher,
+      createWriteStream(outputPath, { flags: "wx", mode: 0o600 }),
+    );
+    const info = await stat(outputPath);
+    return { iv: iv.toString("hex"), tag: cipher.getAuthTag().toString("hex"), sizeBytes: info.size };
+  }
+
+  private async decryptArchiveFile(
+    inputPath: string,
+    outputPath: string,
+    ivHex: string,
+    tagHex: string,
+    expectedChecksum: string,
+  ): Promise<number> {
+    if (!/^[a-f0-9]{24}$/i.test(ivHex) || !/^[a-f0-9]{32}$/i.test(tagHex)) {
+      throw new BadRequestException("Backup encryption metadata is invalid");
+    }
+    const decipher = createDecipheriv("aes-256-gcm", this.backupKey(), Buffer.from(ivHex, "hex"));
+    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+    const hash = createHash("sha256");
+    const digestStream = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    try {
+      await pipeline(
+        createReadStream(inputPath),
+        decipher,
+        digestStream,
+        createWriteStream(outputPath, { flags: "wx", mode: 0o600 }),
+      );
+    } catch {
+      await rm(outputPath, { force: true }).catch(() => undefined);
+      throw new BadRequestException("Backup decryption or authentication failed");
+    }
+    const digest = hash.digest();
+    if (digest.toString("base64") !== expectedChecksum && digest.toString("hex") !== expectedChecksum) {
+      await rm(outputPath, { force: true }).catch(() => undefined);
+      throw new BadRequestException("Decrypted backup failed SHA-256 verification");
+    }
+    return (await stat(outputPath)).size;
+  }
 
   /**
    * Customers can only list backups belonging to services they currently own.
