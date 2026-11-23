@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -566,6 +566,117 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.backupJobWorkerRunning = false;
     }
+  }
+
+  private async downloadAdminPanelArtifact(
+    artifact: { fileId: string; checksum: string; encryptionMetadata: { algorithm: string; iv: string; authTag: string; keyVersion: string } },
+    destinationPath: string,
+  ) {
+    const accessToken = await this.integrations.googleDriveAccessToken("admin");
+    const encryptedPath = destinationPath + ".enc";
+    const response = await axios.get(
+      "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(artifact.fileId) + "?alt=media",
+      { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 60 * 60 * 1000 },
+    );
+    await pipeline(response.data, createWriteStream(encryptedPath, { mode: 0o600 }));
+    try {
+      await this.decryptArchiveFile(encryptedPath, destinationPath, artifact.encryptionMetadata);
+      if (await this.hashFile(destinationPath, "hex") !== artifact.checksum) {
+        throw new BadRequestException("Full Panel Backup artifact checksum verification failed");
+      }
+    } finally {
+      await rm(encryptedPath, { force: true });
+    }
+  }
+
+  async prepareFullPanelRestore(jobId: string, user: { id: string; role: string }, confirmed: boolean) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    if (confirmed !== true) throw new BadRequestException("Explicit confirmation is required before preparing panel recovery");
+    const job = await this.jobs.findById(jobId);
+    if (!job || job.mode !== "full-panel" || job.status !== "completed") {
+      throw new BadRequestException("Select a completed Full Panel Backup");
+    }
+    const artifacts = job.panelArtifacts ?? {};
+    const database = artifacts.database as { fileId?: string; checksum?: string; encryptionMetadata?: any } | undefined;
+    const configuration = artifacts.configuration as { fileId?: string; checksum?: string; encryptionMetadata?: any } | undefined;
+    const manifest = artifacts.manifest as { fileId?: string; checksum?: string; encryptionMetadata?: any } | undefined;
+    if (!database?.fileId || !database.checksum || !database.encryptionMetadata || !configuration?.fileId || !configuration.checksum || !configuration.encryptionMetadata) {
+      throw new BadRequestException("The Full Panel Backup is missing its database or configuration artifact");
+    }
+    const stagingRoot = join(process.cwd(), "restore-staging");
+    const stagingDir = join(stagingRoot, jobId);
+    await mkdir(stagingDir, { recursive: true, mode: 0o700 });
+    await chmod(stagingRoot, 0o700).catch(() => undefined);
+    await chmod(stagingDir, 0o700);
+    const databasePath = join(stagingDir, "database.archive.gz");
+    const configPath = join(stagingDir, "configuration.json");
+    await this.downloadAdminPanelArtifact(database as Required<typeof database>, databasePath);
+    await this.downloadAdminPanelArtifact(configuration as Required<typeof configuration>, configPath);
+    let manifestPath: string | null = null;
+    if (manifest?.fileId && manifest.checksum && manifest.encryptionMetadata) {
+      manifestPath = join(stagingDir, "manifest.json");
+      await this.downloadAdminPanelArtifact(manifest as Required<typeof manifest>, manifestPath);
+    }
+    const panelRoot = process.cwd();
+    const script = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      \`PANEL_ROOT=\${JSON.stringify(panelRoot)}\`,
+      'STAGING_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"',
+      'if [[ "$EUID" -ne 0 ]]; then echo "Run this recovery script with sudo."; exit 1; fi',
+      'if [[ ! -f "$PANEL_ROOT/.env" ]]; then echo "Current panel .env file not found."; exit 1; fi',
+      'source "$PANEL_ROOT/.env"',
+      'CURRENT_MONGODB_URI="\${MONGODB_URI:-}"',
+      'if [[ -z "$CURRENT_MONGODB_URI" ]]; then echo "Current MONGODB_URI is missing from .env."; exit 1; fi',
+      'SAFETY_DIR="/var/backups/nimbus/full-restore-$(date +%Y%m%d-%H%M%S)"',
+      'mkdir -p "$SAFETY_DIR"',
+      'cp -a "$PANEL_ROOT/.env" "$SAFETY_DIR/.env.before"',
+      'mongodump --uri="$CURRENT_MONGODB_URI" --db nimbus --archive="$SAFETY_DIR/database.before.archive.gz" --gzip',
+      'read -r -s -p "Enter INTEGRATION_ENCRYPTION_KEY from your separate secure escrow: " NIMBUS_RECOVERY_KEY; echo',
+      'if [[ -z "$NIMBUS_RECOVERY_KEY" ]]; then echo "Encryption key is required."; exit 1; fi',
+      'node - "$STAGING_DIR/configuration.json" "$STAGING_DIR/restore.env" "$NIMBUS_RECOVERY_KEY" <<\'NODE\'',
+      'const fs = require("fs");',
+      'const [configPath, outputPath, key] = process.argv.slice(2);',
+      'const config = JSON.parse(fs.readFileSync(configPath, "utf8"));',
+      'const environment = config.environment || {};',
+      'const ignored = new Set(["INTEGRATION_ENCRYPTION_KEY", "PATH", "HOME", "PWD", "OLDPWD", "SHELL", "SHLVL", "_", "TERM", "LANG", "USER", "LOGNAME", "HOSTNAME"]);',
+      'const entries = Object.entries(environment).filter(([name, value]) => /^[A-Z_][A-Z0-9_]*$/.test(name) && value !== undefined && !ignored.has(name));',
+      'entries.push(["INTEGRATION_ENCRYPTION_KEY", key]);',
+      'fs.writeFileSync(outputPath, entries.map(([name, value]) => name + "=" + JSON.stringify(String(value))).join("\\n") + "\\n", { mode: 0o600 });',
+      'NODE',
+      'source "$STAGING_DIR/restore.env"',
+      'RESTORE_MONGODB_URI="\${MONGODB_URI:-}"',
+      'if [[ -z "$RESTORE_MONGODB_URI" ]]; then echo "Backup configuration does not contain MONGODB_URI."; exit 1; fi',
+      'SERVICES_STOPPED=0',
+      'on_error() { status=$?; if [[ "$SERVICES_STOPPED" -eq 1 ]]; then systemctl start nimbus-api nimbus-web || true; fi; exit "$status"; }',
+      'trap on_error ERR',
+      'systemctl stop nimbus-web nimbus-api',
+      'SERVICES_STOPPED=1',
+      'if ! mongorestore --uri="$RESTORE_MONGODB_URI" --archive="$STAGING_DIR/database.archive.gz" --gzip --drop --nsInclude="nimbus.*"; then',
+      '  echo "Database restore failed. Attempting to roll back the safety dump."',
+      '  mongorestore --uri="$CURRENT_MONGODB_URI" --archive="$SAFETY_DIR/database.before.archive.gz" --gzip --drop --nsInclude="nimbus.*" || true',
+      '  systemctl start nimbus-api nimbus-web || true',
+      '  SERVICES_STOPPED=0',
+      '  exit 1',
+      'fi',
+      'install -m 600 "$STAGING_DIR/restore.env" "$PANEL_ROOT/.env"',
+      'systemctl start nimbus-api nimbus-web',
+      'SERVICES_STOPPED=0',
+      'trap - ERR',
+      'echo "Panel database and configuration restored. Safety backup: $SAFETY_DIR"',
+      'echo "Next, sign in and use Admin Backups to restore customer service archives from the Full Panel manifest."',
+    ].join("\n") + "\n";
+    const scriptPath = join(stagingDir, "restore-panel.sh");
+    await writeFile(scriptPath, script, { mode: 0o700 });
+    await chmod(scriptPath, 0o700);
+    return {
+      jobId,
+      stagingPath: stagingDir,
+      scriptPath,
+      command: "sudo bash " + scriptPath,
+      manifestPath,
+      warning: "This restores the panel database and configuration during maintenance. Customer service data archives must then be restored from the manifest using the Admin restore workflow.",
+    };
   }
 
   async createFullPanelBackup(user: { id: string; role: string }) {
