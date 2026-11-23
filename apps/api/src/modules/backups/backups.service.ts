@@ -613,11 +613,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const configPath = join(stagingDir, "configuration.json");
     await this.downloadAdminPanelArtifact(database, databasePath);
     await this.downloadAdminPanelArtifact(configuration, configPath);
-    let manifestPath: string | null = null;
-    if (manifest?.fileId && manifest.checksum && manifest.encryptionMetadata) {
-      manifestPath = join(stagingDir, "manifest.json");
-      await this.downloadAdminPanelArtifact(manifest, manifestPath);
+    if (!manifest?.fileId || !manifest.checksum || !manifest.encryptionMetadata) {
+      throw new BadRequestException("The Full Panel Backup is missing its recovery manifest");
     }
+    const manifestPath = join(stagingDir, "manifest.json");
+    await this.downloadAdminPanelArtifact(manifest, manifestPath);
     const panelRoot = process.cwd();
     const script = [
       "#!/usr/bin/env bash",
@@ -665,6 +665,23 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       '  SERVICES_STOPPED=0',
       '  exit 1',
       'fi',
+      'node - "$RESTORE_MONGODB_URI" "$STAGING_DIR/manifest.json" "${jobId}" <<\'NODE\'',
+      'const fs = require("fs"); const { MongoClient, ObjectId } = require("mongodb");',
+      '(async () => {',
+      '  const [uri, manifestPath, jobId] = process.argv.slice(2);',
+      '  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));',
+      '  const client = new MongoClient(uri);',
+      '  await client.connect();',
+      '  try {',
+      '    const jobs = client.db("nimbus").collection("backupjobs");',
+      '    const now = new Date();',
+      '    await jobs.updateMany({ _id: { $ne: new ObjectId(jobId) }, status: { $in: ["queued", "running"] } }, { $set: { status: "failed", error: "Interrupted by Full Panel recovery; review before requeueing", completedAt: now, leaseUntil: null, currentServiceId: null } });',
+      '    const serviceCount = Number(manifest.totals?.services ?? 0);',
+      '    await jobs.updateOne({ _id: new ObjectId(jobId) }, { $set: { status: "completed", completed: serviceCount + 4, failed: 0, results: manifest.serviceBackupResults || [], panelArtifacts: manifest.panelArtifacts || {}, completedAt: now, leaseUntil: null, currentServiceId: null } });',
+      '  } finally { await client.close(); }',
+      '})().catch((error) => { console.error("Could not reconcile backup job state:", error.message); process.exitCode = 1; });',
+      'NODE',
+      'if [[ "$?" -ne 0 ]]; then echo "Warning: backup job state reconciliation failed; inspect backup jobs after restart."; fi',
       'install -m 600 "$STAGING_DIR/restore.env" "$PANEL_ROOT/.env"',
       'systemctl start nimbus-api nimbus-web',
       'SERVICES_STOPPED=0',
