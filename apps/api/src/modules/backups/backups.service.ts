@@ -12,7 +12,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import axios from "axios";
 import { AuditService } from "../audit/audit.service";
-import { Backup, BackupDocument, BackupSchedule, BackupScheduleDocument, BackupJob, BackupJobDocument } from "./backup.schema";
+import { Backup, BackupDocument, BackupSchedule, BackupScheduleDocument, BackupJob, BackupJobDocument, FullPanelSchedule, FullPanelScheduleDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
 import { IntegrationsService } from "../integrations/integrations.service";
@@ -33,6 +33,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     @InjectModel(Backup.name) private readonly backups: Model<BackupDocument>,
     @InjectModel(BackupSchedule.name) private readonly schedules: Model<BackupScheduleDocument>,
     @InjectModel(BackupJob.name) private readonly jobs: Model<BackupJobDocument>,
+    @InjectModel(FullPanelSchedule.name) private readonly fullPanelSchedules: Model<FullPanelScheduleDocument>,
     private readonly nodes: NodesService,
     private readonly services: ServicesService,
     private readonly audit: AuditService,
