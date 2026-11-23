@@ -881,6 +881,9 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       selected.push({ backup, service });
     }
     const serviceIds = selected.map((item) => item.service._id!);
+    if (new Set(serviceIds.map((id) => id.toString())).size !== serviceIds.length) {
+      throw new BadRequestException("Select only one backup per service in a restore job");
+    }
     const activeRestore = await this.jobs.findOne({
       mode: "restore-batch",
       status: { $in: ["queued", "running"] },
