@@ -42,6 +42,7 @@ export default function AdminBackups() {
   const [serviceId, setServiceId] = useState("");
   const [selectedBackupIds, setSelectedBackupIds] = useState<string[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [recoveryCommand, setRecoveryCommand] = useState("");
   const [summary, setSummary] = useState<AdminBackupSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const { show, node } = useToast();
@@ -134,7 +135,8 @@ export default function AdminBackups() {
     setBusy(true);
     try {
       const result = await api.post<{ command: string; scriptPath: string }>(`/backups/admin/full/${jobId}/prepare-restore`, { confirm: true });
-      show(`Recovery script prepared: ${result.scriptPath}. Run this on the VPS: ${result.command}`, "info");
+      setRecoveryCommand(result.command);
+      show(`Recovery script prepared at ${result.scriptPath}`, "ok");
     } catch (err) {
       show(err instanceof Error ? err.message : "Recovery preparation failed", "err");
     } finally {
@@ -228,6 +230,17 @@ export default function AdminBackups() {
           {jobs.length === 0 ? <p className="text-xs text-muted">No backup jobs yet</p> : null}
         </div>
       </GlassCard>
+
+      {recoveryCommand ? (
+        <GlassCard className="space-y-3 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium">Run this recovery command over SSH as root</p>
+            <button className="btn-ghost text-xs" onClick={() => void navigator.clipboard.writeText(recoveryCommand).then(() => show("Recovery command copied", "ok")).catch(() => show("Select and copy the command manually", "err"))}>Copy command</button>
+          </div>
+          <pre className="overflow-x-auto rounded-lg bg-black/30 p-3 text-xs">{recoveryCommand}</pre>
+          <p className="text-xs text-muted">The script creates a safety database dump, pauses panel services, restores the database/configuration, and restarts the panel. Restore customer service archives from the manifest afterwards.</p>
+        </GlassCard>
+      ) : null}
 
       <GlassCard className="flex flex-wrap items-end gap-3 p-4">
         <div className="min-w-52 flex-1">
