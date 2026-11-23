@@ -646,31 +646,46 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       });
       backup.manifest = { ...(backup.manifest ?? {}), backupId: backup._id!.toString() };
     }
+    let tempDir: string | undefined;
     try {
       backup.progressStage = "creating_snapshot";
       await backup.save();
-      // Node Agent creates a gzip-compressed tar archive and computes SHA-256.
       const result = await this.nodes.agentCall(node, "/backups/create", {
         serviceId,
         backupId: backup._id!.toString(),
       }, "POST", 10 * 60 * 1000);
       backup.sizeBytes = result.sizeBytes;
       backup.checksum = result.checksum;
-      backup.progressStage = "encrypting";
-      await backup.save();
       if (destination === "gdrive") {
-        const archive = await this.nodes.downloadBackupArchive(node, serviceId, backup._id!.toString());
-        if (!this.verifyChecksum(archive, result.checksum)) throw new BadRequestException("Downloaded archive failed checksum verification");
+        tempDir = await mkdtemp(join(tmpdir(), "nimbus-service-backup-"));
+        const archivePath = join(tempDir, "service.tar.gz");
+        const encryptedPath = join(tempDir, "service.tar.gz.enc");
+        const source = await this.nodes.downloadBackupArchiveStream(node, serviceId, backup._id!.toString());
+        const hash = createHash("sha256");
+        const hashTransform = new Transform({
+          transform(chunk, _encoding, callback) {
+            hash.update(chunk);
+            callback(null, chunk);
+          },
+        });
+        await pipeline(source, hashTransform, createWriteStream(archivePath, { mode: 0o600 }));
+        if (!this.verifyChecksumDigest(hash.digest(), result.checksum)) {
+          throw new BadRequestException("Downloaded archive failed checksum verification");
+        }
+        backup.progressStage = "encrypting";
+        await backup.save();
         const ownerRecord = await this.backups.db.collection("users").findOne(
           { _id: service.ownerId },
           { projection: { displayName: 1, username: 1, email: 1 } },
         );
         const ownerName = String(ownerRecord?.displayName || ownerRecord?.username || ownerRecord?.email || service.ownerId.toString());
-        const encrypted = this.encryptArchive(archive);
-        backup.encryptionMetadata = encrypted.metadata;
-        backup.manifest = { ...(backup.manifest ?? {}), encryption: encrypted.metadata, archiveChecksum: result.checksum };
+        const encryptionMetadata = await this.encryptArchiveFile(archivePath, encryptedPath);
+        backup.encryptionMetadata = encryptionMetadata;
+        backup.manifest = { ...(backup.manifest ?? {}), encryption: encryptionMetadata, archiveChecksum: result.checksum };
+        const encryptedStat = await stat(encryptedPath);
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
-          encrypted.data,
+          encryptedPath,
+          encryptedStat.size,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.gz.enc`,
           driveOwnerType,
           driveOwnerId?.toString(),
@@ -680,15 +695,15 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
           service.ownerId.toString(),
           backup._id!.toString(),
           result.checksum,
-          encrypted.metadata,
+          encryptionMetadata,
           async (stage) => { backup.progressStage = stage; await backup.save(); },
         );
         backup.verificationStatus = "verified";
-        // Remove the temporary plaintext node archive only after Drive read-back verification succeeds.
         await this.nodes.agentCall(node, "/backups/delete", { serviceId, backupId: backup._id!.toString() }, "POST", 30_000)
           .catch((error) => console.error("[backups] could not remove temporary plaintext archive:", error instanceof Error ? error.message : "unknown error"));
+      } else {
+        backup.verificationStatus = "verified";
       }
-      if (destination !== "gdrive") backup.verificationStatus = "verified";
       backup.status = "completed";
       backup.progressStage = "completed";
       backup.completedAt = new Date();
@@ -697,6 +712,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       backup.progressStage = "failed";
       backup.verificationStatus = "failed";
       backup.error = (err as Error).message;
+    } finally {
+      if (tempDir) await rm(tempDir, { recursive: true, force: true });
     }
     await backup.save();
     await this.audit.log({
@@ -1254,6 +1271,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
       throw new BadRequestException(details ?? "Google Drive upload verification failed");
     }
+  }
+
+  private verifyChecksumDigest(digest: Buffer, expected: string): boolean {
+    const normalized = expected.replace(/^sha256:/i, "");
+    return digest.toString("base64") === normalized || digest.toString("hex") === normalized;
   }
 
   /** Integrity verification helper (sha256) usable by scheduled verification jobs. */
