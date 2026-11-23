@@ -281,9 +281,27 @@ export class BackupsService {
       serviceId: service._id!.toString(),
       backupId,
       checksum: backup.checksum,
-    }) as { status?: string; checksumVerified?: boolean; safetyBackupId?: string; safetyBackupChecksum?: string };
+    }) as { status?: string; checksumVerified?: boolean; safetyBackupId?: string; safetyBackupChecksum?: string; safetyBackupSizeBytes?: number };
     if (result.status !== "restored" || result.checksumVerified !== true) {
       throw new BadRequestException("Node Agent did not confirm a verified restore");
+    }
+    let safetyBackupRecord: BackupDocument | undefined;
+    let safetyBackupError: string | undefined;
+    if (result.safetyBackupId && result.safetyBackupChecksum && result.safetyBackupSizeBytes) {
+      try {
+        safetyBackupRecord = await this.persistSafetyBackup(
+          node,
+          service,
+          user,
+          result.safetyBackupId,
+          result.safetyBackupChecksum,
+          result.safetyBackupSizeBytes,
+        );
+      } catch (error) {
+        safetyBackupError = error instanceof Error ? error.message : "Safety backup upload failed";
+      }
+    } else {
+      safetyBackupError = "Node Agent did not return complete safety backup metadata";
     }
     await this.nodes.agentCall(node, "/backups/delete", {
       serviceId: service._id!.toString(),
@@ -293,10 +311,17 @@ export class BackupsService {
       actorId: user.id,
       action: "backups.restore",
       targetId: backupId,
-      detail: result.safetyBackupId ? `safetyBackupId=${result.safetyBackupId}; safetyChecksum=${result.safetyBackupChecksum ?? "unavailable"}` : "restore verified",
+      detail: safetyBackupRecord
+        ? `safetyBackupRecordId=${safetyBackupRecord._id!.toString()}; source=${result.safetyBackupId}`
+        : `restore verified; safety backup remains on node or needs attention: ${safetyBackupError ?? "unknown"}`,
       sensitive: true,
     });
-    return { ok: true, safetyBackupId: result.safetyBackupId ?? null };
+    return {
+      ok: true,
+      safetyBackupId: safetyBackupRecord?._id?.toString() ?? result.safetyBackupId ?? null,
+      safetyBackupStored: Boolean(safetyBackupRecord),
+      safetyBackupError,
+    };
   }
 
   private async persistSafetyBackup(
@@ -367,14 +392,15 @@ export class BackupsService {
       await this.nodes.agentCall(node, "/backups/delete", {
         serviceId: service._id!.toString(),
         backupId: safetyBackupId,
-      });
+      }).catch(() => { backup.localArchiveCleanupPending = true; });
+      await backup.save();
       await this.audit.log({
         actorId: user.id,
         action: "backups.safety.create",
         targetId: backup._id!.toString(),
         detail: `sourceRestoreId=${safetyBackupId}`,
         sensitive: true,
-      });
+      }).catch(() => undefined);
       return backup;
     } catch (error) {
       backup.status = "failed";
