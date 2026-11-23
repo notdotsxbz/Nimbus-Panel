@@ -156,14 +156,20 @@ export class BackupsService {
           if (digest.toString("base64") !== result.checksum && digest.toString("hex") !== result.checksum) {
             throw new BadRequestException("Downloaded archive failed checksum verification");
           }
+          const encryptedPath = join(tempDir, `${backup._id!.toString()}.tar.enc`);
+          const encrypted = await this.encryptArchiveFile(archivePath, encryptedPath);
+          backup.encryptionAlgorithm = "aes-256-gcm";
+          backup.encryptionIv = encrypted.iv;
+          backup.encryptionTag = encrypted.tag;
+          backup.storedSizeBytes = encrypted.sizeBytes;
           const driveOwner = user.role === "customer"
             ? { id: service.ownerId.toString(), role: "customer" as const }
             : user;
           const customer = await this.users.findById(service.ownerId).select("displayName username").lean();
           const customerName = customer?.displayName || customer?.username || "customer";
           backup.remoteFileId = await this.uploadGoogleDriveArchive(
-            archivePath,
-            `nimbus-${serviceId}-${backup._id!.toString()}.tar`,
+            encryptedPath,
+            `nimbus-${serviceId}-${backup._id!.toString()}.tar.enc`,
             driveOwner,
             { serviceId, serviceName: service.name, serviceType: String(service.type), customerName, customerId: service.ownerId.toString() },
           );
