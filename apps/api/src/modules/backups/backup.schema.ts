@@ -39,7 +39,7 @@ export class Backup {
 export type BackupDocument = HydratedDocument<Backup>;
 export const BackupSchema = SchemaFactory.createForClass(Backup);
 BackupSchema.index({ createdAt: -1 });
-BackupSchema.index({ jobId: 1, serviceId: 1 }, { unique: true, sparse: true });
+BackupSchema.index({ jobId: 1, serviceId: 1 }, { unique: true, partialFilterExpression: { jobId: { $exists: true } } });
 
 @Schema({ collection: "auditlogs", timestamps: { createdAt: true, updatedAt: false } })
 export class AuditLog {
