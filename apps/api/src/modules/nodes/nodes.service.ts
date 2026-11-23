@@ -363,7 +363,9 @@ export class NodesService {
       url: `${node.agentUrl}/backups/download`,
       data: { serviceId, backupId },
       headers: { authorization: `Bearer ${token}`, "x-nimbus-node": node._id!.toString() },
-      timeout: 10 * 60 * 1000,
+      timeout: 60 * 60 * 1000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
       responseType: "stream",
       httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
     });
@@ -389,8 +391,9 @@ export class NodesService {
         "content-type": "application/octet-stream",
         "content-length": String(archiveStat.size),
       },
-      timeout: 10 * 60 * 1000,
+      timeout: 60 * 60 * 1000,
       maxBodyLength: Infinity,
+      maxContentLength: Infinity,
       httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
     });
   }
