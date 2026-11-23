@@ -235,6 +235,70 @@ export class IntegrationsService implements OnModuleInit {
     return { url: "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString() };
   }
 
+  private async findOrCreateDriveFolder(accessToken: string, name: string, parentId?: string): Promise<string> {
+    const escapedName = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const clauses = [
+      `name = '${escapedName}'`,
+      "mimeType = 'application/vnd.google-apps.folder'",
+      "trashed = false",
+    ];
+    if (parentId) clauses.push(`'${parentId}' in parents`);
+    const query = new URLSearchParams({ q: clauses.join(" and "), pageSize: "1", fields: "files(id,name)" });
+    const listed = await fetch("https://www.googleapis.com/drive/v3/files?" + query.toString(), {
+      headers: { authorization: "Bearer " + accessToken },
+    });
+    const listData = await listed.json() as { files?: Array<{ id?: string }> ; error?: { message?: string } };
+    if (!listed.ok) throw new BadRequestException(listData.error?.message ?? "Could not inspect the Google Drive backup folders");
+    if (listData.files?.[0]?.id) return listData.files[0].id;
+    const created = await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
+      method: "POST",
+      headers: { authorization: "Bearer " + accessToken, "content-type": "application/json" },
+      body: JSON.stringify({
+        name,
+        mimeType: "application/vnd.google-apps.folder",
+        ...(parentId ? { parents: [parentId] } : {}),
+      }),
+    });
+    const folder = await created.json() as { id?: string; error?: { message?: string } };
+    if (!created.ok || !folder.id) throw new BadRequestException(folder.error?.message ?? "Could not create a Google Drive backup folder");
+    return folder.id;
+  }
+
+  private async ensureDriveRootFolder(accessToken: string, ownerType: "admin" | "customer", existingFolderId?: string): Promise<string> {
+    const rootName = ownerType === "admin" ? "NIMBUS Full Panel Backups" : "NIMBUS Backups";
+    const rootId = existingFolderId || await this.findOrCreateDriveFolder(accessToken, rootName);
+    if (ownerType === "customer") {
+      const categories = ["Minecraft", "Discord Bots", "Websites", "Backends", "Node.js", "Python", "MongoDB", "Databases", "Docker", "Lavalink", "Custom Applications", "VPS", "VDS"];
+      for (const category of categories) await this.findOrCreateDriveFolder(accessToken, category, rootId);
+    } else {
+      const panel = await this.findOrCreateDriveFolder(accessToken, "Panel", rootId);
+      for (const name of ["Database", "Configuration", "System Metadata", "Backup Manifest"]) {
+        await this.findOrCreateDriveFolder(accessToken, name, panel);
+      }
+      await this.findOrCreateDriveFolder(accessToken, "Users", rootId);
+      await this.findOrCreateDriveFolder(accessToken, "Full Backup Manifests", rootId);
+    }
+    return rootId;
+  }
+
+  async googleDriveBackupFolder(ownerType: "admin" | "customer", ownerId: string | undefined, serviceType: string, serviceName: string): Promise<string> {
+    const key = this.googleDriveConnectionKey(ownerType, ownerId);
+    const connection = await this.settings.findOne({ key });
+    if (!connection) throw new BadRequestException("Connect your Google Drive before creating backups");
+    const accessToken = await this.googleDriveAccessToken(ownerType, ownerId);
+    const rootId = connection.folderId || await this.ensureDriveRootFolder(accessToken, ownerType);
+    if (!connection.folderId) await this.settings.updateOne({ key }, { $set: { folderId: rootId } });
+    const rootCategory = serviceType.toLowerCase().replace(/[-_]/g, " ");
+    const categories: Record<string, string> = {
+      minecraft: "Minecraft", discord: "Discord Bots", website: "Websites", backend: "Backends",
+      nodejs: "Node.js", python: "Python", mongodb: "MongoDB", database: "Databases",
+      docker: "Docker", lavalink: "Lavalink", custom: "Custom Applications", vps: "VPS", vds: "VDS",
+    };
+    const categoryName = categories[serviceType.toLowerCase()] ?? (rootCategory ? rootCategory.replace(/\\b\\w/g, (c) => c.toUpperCase()) : "Custom Applications");
+    const categoryId = await this.findOrCreateDriveFolder(accessToken, categoryName, rootId);
+    return this.findOrCreateDriveFolder(accessToken, serviceName.replace(/[\\/\\\\]/g, "-").slice(0, 100) || "Unnamed Service", categoryId);
+  }
+
   async exchangeGoogleDriveCode(code: string, state: string, actorId: string) {
     if (!code || !state || !/^[a-f0-9]{48}$/.test(state)) throw new BadRequestException("Invalid Google OAuth callback");
     const pendingKey = "google-oauth-state:" + state;
@@ -281,11 +345,17 @@ export class IntegrationsService implements OnModuleInit {
         accountEmail = data.email;
       }
     } catch { /* Drive connection remains valid if profile lookup is temporarily unavailable. */ }
-    await this.settings.findOneAndUpdate(
+    const savedConnection = await this.settings.findOneAndUpdate(
       { key },
       { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken })), connectedAt: new Date(), updatedBy: actorId, ...(accountEmail ? { accountEmail } : {}) } },
       { upsert: true, new: true },
     );
+    try {
+      const folderId = await this.ensureDriveRootFolder(tokens.access_token, ownerType, savedConnection.folderId);
+      await this.settings.updateOne({ key }, { $set: { folderId } });
+    } catch (error) {
+      this.logger.error("Google Drive connected, but automatic backup folder setup failed", (error as Error).message);
+    }
     return { connected: true, ownerType };
   }
 
