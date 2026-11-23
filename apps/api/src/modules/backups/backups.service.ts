@@ -26,16 +26,29 @@ export class BackupsService {
   ) {}
 
   async list(user: { id: string; role: string }, serviceId?: string) {
-    const filter: Record<string, unknown> = serviceId ? { serviceId } : {};
-    if (serviceId) await this.services.get(serviceId, user as never); // ownership check
-    return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
+    const filter: Record<string, unknown> = {};
+    if (serviceId) {
+      const service = await this.services.get(serviceId, user as never);
+      filter.serviceId = service._id;
+    } else if (user.role === "customer") {
+      const ownedServices = await this.services.listFor(user as never);
+      const ids = ownedServices.map((service) => service._id);
+      filter.serviceId = { $in: ids };
+    }
+    return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type");
   }
 
   async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local") {
     const service = await this.services.get(serviceId, user as never);
     const node = await this.nodes.get(service.nodeId.toString());
+    const driveOwnerType = user.role === "customer" ? "customer" : "admin";
+    const driveOwnerId = driveOwnerType === "customer" ? service.ownerId : undefined;
     const backup = await this.backups.create({
       serviceId: new Types.ObjectId(serviceId),
+      ownerId: service.ownerId,
+      requestedBy: new Types.ObjectId(user.id),
+      driveOwnerType,
+      ...(driveOwnerId ? { driveOwnerId } : {}),
       destination,
       status: "running",
       trigger,
@@ -55,6 +68,8 @@ export class BackupsService {
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           archive,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
+          driveOwnerType,
+          driveOwnerId?.toString(),
         );
       }
       backup.status = "completed";
@@ -88,8 +103,13 @@ export class BackupsService {
     return { ok: true };
   }
 
-  private async uploadGoogleDriveArchive(archive: Buffer, filename: string): Promise<string> {
-    const accessToken = await this.integrations.googleDriveAccessToken();
+  private async uploadGoogleDriveArchive(
+    archive: Buffer,
+    filename: string,
+    ownerType: "admin" | "customer",
+    ownerId?: string,
+  ): Promise<string> {
+    const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
     let metadata;
     try {
       metadata = await axios.post(
