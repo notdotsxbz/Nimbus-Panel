@@ -6,6 +6,18 @@ import type { BackupDestination, BackupStatus } from "@nimbus/shared";
 export class Backup {
   @Prop({ type: Types.ObjectId, ref: "Service", required: true, index: true })
   serviceId!: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: "User", required: true, index: true })
+  ownerId!: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: "User", required: true })
+  requestedBy!: Types.ObjectId;
+  @Prop({ enum: ["admin", "customer"], default: "admin", index: true })
+  driveOwnerType!: "admin" | "customer";
+  @Prop({ type: Types.ObjectId, ref: "User" })
+  driveOwnerId?: Types.ObjectId;
+  @Prop() backupName?: string;
+  @Prop() backupType?: string;
+  @Prop() manifest?: Record<string, unknown>;
+  @Prop() verificationStatus?: "pending" | "verified" | "failed";
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
