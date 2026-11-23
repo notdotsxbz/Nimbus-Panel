@@ -26,7 +26,7 @@ export class Backup {
   @Prop() checksum?: string; // sha256 integrity verification
   @Prop() remoteFileId?: string;
   @Prop({ type: Types.ObjectId, ref: "User" }) createdBy?: Types.ObjectId;
-  @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall"], default: "manual" })
+  @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"], default: "manual" })
   trigger!: string;
   @Prop() error?: string;
   @Prop() completedAt?: Date;
