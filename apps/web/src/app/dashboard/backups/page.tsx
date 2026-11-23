@@ -56,7 +56,7 @@ export default function CustomerBackups() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `nimbus-backup-${id}.tar`;
+      anchor.download = `nimbus-backup-${id}.tar.gz`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
