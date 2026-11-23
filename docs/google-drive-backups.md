@@ -49,6 +49,7 @@ sudo grep -qE '^BACKUP_ENCRYPTION_KEY=[a-fA-F0-9]{64}$' /opt/nimbus/.env \
 - Admin Google Drive is independent from customer Drive accounts.
 - Full panel backup jobs include a MongoDB dump, encrypted `.env` snapshot, infrastructure metadata, customer-wise service archives, and a manifest.
 - Selected customer and selected service backup jobs are also available.
+- Admins can configure daily or weekly full-panel schedules; schedule times use UTC.
 - Full-panel backups are best-effort sequential snapshots, not globally quiesced point-in-time snapshots.
 - Full VM/disk snapshots for VPS/VDS are not supported by the current Node Agent and are reported as excluded/partial.
 
