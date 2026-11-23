@@ -205,10 +205,47 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
           await this.schedules.updateOne({ _id: claimed._id }, { $set: { leaseUntil: null } });
         }
       }
+      await this.runScheduledFullPanelBackups(now);
     } catch (error) {
       console.error("[backup-scheduler] worker failed:", error instanceof Error ? error.message : "unknown error");
     } finally {
       this.scheduleWorkerRunning = false;
+    }
+  }
+
+  private async runScheduledFullPanelBackups(now: Date) {
+    const due = await this.fullPanelSchedules.find({ enabled: true, nextRunAt: { $lte: now } }).sort({ nextRunAt: 1 }).limit(5);
+    for (const candidate of due) {
+      const nextRunAt = this.nextScheduleRun(candidate.frequency, candidate.time, now);
+      const claimed = await this.fullPanelSchedules.findOneAndUpdate(
+        {
+          _id: candidate._id,
+          enabled: true,
+          nextRunAt: { $lte: now },
+          $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: null }, { leaseUntil: { $lt: now } }],
+        },
+        { $set: { leaseUntil: new Date(now.getTime() + 30 * 60 * 1000), lastRunAt: now, nextRunAt: nextRunAt ?? null } },
+        { new: true },
+      );
+      if (!claimed) continue;
+      const admin = await this.backups.db.collection("users").findOne({ _id: claimed.ownerId });
+      if (!admin || !["owner", "admin"].includes(String(admin.role))) {
+        await this.fullPanelSchedules.updateOne({ _id: claimed._id }, { $set: { enabled: false, leaseUntil: null } });
+        continue;
+      }
+      const user = { id: claimed.ownerId.toString(), role: String(admin.role) };
+      try {
+        await this.createFullPanelBackup(user, "scheduled");
+        if (claimed.notifyOnCompletion) {
+          await this.notifications.notify(user.id, "backup", "Scheduled Full Panel Backup queued", "A scheduled Full Panel Backup has been queued for the Admin Google Drive.");
+        }
+      } catch (error) {
+        if (claimed.notifyOnCompletion) {
+          await this.notifications.notify(user.id, "backup", "Scheduled Full Panel Backup failed", error instanceof Error ? error.message : "The scheduled Full Panel Backup could not be queued.");
+        }
+      } finally {
+        await this.fullPanelSchedules.updateOne({ _id: claimed._id }, { $set: { leaseUntil: null } });
+      }
     }
   }
 
