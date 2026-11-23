@@ -23,7 +23,7 @@ export class Backup {
   @Prop({ default: false }) localArchiveCleanupPending?: boolean;
   @Prop() remoteFileId?: string;
   @Prop({ type: Types.ObjectId, ref: "User" }) createdBy?: Types.ObjectId;
-  @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall"], default: "manual" })
+  @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore-safety"], default: "manual" })
   trigger!: string;
   @Prop() error?: string;
   @Prop() completedAt?: Date;
