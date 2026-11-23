@@ -71,8 +71,10 @@ mongodump --quiet --config "$OLD_MONGO_CONFIG" --archive="$SAFETY_DIR/database-b
 
 rollback() {
   local exit_code=$?
+  trap - EXIT
   if [[ "$RESTORE_STARTED" -eq 1 && "$RESTORE_COMPLETE" -eq 0 ]]; then
     log "Restore failed. Attempting to roll back the database and .env…"
+    systemctl stop nimbus-web nimbus-api || true
     cp -a "$SAFETY_DIR/env-before-restore.bak" "$ENV_FILE"
     chown nimbus:nimbus "$ENV_FILE" || true
     chmod 600 "$ENV_FILE" || true
@@ -83,11 +85,11 @@ rollback() {
   fi
   exit "$exit_code"
 }
-trap rollback ERR
+trap rollback EXIT
 
+RESTORE_STARTED=1
 log "Stopping NIMBUS web and API services…"
 systemctl stop nimbus-web nimbus-api
-RESTORE_STARTED=1
 
 log "Installing the backed-up environment file…"
 install -o nimbus -g nimbus -m 600 "$RESTORE_DIR/environment.env" "$ENV_FILE"
@@ -112,9 +114,8 @@ systemctl is-active --quiet nimbus-api || fail "NIMBUS API did not become active
 systemctl is-active --quiet nimbus-web || fail "NIMBUS web did not become active."
 
 RESTORE_COMPLETE=1
-trap - ERR
+trap - EXIT
 log "Panel database and configuration restore completed."
 log "Safety backup: $SAFETY_DIR"
-rm -rf -- "$RESTORE_DIR"
-log "Removed decrypted staging files after successful restore."
+rm -rf -- "$RESTORE_DIR" || log "WARNING: could not remove decrypted staging files at $RESTORE_DIR"
 log "Next: open the Admin Backups page and restore the service backups listed in the restored backup manifest."
