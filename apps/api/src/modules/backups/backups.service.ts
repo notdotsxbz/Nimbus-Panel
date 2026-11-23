@@ -45,11 +45,13 @@ export class BackupsService {
     if (serviceId) {
       await this.services.get(serviceId, user); // ownership check
       filter.serviceId = new Types.ObjectId(serviceId);
+      if (user.role === "customer") filter.driveOwnerType = "customer";
     } else if (!isStaffRole(user.role)) {
       const ownedServices = await this.services.listFor(user);
       const serviceIds = ownedServices.map((service) => service._id);
       if (serviceIds.length === 0) return [];
       filter.serviceId = { $in: serviceIds };
+      filter.driveOwnerType = "customer";
     }
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
   }
@@ -60,6 +62,7 @@ export class BackupsService {
     const backup = await this.backups.create({
       serviceId: new Types.ObjectId(serviceId),
       ownerId: service.ownerId,
+      driveOwnerType: destination === "gdrive" ? (user.role === "customer" ? "customer" : "admin") : undefined,
       destination,
       status: "running",
       trigger,
@@ -132,8 +135,36 @@ export class BackupsService {
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
+    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
     const node = await this.nodes.get(service.nodeId.toString());
     if (!backup.checksum) throw new BadRequestException("Backup has no integrity checksum and cannot be restored safely");
+    if (backup.destination === "gdrive") {
+      if (!backup.remoteFileId || !backup.sizeBytes) throw new BadRequestException("Google Drive backup metadata is incomplete");
+      const driveOwner = backup.driveOwnerType === "customer"
+        ? { id: (backup.ownerId ?? service.ownerId).toString(), role: "customer" as const }
+        : { id: user.id, role: user.role };
+      const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
+      const remote = await axios.get(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          responseType: "stream",
+          timeout: 10 * 60 * 1000,
+          maxContentLength: Infinity,
+        },
+      );
+      const uploaded = await this.nodes.uploadBackupArchiveStream(
+        node,
+        service._id!.toString(),
+        backupId,
+        backup.checksum,
+        backup.sizeBytes,
+        remote.data,
+      );
+      if (!uploaded.uploaded || uploaded.checksum !== backup.checksum || uploaded.sizeBytes !== backup.sizeBytes) {
+        throw new BadRequestException("Node Agent did not verify the downloaded Google Drive archive");
+      }
+    }
     const result = await this.nodes.agentCall(node, "/backups/restore", {
       serviceId: service._id!.toString(),
       backupId,
