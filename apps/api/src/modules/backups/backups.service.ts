@@ -622,6 +622,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const script = [
       "#!/usr/bin/env bash",
       "set -Eeuo pipefail",
+      "umask 077",
       `PANEL_ROOT=${JSON.stringify(panelRoot)}`,
       'STAGING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
       'if [[ "$EUID" -ne 0 ]]; then echo "Run this recovery script with sudo."; exit 1; fi',
@@ -634,6 +635,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       'if [[ -z "$CURRENT_MONGODB_URI" ]]; then echo "Current MONGODB_URI is missing from .env."; exit 1; fi',
       'SAFETY_DIR="/var/backups/nimbus/full-restore-$(date +%Y%m%d-%H%M%S)"',
       'mkdir -p "$SAFETY_DIR"',
+      'chmod 700 "$SAFETY_DIR"',
       'cp -a "$PANEL_ROOT/.env" "$SAFETY_DIR/.env.before"',
       'mongodump --uri="$CURRENT_MONGODB_URI" --db nimbus --archive="$SAFETY_DIR/database.before.archive.gz" --gzip',
       'read -r -s -p "Enter INTEGRATION_ENCRYPTION_KEY from your separate secure escrow: " NIMBUS_RECOVERY_KEY; echo',
@@ -684,6 +686,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       'install -m 600 "$STAGING_DIR/restore.env" "$PANEL_ROOT/.env"',
       'systemctl start nimbus-api nimbus-web',
       'SERVICES_STOPPED=0',
+      'rm -f "$STAGING_DIR/database.archive.gz" "$STAGING_DIR/configuration.json" "$STAGING_DIR/manifest.json" "$STAGING_DIR/restore.env"',
       'trap - ERR',
       'echo "Panel database and configuration restored. Safety backup: $SAFETY_DIR"',
       'echo "Next, sign in and use Admin Backups to restore customer service archives from the Full Panel manifest."',
