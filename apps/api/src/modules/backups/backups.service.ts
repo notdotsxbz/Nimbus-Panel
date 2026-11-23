@@ -927,7 +927,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async createFullPanelBackup(user: { id: string; role: string }) {
+  async createFullPanelBackup(user: { id: string; role: string }, trigger: "manual" | "scheduled" = "manual") {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
     const driveStatus = await this.integrations.googleDriveStatus("admin");
     if (!driveStatus.connected) throw new BadRequestException("Connect the Admin Google Drive before creating a Full Panel Backup");
@@ -941,7 +941,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       ownerType: "admin",
       requesterRole: user.role,
       serviceIds: services.map((service) => service._id!),
-      trigger: "manual",
+      trigger,
       destination: "gdrive",
       mode: "full-panel",
       status: "queued",
