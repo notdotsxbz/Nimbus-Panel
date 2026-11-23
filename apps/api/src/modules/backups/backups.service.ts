@@ -840,6 +840,12 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   async delete(backupId: string, user: { id: string; role: string }) {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
+    const activeRestore = await this.jobs.findOne({
+      mode: "restore-batch",
+      status: { $in: ["queued", "running"] },
+      backupIds: new Types.ObjectId(backupId),
+    });
+    if (activeRestore) throw new BadRequestException("This backup is currently queued for restore and cannot be deleted");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
     if (backup.remoteFileId) {
       const ownerType = backup.driveOwnerType ?? "admin";
