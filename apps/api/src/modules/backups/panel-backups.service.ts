@@ -503,6 +503,10 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       await this.backups.downloadAdminPanelArtifact(database.fileId, database, user, join(restoreDir, "database.archive.gz"));
       await this.backups.downloadAdminPanelArtifact(configuration.fileId, configuration, user, join(restoreDir, "environment.env"));
       await this.backups.downloadAdminPanelArtifact(systemMetadata.fileId, systemMetadata, user, join(restoreDir, "system-metadata.json"));
+      const checksumHex = (value: string) => /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : Buffer.from(value, "base64").toString("hex");
+      await writeFile(join(restoreDir, "database.archive.gz.sha256"), `${checksumHex(database.checksum)}  database.archive.gz\n`, { mode: 0o600, flag: "wx" });
+      await writeFile(join(restoreDir, "environment.env.sha256"), `${checksumHex(configuration.checksum)}  environment.env\n`, { mode: 0o600, flag: "wx" });
+      await writeFile(join(restoreDir, "system-metadata.json.sha256"), `${checksumHex(systemMetadata.checksum)}  system-metadata.json\n`, { mode: 0o600, flag: "wx" });
       await writeFile(join(restoreDir, "manifest.json"), JSON.stringify(record.manifest, null, 2), { mode: 0o600, flag: "wx" });
       await writeFile(
         join(restoreDir, "README-RESTORE.txt"),
