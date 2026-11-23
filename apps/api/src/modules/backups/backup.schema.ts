@@ -16,7 +16,7 @@ export class Backup {
   driveOwnerId?: Types.ObjectId;
   @Prop() backupName?: string;
   @Prop() backupType?: string;
-  @Prop() manifest?: Record<string, unknown>;
+  @Prop({ type: Object }) manifest?: Record<string, unknown>;
   @Prop() verificationStatus?: "pending" | "verified" | "failed";
   @Prop({ type: Object }) encryptionMetadata?: { algorithm: string; iv: string; authTag: string; keyVersion: string };
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
