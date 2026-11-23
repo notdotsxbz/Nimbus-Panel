@@ -600,8 +600,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
     if (confirmed !== true) throw new BadRequestException("Explicit confirmation is required before preparing panel recovery");
     const job = await this.jobs.findById(jobId);
-    if (!job || job.mode !== "full-panel" || job.status !== "completed") {
-      throw new BadRequestException("Select a completed Full Panel Backup");
+    if (!job || job.mode !== "full-panel") {
+      throw new BadRequestException("Select a Full Panel Backup job");
     }
     const artifacts = job.panelArtifacts ?? {};
     type PanelArtifactRef = { fileId: string; checksum: string; encryptionMetadata: { algorithm: string; iv: string; authTag: string; keyVersion: string } };
