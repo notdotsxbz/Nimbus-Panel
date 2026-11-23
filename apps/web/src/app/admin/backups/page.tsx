@@ -176,6 +176,7 @@ export default function AdminBackups() {
           </div>
           <p className="mt-4 text-xs text-muted">Full Panel Backup includes: {summary.included.join(" · ")}</p>
           <p className="mt-2 text-xs text-amber-400">Not included: {summary.excluded.join(" · ")}.</p>
+          <p className="mt-2 text-xs text-muted">Full-panel database/configuration restore is not available yet. Admins can queue restores for selected services or a customer's latest service backups below.</p>
         </GlassCard>
       ) : null}
 
