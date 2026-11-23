@@ -46,7 +46,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (frequency === "manual") return undefined;
     if (frequency === "every6h") return new Date(from.getTime() + 6 * 60 * 60 * 1000);
     if (frequency === "every12h") return new Date(from.getTime() + 12 * 60 * 60 * 1000);
-    const match = /^(\\d{2}):(\\d{2})$/.exec(time);
+    const match = /^(\d{2}):(\d{2})$/.exec(time);
     const hour = match ? Number(match[1]) : 2;
     const minute = match ? Number(match[2]) : 0;
     const next = new Date(from);
@@ -81,7 +81,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Invalid backup frequency");
     }
     const time = dto.time ?? "02:00";
-    if (!/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(time)) throw new BadRequestException("Backup time must be in 24-hour HH:mm format (UTC)");
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new BadRequestException("Backup time must be in 24-hour HH:mm format (UTC)");
     const retention = dto.retention ?? 5;
     if (![0, 5, 10, 30].includes(retention)) throw new BadRequestException("Retention must be 5, 10, 30 or 0 for never delete");
     const enabled = dto.enabled === true && frequency !== "manual";
