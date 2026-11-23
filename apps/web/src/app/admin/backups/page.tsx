@@ -16,6 +16,7 @@ interface BackupRow {
   createdAt: string;
 }
 interface ServiceOption { _id: string; name: string; type: string; }
+interface AdminCustomerOption { id: string; name: string; serviceCount: number; }
 interface BackupJobRow {
   _id: string;
   mode?: string;
@@ -39,6 +40,7 @@ export default function AdminBackups() {
   const [rows, setRows] = useState<BackupRow[]>([]);
   const [jobs, setJobs] = useState<BackupJobRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
+  const [customers, setCustomers] = useState<AdminCustomerOption[]>([]);
   const [serviceId, setServiceId] = useState("");
   const [selectedBackupIds, setSelectedBackupIds] = useState<string[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
