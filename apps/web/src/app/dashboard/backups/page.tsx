@@ -17,6 +17,7 @@ interface BackupRow {
   _id: string;
   destination: string;
   status: string;
+  progressStage?: string;
   trigger: string;
   sizeBytes?: number;
   createdAt: string;
