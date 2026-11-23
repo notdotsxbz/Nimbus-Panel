@@ -597,9 +597,10 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Select a completed Full Panel Backup");
     }
     const artifacts = job.panelArtifacts ?? {};
-    const database = artifacts.database as { fileId?: string; checksum?: string; encryptionMetadata?: any } | undefined;
-    const configuration = artifacts.configuration as { fileId?: string; checksum?: string; encryptionMetadata?: any } | undefined;
-    const manifest = artifacts.manifest as { fileId?: string; checksum?: string; encryptionMetadata?: any } | undefined;
+    type PanelArtifactRef = { fileId: string; checksum: string; encryptionMetadata: { algorithm: string; iv: string; authTag: string; keyVersion: string } };
+    const database = artifacts.database as PanelArtifactRef | undefined;
+    const configuration = artifacts.configuration as PanelArtifactRef | undefined;
+    const manifest = artifacts.manifest as PanelArtifactRef | undefined;
     if (!database?.fileId || !database.checksum || !database.encryptionMetadata || !configuration?.fileId || !configuration.checksum || !configuration.encryptionMetadata) {
       throw new BadRequestException("The Full Panel Backup is missing its database or configuration artifact");
     }
@@ -610,12 +611,12 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     await chmod(stagingDir, 0o700);
     const databasePath = join(stagingDir, "database.archive.gz");
     const configPath = join(stagingDir, "configuration.json");
-    await this.downloadAdminPanelArtifact(database as Required<typeof database>, databasePath);
-    await this.downloadAdminPanelArtifact(configuration as Required<typeof configuration>, configPath);
+    await this.downloadAdminPanelArtifact(database, databasePath);
+    await this.downloadAdminPanelArtifact(configuration, configPath);
     let manifestPath: string | null = null;
     if (manifest?.fileId && manifest.checksum && manifest.encryptionMetadata) {
       manifestPath = join(stagingDir, "manifest.json");
-      await this.downloadAdminPanelArtifact(manifest as Required<typeof manifest>, manifestPath);
+      await this.downloadAdminPanelArtifact(manifest, manifestPath);
     }
     const panelRoot = process.cwd();
     const script = [
@@ -770,6 +771,18 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                   recoveredFromFullPanelJob: jobId,
                 },
               });
+            }
+            if (backup.remoteFileId !== String(item.driveFileId) || !backup.encryptionMetadata) {
+              backup.remoteFileId = String(item.driveFileId);
+              backup.checksum = String(item.checksum);
+              backup.sizeBytes = Number(item.sizeBytes ?? 0);
+              backup.encryptionMetadata = item.encryptionMetadata;
+              backup.driveOwnerType = "admin";
+              backup.destination = "gdrive";
+              backup.status = "completed";
+              backup.progressStage = "completed";
+              backup.verificationStatus = "verified";
+              await backup.save();
             }
             backupIds.push(backup._id!.toString());
           } catch (error) {
