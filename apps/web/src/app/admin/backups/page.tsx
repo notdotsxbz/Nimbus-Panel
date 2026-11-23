@@ -49,14 +49,16 @@ export default function AdminBackups() {
 
   const load = async () => {
     try {
-      const [backupRows, serviceRows, backupSummary, backupJobs] = await Promise.all([
+      const [backupRows, serviceRows, customerRows, backupSummary, backupJobs] = await Promise.all([
         api.get<BackupRow[]>("/backups"),
         api.get<ServiceOption[]>("/services"),
+        api.get<AdminCustomerOption[]>("/backups/admin/customers"),
         api.get<AdminBackupSummary>("/backups/admin/summary"),
         api.get<BackupJobRow[]>("/backups/jobs"),
       ]);
       setRows(backupRows);
       setServices(serviceRows);
+      setCustomers(customerRows);
       setSummary(backupSummary);
       setJobs(backupJobs);
       if (!serviceId && serviceRows.length) setServiceId(serviceRows[0]._id);
@@ -107,6 +109,25 @@ export default function AdminBackups() {
       await load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Restore could not be queued", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const backupSelectedCustomer = async () => {
+    if (!selectedCustomerId) return;
+    const customer = customers.find((item) => item.id === selectedCustomerId);
+    if (!customer || customer.serviceCount < 1) return;
+    if (!confirm(`Back up all ${customer.serviceCount} eligible services belonging to ${customer.name} to the Admin Google Drive?`)) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ jobId: string; total: number }>("/backups/admin/batch", {
+        mode: "selected-customers", customerIds: [selectedCustomerId],
+      });
+      show(`Customer backup job queued for ${result.total} services (${result.jobId.slice(0, 8)})`, "info");
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Customer backup could not be queued", "err");
     } finally {
       setBusy(false);
     }
@@ -173,12 +194,10 @@ export default function AdminBackups() {
     }
   };
 
-  const customerOptions = Array.from(new Map(rows.map((backup) => {
-    const owner = typeof backup.ownerId === "object" ? backup.ownerId : null;
-    const id = owner?._id ?? (typeof backup.ownerId === "string" ? backup.ownerId : "");
-    const label = owner?.displayName ?? owner?.username ?? owner?.email ?? id;
-    return [id, label] as const;
-  }).filter(([id]) => Boolean(id))).entries());
+  const customerOptions = customers.map((customer) => [
+    customer.id,
+    customer.name + " (" + customer.serviceCount + " services)",
+  ] as const);
 
   return (
     <div className="space-y-6">
@@ -250,6 +269,7 @@ export default function AdminBackups() {
             {customerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
         </div>
+        <button className="btn-ghost" disabled={busy || !selectedCustomerId || (customers.find((item) => item.id === selectedCustomerId)?.serviceCount ?? 0) < 1} onClick={() => void backupSelectedCustomer()}>Back up customer</button>
         <button className="btn-ghost" disabled={busy || !selectedCustomerId} onClick={() => void restoreSelectedCustomer()}>Restore customer</button>
         <button className="btn-primary" disabled={busy || !selectedBackupIds.length} onClick={() => void restoreSelectedBackups()}>Restore selected ({selectedBackupIds.length})</button>
       </GlassCard>
