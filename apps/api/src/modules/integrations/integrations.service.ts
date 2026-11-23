@@ -339,6 +339,18 @@ export class IntegrationsService implements OnModuleInit {
     }
   }
 
+  async testGoogleDriveConnection(actor: AuthUser) {
+    const accessToken = await this.googleDriveAccessToken(actor);
+    const response = await fetch("https://www.googleapis.com/drive/v3/about?fields=user", {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      throw new BadRequestException("Google Drive connection test failed. Reconnect the Google account and try again.");
+    }
+    const payload = await response.json() as { user?: { emailAddress?: string } };
+    return { connected: true, accountEmail: payload.user?.emailAddress ?? null };
+  }
+
   async disconnectGoogleDrive(actor: AuthUser) {
     const keys = this.googleDriveSettingKeys(actor);
     // Disconnecting a Drive removes only that account's refresh token.
