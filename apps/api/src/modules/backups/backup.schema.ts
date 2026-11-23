@@ -6,6 +6,8 @@ import type { BackupDestination, BackupStatus } from "@nimbus/shared";
 export class Backup {
   @Prop({ type: Types.ObjectId, ref: "Service", required: true, index: true })
   serviceId!: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: "BackupJob", index: true })
+  jobId?: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: "User", required: true, index: true })
   ownerId!: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: "User", required: true })
@@ -37,6 +39,7 @@ export class Backup {
 export type BackupDocument = HydratedDocument<Backup>;
 export const BackupSchema = SchemaFactory.createForClass(Backup);
 BackupSchema.index({ createdAt: -1 });
+BackupSchema.index({ jobId: 1, serviceId: 1 }, { unique: true, sparse: true });
 
 @Schema({ collection: "auditlogs", timestamps: { createdAt: true, updatedAt: false } })
 export class AuditLog {
