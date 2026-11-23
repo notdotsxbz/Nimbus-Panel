@@ -648,12 +648,13 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       job.leaseUntil = undefined;
       job.completedAt = new Date();
       await job.save();
-      await this.notifications.notify(
-        job.requestedBy.toString(),
-        "backup",
-        job.status === "completed" ? "Backup job completed" : "Backup job failed",
-        job.completed + " of " + job.total + " backup tasks completed; " + job.failed + " failed.",
-      );
+      const fullPanelSchedule = job.mode === "full-panel" ? await this.fullPanelSchedules.findOne({ ownerId: job.ownerId }) : null;
+      if (job.trigger !== "scheduled" || !fullPanelSchedule || fullPanelSchedule.notifyOnCompletion) {
+        await this.notifications.notify(job.requestedBy.toString(), "backup", job.status === "completed" ? "Backup job completed" : "Backup job failed", job.completed + " of " + job.total + " backup tasks completed; " + job.failed + " failed.");
+      }
+      if (job.mode === "full-panel" && job.status === "completed" && fullPanelSchedule) {
+        await this.applyFullPanelRetention(fullPanelSchedule, user);
+      }
       await this.audit.log({
         actorId: job.requestedBy.toString(),
         action: job.mode === "full-panel" ? "backups.full-panel.completed" : "backups.job.completed",
