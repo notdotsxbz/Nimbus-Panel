@@ -572,6 +572,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
     const driveStatus = await this.integrations.googleDriveStatus("admin");
     if (!driveStatus.connected) throw new BadRequestException("Connect the Admin Google Drive before creating a Full Panel Backup");
+    const activeJob = await this.jobs.findOne({ mode: "full-panel", status: { $in: ["queued", "running"] } });
+    if (activeJob) throw new BadRequestException("A Full Panel Backup is already queued or running");
     const services = await this.services.listFor(user as never, {}, 1000);
     if (services.length >= 1000) throw new BadRequestException("This panel exceeds the 1000-service Full Panel Backup limit.");
     const job = await this.jobs.create({
@@ -878,12 +880,19 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const service = await this.services.get(backup.serviceId.toString(), user as never);
       selected.push({ backup, service });
     }
+    const serviceIds = selected.map((item) => item.service._id!);
+    const activeRestore = await this.jobs.findOne({
+      mode: "restore-batch",
+      status: { $in: ["queued", "running"] },
+      serviceIds: { $in: serviceIds },
+    });
+    if (activeRestore) throw new BadRequestException("A restore is already queued or running for one of the selected services");
     const job = await this.jobs.create({
       requestedBy: new Types.ObjectId(user.id),
       ownerId: new Types.ObjectId(user.id),
       ownerType: user.role === "customer" ? "customer" : "admin",
       requesterRole: user.role,
-      serviceIds: selected.map((item) => item.service._id!),
+      serviceIds,
       backupIds: selected.map((item) => item.backup._id!),
       trigger: "manual",
       destination: "gdrive",
