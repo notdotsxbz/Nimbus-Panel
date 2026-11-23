@@ -35,6 +35,12 @@ export class BackupsController {
     return this.backups.adminBackupSummary(user);
   }
 
+  @Post("admin/full")
+  @Roles("owner", "admin")
+  createFullPanelBackup(@CurrentUser() user: AuthUser) {
+    return this.backups.createFullPanelBackup(user);
+  }
+
   @Post("admin/batch")
   @Roles("owner", "admin")
   createAdminBatch(
