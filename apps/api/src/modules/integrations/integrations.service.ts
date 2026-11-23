@@ -281,6 +281,28 @@ export class IntegrationsService implements OnModuleInit {
     return rootId;
   }
 
+  async googleDriveAdminPanelFolder(section: "Database" | "Configuration" | "System Metadata" | "Backup Manifest" | "Full Backup Manifests"): Promise<string> {
+    const key = this.googleDriveConnectionKey("admin");
+    let connection = await this.settings.findOne({ key });
+    if (!connection) {
+      const legacy = await this.settings.findOne({ key: "google-drive" });
+      if (legacy) {
+        connection = await this.settings.findOneAndUpdate(
+          { key },
+          { $setOnInsert: { encryptedValue: legacy.encryptedValue, connectedAt: legacy.connectedAt, updatedBy: legacy.updatedBy } },
+          { upsert: true, new: true },
+        );
+      }
+    }
+    if (!connection) throw new BadRequestException("Connect the Admin Google Drive before creating a full panel backup");
+    const accessToken = await this.googleDriveAccessToken("admin");
+    const rootId = connection.folderId || await this.ensureDriveRootFolder(accessToken, "admin");
+    if (!connection.folderId) await this.settings.updateOne({ key }, { $set: { folderId: rootId } });
+    if (section === "Full Backup Manifests") return this.findOrCreateDriveFolder(accessToken, section, rootId);
+    const panelId = await this.findOrCreateDriveFolder(accessToken, "Panel", rootId);
+    return this.findOrCreateDriveFolder(accessToken, section, panelId);
+  }
+
   async googleDriveBackupFolder(
     ownerType: "admin" | "customer",
     ownerId: string | undefined,
