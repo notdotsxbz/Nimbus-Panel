@@ -19,6 +19,7 @@ interface ServiceOption { _id: string; name: string; type: string; }
 interface BackupJobRow {
   _id: string;
   mode?: string;
+  panelArtifacts?: Record<string, unknown>;
   status: string;
   total: number;
   completed: number;
@@ -218,7 +219,7 @@ export default function AdminBackups() {
               <span className="text-xs uppercase">{job.status}</span>
               {job.mode === "full-panel" ? (
                 <div className="flex flex-wrap gap-2">
-                  {job.status === "completed" ? <button className="btn-ghost text-xs" disabled={busy} onClick={() => void prepareFullPanelRecovery(job._id)}>Prepare DB/config recovery</button> : null}
+                  {job.status === "completed" && job.panelArtifacts?.manifest ? <button className="btn-ghost text-xs" disabled={busy} onClick={() => void prepareFullPanelRecovery(job._id)}>Prepare DB/config recovery</button> : null}
                   <button className="btn-ghost text-xs" disabled={busy} onClick={() => void restoreFullPanelServices(job._id)}>Restore services from manifest</button>
                 </div>
               ) : null}
