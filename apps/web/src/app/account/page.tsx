@@ -22,6 +22,7 @@ interface PublicSettings {
 }
 
 interface DriveStatus { connected: boolean; connectedAt: string | null; reconnectRequired?: boolean; accountEmail?: string | null; }
+interface BackupStatRow { status: string; createdAt: string; }
 
 interface MeAppearance {
   themeKey: string;
@@ -39,6 +40,7 @@ export default function AccountSettings() {
   const [prefs, setPrefs] = useState<MeAppearance | null>(null);
   const [drive, setDrive] = useState<DriveStatus>({ connected: false, connectedAt: null });
   const [driveBusy, setDriveBusy] = useState(false);
+  const [backupStats, setBackupStats] = useState<{ total: number; lastSuccessfulAt: string | null }>({ total: 0, lastSuccessfulAt: null });
   const { show, node } = useToast();
   // Visible Back navigation — Settings must never be a dead end.
   const goBack = () => {
@@ -64,6 +66,12 @@ export default function AccountSettings() {
         setPub(s);
         setPrefs(me);
         try { setDrive(await api.get<DriveStatus>("/integrations/google-drive")); } catch { /* Drive status is optional */ }
+        try {
+          const backupRows = await api.get<{ items?: BackupStatRow[] } | BackupStatRow[]>("/backups");
+          const items = Array.isArray(backupRows) ? backupRows : backupRows.items ?? [];
+          const completed = items.filter(item => item.status === "completed").sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setBackupStats({ total: items.length, lastSuccessfulAt: completed[0]?.createdAt ?? null });
+        } catch { /* Backup statistics are optional */ }
       } catch {
         /* appearance is optional — leave defaults */
       }
@@ -107,6 +115,19 @@ export default function AccountSettings() {
       show(`Google Drive connection verified${result.accountEmail ? ` as ${result.accountEmail}` : ""}`, "ok");
     } catch (error) {
       show(error instanceof Error ? error.message : "Google Drive test failed", "err");
+    } finally { setDriveBusy(false); }
+  };
+
+  const openDriveFolder = async () => {
+    const tab = window.open("about:blank", "_blank");
+    setDriveBusy(true);
+    try {
+      const result = await api.get<{ url: string }>("/backups/drive-folder");
+      if (tab) tab.location.href = result.url;
+      else show("Allow pop-ups to open your Google Drive folder", "err");
+    } catch (error) {
+      tab?.close();
+      show(error instanceof Error ? error.message : "Could not open backup folder", "err");
     } finally { setDriveBusy(false); }
   };
 
@@ -183,10 +204,12 @@ export default function AccountSettings() {
               <h2 className="font-semibold">Integrations · Google Drive</h2>
               <p className="mt-1 text-sm text-muted">Connect your personal Google Drive to store your service backups privately.</p>
               <p className="mt-1 text-xs text-muted">{drive.connected ? `Connected${drive.accountEmail ? ` as ${drive.accountEmail}` : ""}${drive.connectedAt ? ` · since ${new Date(drive.connectedAt).toLocaleDateString()}` : ""}` : "Not connected"}</p>
+              <p className="mt-1 text-xs text-muted">{backupStats.total} backups · Last successful: {backupStats.lastSuccessfulAt ? new Date(backupStats.lastSuccessfulAt).toLocaleString() : "Never"} · Folder: NIMBUS Backups</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button className="btn-primary" disabled={driveBusy} onClick={() => void connectDrive()}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
               {drive.connected ? <button className="btn-ghost" disabled={driveBusy} onClick={() => void testDrive()}>Test Connection</button> : null}
+              {drive.connected ? <button className="btn-ghost" disabled={driveBusy} onClick={() => void openDriveFolder()}>Open Backup Folder</button> : null}
               {drive.connected ? <button className="btn-ghost" disabled={driveBusy} onClick={() => void openDriveFolder()}>Open Backup Folder</button> : null}
               {drive.connected ? <button className="btn-ghost" disabled={driveBusy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
             </div>
