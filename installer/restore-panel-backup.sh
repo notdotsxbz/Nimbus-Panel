@@ -3,6 +3,7 @@
 # Service data archives remain in Admin Google Drive and are restored separately
 # from the Admin Backups page after the panel services restart.
 set -Eeuo pipefail
+umask 077
 
 INSTALL_DIR="${NIMBUS_INSTALL_DIR:-/opt/nimbus}"
 BACKUP_ID="${1:-}"
@@ -41,6 +42,7 @@ read -r -p 'Type RESTORE FULL NIMBUS PANEL to continue: ' CONFIRM
 [[ "$CONFIRM" == "RESTORE FULL NIMBUS PANEL" ]] || fail "Confirmation did not match. Nothing was changed."
 
 mkdir -p "$SAFETY_DIR"
+chmod 700 "$SAFETY_DIR"
 cp -a "$ENV_FILE" "$SAFETY_DIR/env-before-restore.bak"
 chmod 600 "$SAFETY_DIR/env-before-restore.bak"
 
@@ -113,4 +115,6 @@ RESTORE_COMPLETE=1
 trap - ERR
 log "Panel database and configuration restore completed."
 log "Safety backup: $SAFETY_DIR"
+rm -rf -- "$RESTORE_DIR"
+log "Removed decrypted staging files after successful restore."
 log "Next: open the Admin Backups page and restore the service backups listed in the restored backup manifest."
