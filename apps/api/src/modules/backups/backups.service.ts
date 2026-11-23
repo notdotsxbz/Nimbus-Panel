@@ -607,7 +607,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
           if (response.status === 308) {
             const range = String(response.headers.range ?? "");
             const match = /(\d+)-(\d+)$/.exec(range);
-            offset = match ? Number(match[2]) + 1 : end + 1;
+            offset = match ? Number(match[2]) + 1 : 0;
           } else {
             finalData = response.data as { id?: string };
             offset = archive.length;
@@ -634,7 +634,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             const range = String(probe.headers.range ?? "");
             const match = /(\d+)-(\d+)$/.exec(range);
             const confirmedOffset = match ? Number(match[2]) + 1 : 0;
-            if (confirmedOffset > offset) {
+            if (confirmedOffset !== offset) {
               offset = confirmedOffset;
               chunkFinished = true;
             }
