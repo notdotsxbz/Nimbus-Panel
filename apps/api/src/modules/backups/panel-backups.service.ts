@@ -64,6 +64,12 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
 
   async createFullPanelBackup(user: AuthUser, trigger: "manual" | "scheduled" = "manual") {
     this.assertAdmin(user);
+    const activeJob = await this.panelBackups.exists({
+      createdBy: new Types.ObjectId(user.id),
+      mode: "full",
+      status: { $in: ["queued", "running"] },
+    });
+    if (activeJob) throw new BadRequestException("A full panel backup is already queued or running for this Admin account");
     this.backups.assertBackupEncryptionConfigured();
     await this.integrations.googleDriveAccessToken(user);
     const [services, nodes, customerCount] = await Promise.all([
@@ -149,6 +155,12 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       const now = new Date();
       const candidate = await this.panelSchedules.findOne({ enabled: true, nextRunAt: { $lte: now } }).sort({ nextRunAt: 1 });
       if (!candidate) return;
+      const activeJob = await this.panelBackups.exists({
+        createdBy: candidate.ownerId,
+        mode: "full",
+        status: { $in: ["queued", "running"] },
+      });
+      if (activeJob) return;
       const nextRunAt = this.nextPanelScheduleRun(candidate.frequency, candidate.backupTime, now);
       const claimed = await this.panelSchedules.findOneAndUpdate(
         { _id: candidate._id, enabled: true, nextRunAt: candidate.nextRunAt },
