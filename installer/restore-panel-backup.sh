@@ -111,11 +111,8 @@ systemctl stop nimbus-web nimbus-api
 log "Installing the backed-up environment file…"
 install -o nimbus -g nimbus -m 600 "$RESTORE_DIR/environment.env" "$ENV_FILE"
 
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
-[[ -n "${MONGODB_URI:-}" ]] || fail "Restored .env does not contain MONGODB_URI."
+MONGODB_URI="$(extract_mongo_uri "$ENV_FILE")" || fail "Restored .env does not contain MONGODB_URI."
+[[ -n "$MONGODB_URI" ]] || fail "Restored MONGODB_URI is empty."
 
 NEW_MONGO_CONFIG="$SAFETY_DIR/mongo-restored.yml"
 write_mongo_config "$MONGODB_URI" "$NEW_MONGO_CONFIG"
