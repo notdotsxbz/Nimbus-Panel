@@ -563,6 +563,101 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async uploadResumableDriveUpload(
+    accessToken: string,
+    metadata: Record<string, unknown>,
+    archive: Buffer,
+  ): Promise<string> {
+    const start = await axios.post(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name",
+      metadata,
+      {
+        headers: {
+          authorization: "Bearer " + accessToken,
+          "content-type": "application/json",
+          "x-upload-content-type": "application/octet-stream",
+          "x-upload-content-length": String(archive.length),
+        },
+        timeout: 30_000,
+      },
+    );
+    const sessionUri = start.headers.location as string | undefined;
+    if (!sessionUri) throw new BadRequestException("Google Drive did not return a resumable upload session");
+    const chunkSize = 8 * 1024 * 1024;
+    let offset = 0;
+    let finalData: { id?: string } | undefined;
+    while (offset < archive.length) {
+      const end = Math.min(offset + chunkSize, archive.length) - 1;
+      const chunk = archive.subarray(offset, end + 1);
+      let retries = 0;
+      let chunkFinished = false;
+      while (!chunkFinished) {
+        try {
+          const response = await axios.put(sessionUri, chunk, {
+            headers: {
+              authorization: "Bearer " + accessToken,
+              "content-type": "application/octet-stream",
+              "content-length": String(chunk.length),
+              "content-range": "bytes " + offset + "-" + end + "/" + archive.length,
+            },
+            timeout: 10 * 60 * 1000,
+            maxBodyLength: Infinity,
+            validateStatus: (status) => status === 308 || status === 200 || status === 201,
+          });
+          if (response.status === 308) {
+            const range = String(response.headers.range ?? "");
+            const match = /(\d+)-(\d+)$/.exec(range);
+            offset = match ? Number(match[2]) + 1 : end + 1;
+          } else {
+            finalData = response.data as { id?: string };
+            offset = archive.length;
+          }
+          chunkFinished = true;
+        } catch (error) {
+          retries += 1;
+          if (retries > 5) throw error;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * (2 ** retries), 15_000)));
+          const probe = await axios.put(sessionUri, Buffer.alloc(0), {
+            headers: {
+              authorization: "Bearer " + accessToken,
+              "content-length": "0",
+              "content-range": "bytes */" + archive.length,
+            },
+            timeout: 30_000,
+            validateStatus: (status) => status === 308 || status === 200 || status === 201,
+          });
+          if (probe.status === 200 || probe.status === 201) {
+            finalData = probe.data as { id?: string };
+            offset = archive.length;
+            chunkFinished = true;
+          } else {
+            const range = String(probe.headers.range ?? "");
+            const match = /(\d+)-(\d+)$/.exec(range);
+            const confirmedOffset = match ? Number(match[2]) + 1 : 0;
+            if (confirmedOffset > offset) {
+              offset = confirmedOffset;
+              chunkFinished = true;
+            }
+          }
+        }
+      }
+    }
+    if (!finalData?.id) {
+      const probe = await axios.put(sessionUri, Buffer.alloc(0), {
+        headers: {
+          authorization: "Bearer " + accessToken,
+          "content-length": "0",
+          "content-range": "bytes */" + archive.length,
+        },
+        timeout: 30_000,
+        validateStatus: (status) => status === 308 || status === 200 || status === 201,
+      });
+      if (probe.status === 200 || probe.status === 201) finalData = probe.data as { id?: string };
+    }
+    if (!finalData?.id) throw new BadRequestException("Google Drive did not confirm the completed resumable upload");
+    return finalData.id;
+  }
+
   private async uploadGoogleDriveArchive(
     archive: Buffer,
     filename: string,
@@ -577,43 +672,29 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
     const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, customerId, serviceType, serviceName, customerFolderName);
-    let metadata;
+    const fileMetadata = {
+      name: filename,
+      mimeType: "application/octet-stream",
+      parents: [parentFolderId],
+      appProperties: {
+        nimbusBackupId: backupId,
+        nimbusServiceId: filename.split("-")[1] ?? "",
+        nimbusCustomerId: customerId,
+        nimbusSha256: checksum,
+      },
+    };
+    let fileId: string;
     try {
-      metadata = await axios.post(
-        "https://www.googleapis.com/drive/v3/files?fields=id,name",
-        {
-          name: filename,
-          mimeType: "application/octet-stream",
-          parents: [parentFolderId],
-          appProperties: { nimbusBackupId: backupId, nimbusServiceId: filename.split("-")[1] ?? "", nimbusCustomerId: customerId, nimbusSha256: checksum },
-        },
-        { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
-      );
+      fileId = await this.uploadResumableDriveUpload(accessToken, fileMetadata, archive);
     } catch (error) {
       const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
-      throw new BadRequestException(details ?? "Google Drive could not create the backup file. Check the connected Google account and Drive permissions.");
+      throw new BadRequestException(details ?? (error instanceof Error ? error.message : "Google Drive resumable upload failed"));
     }
-    const fileId = metadata.data?.id as string | undefined;
-    if (!fileId) throw new BadRequestException("Google Drive did not create a backup file");
     try {
-      await axios.patch(
-        `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`,
-        archive,
-        {
-          headers: {
-            authorization: `Bearer ${accessToken}`,
-            "content-type": "application/octet-stream",
-            "content-length": String(archive.length),
-          },
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity,
-          timeout: 10 * 60 * 1000,
-        },
-      );
       const downloaded = await axios.get(
-        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+        "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media",
         {
-          headers: { authorization: `Bearer ${accessToken}` },
+          headers: { authorization: "Bearer " + accessToken },
           responseType: "arraybuffer",
           maxContentLength: Infinity,
           timeout: 10 * 60 * 1000,
@@ -625,11 +706,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       if (expectedDigest !== actualDigest) throw new BadRequestException("Google Drive upload verification failed: downloaded content did not match the uploaded archive");
       return fileId;
     } catch (error) {
-      await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
-        headers: { authorization: `Bearer ${accessToken}` },
+      await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId), {
+        headers: { authorization: "Bearer " + accessToken },
       }).catch(() => undefined);
       const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
-      throw new BadRequestException(details ?? "Google Drive upload failed. Reconnect the shared Drive account and try again.");
+      throw new BadRequestException(details ?? "Google Drive upload verification failed");
     }
   }
 
