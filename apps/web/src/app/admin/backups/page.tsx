@@ -10,6 +10,7 @@ interface BackupRow {
   ownerId: { _id?: string; displayName?: string; username?: string; email?: string } | string;
   destination: string;
   status: string;
+  progressStage?: string;
   trigger: string;
   sizeBytes?: number;
   createdAt: string;
@@ -227,7 +228,7 @@ export default function AdminBackups() {
                 <td className="px-5 py-3 text-xs uppercase text-muted">{b.destination}</td>
                 <td className="px-5 py-3 text-xs text-muted">{b.trigger}</td>
                 <td className="tnum px-5 py-3 text-xs">{b.sizeBytes ? `${(b.sizeBytes / 1048576).toFixed(1)} MB` : "—"}</td>
-                <td className="px-5 py-3"><span className="inline-flex items-center gap-2 text-xs"><span className={`status-dot ${b.status === "completed" ? "status-online" : b.status === "failed" ? "status-error" : "status-installing"}`} />{b.status}</span></td>
+                <td className="px-5 py-3"><span className="inline-flex items-center gap-2 text-xs"><span className={`status-dot ${b.status === "completed" ? "status-online" : b.status === "failed" ? "status-error" : "status-installing"}`} />{b.status === "running" && b.progressStage ? b.progressStage.replace(/_/g, " ") : b.status}</span></td>
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
               </tr>
             ))}
