@@ -14,6 +14,7 @@ export default function AdminSettings() {
   const [cloudflare, setCloudflare] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
   const [drive, setDrive] = useState<ConnectionStatus>({ connected: false, connectedAt: null });
   const [backgroundImageData, setBackgroundImageData] = useState("");
+  const [backgroundAnimationUrl, setBackgroundAnimationUrl] = useState("");
   const [firebaseJson, setFirebaseJson] = useState("");
   const [firebaseWeb, setFirebaseWeb] = useState({ apiKey: "", authDomain: "", projectId: "", appId: "", storageBucket: "", messagingSenderId: "", googleClientId: "" });
   const [cfToken, setCfToken] = useState("");
@@ -36,7 +37,16 @@ export default function AdminSettings() {
     if (results[0].status === "fulfilled") setFirebase(results[0].value);
     if (results[1].status === "fulfilled") setCloudflare(results[1].value);
     if (results[2].status === "fulfilled") setDrive(results[2].value);
-    if (results[3].status === "fulfilled") setBackgroundImageData(results[3].value.backgroundImageData ?? "");
+    if (results[3].status === "fulfilled") {
+      const background = results[3].value.backgroundImageData ?? "";
+      if (/^https:\/\//i.test(background)) {
+        setBackgroundAnimationUrl(background);
+        setBackgroundImageData("");
+      } else {
+        setBackgroundImageData(background);
+        setBackgroundAnimationUrl("");
+      }
+    }
   };
 
   useEffect(() => { void load(); }, []);
@@ -167,10 +177,52 @@ export default function AdminSettings() {
               reader.onerror = () => show("Could not read that image file", "err");
               reader.readAsDataURL(file);
             }} />
-            <button className="btn-primary" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData }); show("Background image saved for all users", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save background image", "err"); } finally { setBusy(false); } }}>Save image</button>
+            <button className="btn-primary" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData }); setBackgroundAnimationUrl(""); show("Background image saved for all users", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not save background image", "err"); } finally { setBusy(false); } }}>Save image</button>
             <button className="btn-ghost" disabled={busy || !backgroundImageData} onClick={async () => { setBusy(true); try { await api.patch("/appearance/settings", { backgroundImageData: "" }); setBackgroundImageData(""); show("Background image removed", "ok"); } catch (error) { show(error instanceof Error ? error.message : "Could not remove image", "err"); } finally { setBusy(false); } }}>Remove</button>
           </div>
           {backgroundImageData ? <img src={backgroundImageData} alt="Selected panel background preview" className="mt-4 max-h-40 max-w-xs rounded-xl object-cover" /> : null}
+        </GlassCard>
+        <GlassCard className="p-6 md:col-span-2">
+          <h2 className="font-semibold">Panel background animation</h2>
+          <p className="mt-2 text-sm text-muted">Add a direct HTTPS link to an MP4, WebM, OGG video or GIF. It plays quietly behind the panel for all users. Saving an animation replaces the background image, and saving an image replaces the animation.</p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <input
+              className="input min-w-0 flex-1"
+              type="url"
+              inputMode="url"
+              autoComplete="url"
+              placeholder="https://cdn.example.com/nimbus-background.mp4"
+              value={backgroundAnimationUrl}
+              disabled={busy}
+              onChange={event => setBackgroundAnimationUrl(event.target.value)}
+            />
+            <button className="btn-primary" disabled={busy || !backgroundAnimationUrl.trim()} onClick={async () => {
+              setBusy(true);
+              try {
+                await api.patch("/appearance/settings", { backgroundImageData: backgroundAnimationUrl.trim() });
+                setBackgroundImageData("");
+                show("Background animation saved for all users", "ok");
+              } catch (error) {
+                show(error instanceof Error ? error.message : "Could not save background animation", "err");
+              } finally {
+                setBusy(false);
+              }
+            }}>Save animation</button>
+            <button className="btn-ghost" disabled={busy || !backgroundAnimationUrl} onClick={async () => {
+              setBusy(true);
+              try {
+                await api.patch("/appearance/settings", { backgroundImageData: "" });
+                setBackgroundAnimationUrl("");
+                show("Background animation removed", "ok");
+              } catch (error) {
+                show(error instanceof Error ? error.message : "Could not remove background animation", "err");
+              } finally {
+                setBusy(false);
+              }
+            }}>Remove</button>
+          </div>
+          <p className="mt-2 text-xs text-muted">Use a direct media-file URL, not a YouTube or webpage link. The browser must be able to load the media from its host.</p>
+          {backgroundAnimationUrl ? <p className="mt-3 break-all text-xs text-muted">Current animation: {backgroundAnimationUrl}</p> : null}
         </GlassCard>
       </div>
 

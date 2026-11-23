@@ -144,19 +144,34 @@ export async function firebaseLogin(email: string, password: string): Promise<{ 
 
 export async function firebaseRegister(email: string, password: string, username: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
   const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
-  const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + encodeURIComponent(config.apiKey), {
+  const signUp = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + encodeURIComponent(config.apiKey), {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: email.trim(), password, returnSecureToken: true }),
   });
-  const result = await response.json() as { idToken?: string; error?: { message?: string } };
-  if (!response.ok || !result.idToken) throw new ApiError(response.status, (result.error?.message ?? "Registration failed").replaceAll("_", " ").toLowerCase());
+  let result = await signUp.json() as { idToken?: string; error?: { message?: string } };
+
+  // If Firebase account creation succeeded but Nimbus rejected a username
+  // (for example, it was already taken), let the same verified user retry
+  // with a different username instead of getting stuck on EMAIL_EXISTS.
+  if (!signUp.ok || !result.idToken) {
+    const signIn = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + encodeURIComponent(config.apiKey), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: email.trim(), password, returnSecureToken: true }),
+    });
+    const signedIn = await signIn.json() as { idToken?: string; error?: { message?: string } };
+    if (!signIn.ok || !signedIn.idToken) {
+      throw new ApiError(signUp.status, (result.error?.message ?? "Registration failed").replaceAll("_", " ").toLowerCase());
+    }
+    result = signedIn;
+  }
+
   const session = await api.post<{ token: string; user: SessionUser; redirect: string }>("/auth/register", { idToken: result.idToken, username });
   localStorage.setItem("nimbus.token", session.token);
   localStorage.setItem("nimbus.user", JSON.stringify(session.user));
   return session;
 }
 
-export async function firebaseGoogleRegister(googleIdToken: string, username?: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
+export async function firebaseGoogleRegister(googleIdToken: string, username?: string, password?: string): Promise<{ token: string; user: SessionUser; redirect: string }> {
   const config = await api.get<{ apiKey: string }>("/auth/firebase-config");
   const response = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=" + encodeURIComponent(config.apiKey), {
     method: "POST", headers: { "content-type": "application/json" },
@@ -164,7 +179,26 @@ export async function firebaseGoogleRegister(googleIdToken: string, username?: s
   });
   const result = await response.json() as { idToken?: string; error?: { message?: string } };
   if (!response.ok || !result.idToken) throw new ApiError(response.status, (result.error?.message ?? "Google sign-in failed").replaceAll("_", " ").toLowerCase());
-  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>(username ? "/auth/register" : "/auth/firebase", username ? { idToken: result.idToken, username } : { idToken: result.idToken });
+
+  let idToken = result.idToken;
+  if (username) {
+    if (!password || password.length < 8) throw new ApiError(400, "Password must be at least 8 characters");
+    // Add an email/password credential to the Google-authenticated Firebase account.
+    const passwordResponse = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:update?key=" + encodeURIComponent(config.apiKey), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idToken, password, returnSecureToken: true }),
+    });
+    const passwordResult = await passwordResponse.json() as { idToken?: string; error?: { message?: string } };
+    if (!passwordResponse.ok || !passwordResult.idToken) {
+      throw new ApiError(passwordResponse.status, (passwordResult.error?.message ?? "Could not set your Firebase password").replaceAll("_", " ").toLowerCase());
+    }
+    idToken = passwordResult.idToken;
+  }
+
+  const session = await api.post<{ token: string; user: SessionUser; redirect: string }>(
+    username ? "/auth/register" : "/auth/firebase",
+    username ? { idToken, username } : { idToken },
+  );
   localStorage.setItem("nimbus.token", session.token);
   localStorage.setItem("nimbus.user", JSON.stringify(session.user));
   return session;

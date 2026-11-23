@@ -242,9 +242,21 @@ export class AppearanceService implements OnModuleInit {
       typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined;
 
     if (dto.backgroundImageData !== undefined) {
-      const image = typeof dto.backgroundImageData === "string" ? dto.backgroundImageData : "";
-      if (image && (image.length > 1_400_000 || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(image))) {
-        throw new BadRequestException("Background image must be a PNG, JPEG, WebP or GIF image smaller than 1 MB");
+      const image = typeof dto.backgroundImageData === "string" ? dto.backgroundImageData.trim() : "";
+      const isDataImage = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(image);
+      let isAnimationUrl = false;
+      if (image && !isDataImage) {
+        try {
+          const url = new URL(image);
+          isAnimationUrl = url.protocol === "https:" &&
+            !url.username && !url.password &&
+            /\.(mp4|webm|ogg|ogv|gif)$/i.test(url.pathname);
+        } catch {
+          isAnimationUrl = false;
+        }
+      }
+      if (image && !(isDataImage && image.length <= 1_400_000) && !isAnimationUrl) {
+        throw new BadRequestException("Background must be a PNG, JPEG, WebP or GIF image under 1 MB, or an HTTPS link to an MP4, WebM, OGG or GIF file");
       }
       settings.backgroundImageData = image || undefined;
     }
