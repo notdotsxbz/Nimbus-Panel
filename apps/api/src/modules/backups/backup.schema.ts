@@ -14,8 +14,12 @@ export class Backup {
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
-  @Prop() sizeBytes?: number;
-  @Prop() checksum?: string; // sha256 integrity verification
+  @Prop() sizeBytes?: number; // plaintext archive size
+  @Prop() storedSizeBytes?: number; // encrypted archive size in Google Drive
+  @Prop() checksum?: string; // plaintext SHA-256 integrity verification
+  @Prop({ enum: ["aes-256-gcm"] }) encryptionAlgorithm?: "aes-256-gcm";
+  @Prop() encryptionIv?: string;
+  @Prop() encryptionTag?: string;
   @Prop() remoteFileId?: string;
   @Prop({ type: Types.ObjectId, ref: "User" }) createdBy?: Types.ObjectId;
   @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall"], default: "manual" })
