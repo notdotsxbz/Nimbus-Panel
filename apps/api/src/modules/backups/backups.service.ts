@@ -531,7 +531,7 @@ export class BackupsService {
       await backup.save();
       await this.nodes.agentCall(node, "/backups/delete", { serviceId: service._id!.toString(), backupId }).catch(() => {
         backup.localArchiveCleanupPending = true;
-        return backup.save();
+        return backup.save().catch(() => undefined);
       });
       await this.audit.log({ actorId: user.id, action: "backups.retry-upload", targetId: backupId, sensitive: true }).catch(() => undefined);
       return backup;
