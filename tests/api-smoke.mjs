@@ -154,6 +154,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("customer cannot start Admin batch backups", customerAdminBatch.status === 403, `status=${customerAdminBatch.status}`);
   const customerAdminRestore = await call("/backups/admin/restore-selection", { method: "POST", token: cust, body: { mode: "selected-services", backupIds: [], confirm: true } });
   check("customer cannot invoke Admin restore selection", customerAdminRestore.status === 403, `status=${customerAdminRestore.status}`);
+  const customerPanelPrepare = await call("/backups/admin/full/000000000000000000000000/prepare-restore", { method: "POST", token: cust, body: { confirm: true } });
+  check("customer cannot prepare Full Panel recovery", customerPanelPrepare.status === 403, `status=${customerPanelPrepare.status}`);
+  const customerPanelServiceRestore = await call("/backups/admin/full/000000000000000000000000/restore-services", { method: "POST", token: cust, body: { confirm: true } });
+  check("customer cannot restore all services from an Admin manifest", customerPanelServiceRestore.status === 403, `status=${customerPanelServiceRestore.status}`);
 
   const own = await call("/services", { token: cust });
   check("customer reads own (empty) services", own.status === 200 && Array.isArray(own.body) && own.body.length === 0);
