@@ -8,6 +8,7 @@ import { Backup, BackupDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
 import { IntegrationsService } from "../integrations/integrations.service";
+import { isStaffRole, type AuthUser } from "../../common/auth.decorators";
 
 /**
  * Backup orchestration. Heavy lifting (tar + integrity) happens on the node
@@ -25,17 +26,32 @@ export class BackupsService {
     private readonly integrations: IntegrationsService,
   ) {}
 
-  async list(user: { id: string; role: string }, serviceId?: string) {
-    const filter: Record<string, unknown> = serviceId ? { serviceId } : {};
-    if (serviceId) await this.services.get(serviceId, user as never); // ownership check
+  /**
+   * Customers can only list backups belonging to services they currently own.
+   * Staff retains the cross-customer view used by the admin backup screen.
+   * Resolve service ownership through ServicesService so this also protects
+   * legacy backup records created before ownerId was stored on the backup.
+   */
+  async list(user: AuthUser, serviceId?: string) {
+    const filter: Record<string, unknown> = {};
+    if (serviceId) {
+      await this.services.get(serviceId, user); // ownership check
+      filter.serviceId = new Types.ObjectId(serviceId);
+    } else if (!isStaffRole(user.role)) {
+      const ownedServices = await this.services.listFor(user);
+      const serviceIds = ownedServices.map((service) => service._id);
+      if (serviceIds.length === 0) return [];
+      filter.serviceId = { $in: serviceIds };
+    }
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
   }
 
-  async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local") {
-    const service = await this.services.get(serviceId, user as never);
+  async create(serviceId: string, user: AuthUser, trigger: string, destination = "local") {
+    const service = await this.services.get(serviceId, user);
     const node = await this.nodes.get(service.nodeId.toString());
     const backup = await this.backups.create({
       serviceId: new Types.ObjectId(serviceId),
+      ownerId: service.ownerId,
       destination,
       status: "running",
       trigger,
@@ -74,7 +90,7 @@ export class BackupsService {
   }
 
   /** Restore into a staging dir — data is swapped only after verification. */
-  async restore(backupId: string, user: { id: string; role: string }) {
+  async restore(backupId: string, user: AuthUser) {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
