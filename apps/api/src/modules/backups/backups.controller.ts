@@ -4,10 +4,41 @@ import { Res } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
 import { PanelBackupsService } from "./panel-backups.service";
+import { BackupSchedulerService } from "./backup-scheduler.service";
 
 @Controller("backups")
 export class BackupsController {
-  constructor(private readonly backups: BackupsService, private readonly panelBackups: PanelBackupsService) {}
+  constructor(private readonly backups: BackupsService, private readonly panelBackups: PanelBackupsService, private readonly scheduler: BackupSchedulerService) {}
+
+  @Get("schedules")
+  @Roles("customer")
+  listSchedules(@CurrentUser() user: AuthUser) {
+    return this.scheduler.list(user);
+  }
+
+  @Post("schedules")
+  @Roles("customer")
+  upsertSchedule(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: {
+      serviceId: string;
+      enabled?: boolean;
+      frequency: "every6h" | "every12h" | "daily" | "weekly";
+      backupTime?: string;
+      retentionMode?: "count" | "days" | "never";
+      retentionCount?: 5 | 10 | 30;
+      retentionDays?: number;
+      notifyOnCompletion?: boolean;
+    },
+  ) {
+    return this.scheduler.upsert(user, dto);
+  }
+
+  @Delete("schedules/:serviceId")
+  @Roles("customer")
+  removeSchedule(@Param("serviceId") serviceId: string, @CurrentUser() user: AuthUser) {
+    return this.scheduler.remove(user, serviceId);
+  }
 
   @Get("admin/full")
   @Roles("owner", "admin")
