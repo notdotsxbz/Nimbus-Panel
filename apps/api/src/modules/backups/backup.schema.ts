@@ -120,6 +120,8 @@ export class BackupJob {
   startedAt?: Date;
   @Prop()
   completedAt?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 export const BackupJobSchema = SchemaFactory.createForClass(BackupJob);
 export type BackupJobDocument = HydratedDocument<BackupJob>;
