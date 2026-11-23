@@ -183,6 +183,69 @@ export class BackupsService {
     return { ok: true, safetyBackupId: result.safetyBackupId ?? null };
   }
 
+  async download(backupId: string, user: AuthUser): Promise<{ stream: import("node:stream").Readable; filename: string; sizeBytes?: number }> {
+    const backup = await this.backups.findById(backupId);
+    if (!backup) throw new NotFoundException("Backup not found");
+    const service = await this.services.get(backup.serviceId.toString(), user);
+    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
+    const filename = `nimbus-backup-${backupId}.tar`;
+    if (backup.destination === "gdrive") {
+      if (!backup.remoteFileId) throw new BadRequestException("Backup has no Google Drive file reference");
+      const driveOwner = backup.driveOwnerType === "customer"
+        ? { id: (backup.ownerId ?? service.ownerId).toString(), role: "customer" as const }
+        : { id: user.id, role: user.role };
+      const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
+      const response = await axios.get(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          responseType: "stream",
+          timeout: 10 * 60 * 1000,
+          maxContentLength: Infinity,
+        },
+      );
+      return { stream: response.data as import("node:stream").Readable, filename, sizeBytes: backup.sizeBytes };
+    }
+    const node = await this.nodes.get(service.nodeId.toString());
+    return {
+      stream: await this.nodes.downloadBackupArchiveStream(node, service._id!.toString(), backupId),
+      filename,
+      sizeBytes: backup.sizeBytes,
+    };
+  }
+
+  async delete(backupId: string, user: AuthUser) {
+    const backup = await this.backups.findById(backupId);
+    if (!backup) throw new NotFoundException("Backup not found");
+    const service = await this.services.get(backup.serviceId.toString(), user);
+    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
+
+    if (backup.destination === "gdrive" && backup.remoteFileId) {
+      const driveOwner = backup.driveOwnerType === "customer"
+        ? { id: (backup.ownerId ?? service.ownerId).toString(), role: "customer" as const }
+        : { id: user.id, role: user.role };
+      const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
+      await axios.delete(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}`,
+        { headers: { authorization: `Bearer ${accessToken}` }, timeout: 30_000 },
+      );
+    }
+
+    const node = await this.nodes.get(service.nodeId.toString());
+    await this.nodes.agentCall(node, "/backups/delete", {
+      serviceId: service._id!.toString(),
+      backupId,
+    }).catch(() => undefined);
+    await backup.deleteOne();
+    await this.audit.log({
+      actorId: user.id,
+      action: "backups.delete",
+      targetId: backupId,
+      sensitive: true,
+    });
+    return { deleted: true };
+  }
+
   private async ensureDriveFolder(accessToken: string, name: string, parentId?: string): Promise<string> {
     const escapedName = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     const query = new URLSearchParams({
