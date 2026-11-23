@@ -554,6 +554,22 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     return this.enqueueBackupJob(selected.map((service) => service._id!.toString()), user, "manual", "gdrive");
   }
 
+  async driveSummary(user: { id: string; role: string }) {
+    const filter = user.role === "customer"
+      ? { ownerId: new Types.ObjectId(user.id), driveOwnerType: "customer", status: "completed" }
+      : { driveOwnerType: "admin", status: "completed" };
+    const [totalBackups, latest, sizes] = await Promise.all([
+      this.backups.countDocuments(filter),
+      this.backups.findOne(filter).sort({ createdAt: -1 }).select("createdAt").lean(),
+      this.backups.aggregate([{ $match: filter }, { $group: { _id: null, totalBytes: { $sum: "$sizeBytes" } } }]),
+    ]);
+    return {
+      totalBackups,
+      lastSuccessfulBackup: latest?.createdAt ?? null,
+      totalSizeBytes: sizes[0]?.totalBytes ?? 0,
+    };
+  }
+
   async list(user: { id: string; role: string }, serviceId?: string) {
     const filter: Record<string, unknown> = {};
     if (serviceId) {
