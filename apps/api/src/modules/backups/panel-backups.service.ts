@@ -439,6 +439,12 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       record.progress = 100;
       record.completedAt = new Date();
       await record.save();
+      if (record.trigger === "scheduled") {
+        await this.panelSchedules.updateOne(
+          { ownerId: record.createdBy },
+          { $set: { lastStatus: record.status, lastError: record.status === "failed" ? record.error : undefined } },
+        ).catch(() => undefined);
+      }
 
       await this.audit.log({
         actorId: user.id,
@@ -454,6 +460,12 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       record.error = `${error instanceof Error ? error.message : "Full panel backup failed"}. Source artifacts preserved at ${tempDir}`;
       preserveSourceArtifacts = true;
       await record.save();
+      if (record.trigger === "scheduled") {
+        await this.panelSchedules.updateOne(
+          { ownerId: record.createdBy },
+          { $set: { lastStatus: "failed", lastError: record.error } },
+        ).catch(() => undefined);
+      }
       await this.audit.log({
         actorId: user.id,
         action: "backups.panel.full.failed",
