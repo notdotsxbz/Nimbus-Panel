@@ -201,6 +201,11 @@ export class BackupsService {
             `nimbus-${serviceId}-${backup._id!.toString()}.tar.enc`,
             driveOwner,
             { serviceId, serviceName: service.name, serviceType: String(service.type), customerName, customerId: service.ownerId.toString() },
+            async percent => {
+              backup.progress = 75 + Math.round(percent * 0.2);
+              backup.currentStep = "Uploading to Google Drive";
+              await backup.save();
+            },
           );
           backup.currentStep = "Verifying upload and cleaning node archive";
           backup.progress = 95;
@@ -591,6 +596,7 @@ export class BackupsService {
     filename: string,
     driveOwner: Pick<AuthUser, "id" | "role">,
     service: { serviceId: string; serviceName: string; serviceType: string; customerName: string; customerId: string },
+    onProgress?: (percent: number) => Promise<void>,
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
     const rootName = driveOwner.role === "customer" ? "NIMBUS Backups" : "NIMBUS Full Panel Backups";
@@ -610,7 +616,7 @@ export class BackupsService {
       `${this.safeFolderName(service.serviceName)}_${service.serviceId}`,
       categoryId,
     );
-    return this.uploadResumableFile(accessToken, archivePath, filename, serviceFolderId);
+    return this.uploadResumableFile(accessToken, archivePath, filename, serviceFolderId, onProgress);
   }
 
   async uploadAdminPanelArtifact(
@@ -692,7 +698,7 @@ export class BackupsService {
     return { checksum: hash.digest("base64"), sizeBytes };
   }
 
-  private async uploadResumableFile(accessToken: string, archivePath: string, filename: string, parentFolderId: string): Promise<string> {
+  private async uploadResumableFile(accessToken: string, archivePath: string, filename: string, parentFolderId: string, onProgress?: (percent: number) => Promise<void>): Promise<string> {
     const archiveInfo = await stat(archivePath);
     if (!archiveInfo.isFile() || archiveInfo.size <= 0) throw new BadRequestException("Backup archive is empty or unavailable");
     let uploadUrl = "";
@@ -752,6 +758,7 @@ export class BackupsService {
           if (response.status === 200 || response.status === 201) {
             fileId = (response.data as { id?: string })?.id;
             offset = archiveInfo.size;
+            await onProgress?.(100);
             break;
           }
           const acknowledged = String(response.headers.range ?? "").match(/-(\d+)$/);
@@ -762,6 +769,7 @@ export class BackupsService {
             }
             offset = nextOffset;
             noProgressRetries = 0;
+            await onProgress?.(Math.min(100, Math.round((offset / archiveInfo.size) * 100)));
           } else {
             noProgressRetries += 1;
             if (noProgressRetries > 5) throw new BadRequestException("Google Drive upload made no progress after repeated retries");
