@@ -330,8 +330,8 @@ export default function ServicePage() {
                   <span>Notify me when a scheduled backup finishes</span>
                   <input type="checkbox" checked={backupSchedule.notifyOnCompletion} onChange={(e) => setBackupSchedule({ ...backupSchedule, notifyOnCompletion: e.target.checked })} />
                 </label>
-                {backupSchedule.lastRunAt ? <p className="text-xs text-muted">Last run: {new Date(backupSchedule.lastRunAt).toLocaleString()}</p> : null}
-                {backupSchedule.nextRunAt ? <p className="text-xs text-muted">Next run: {new Date(backupSchedule.nextRunAt).toLocaleString()} UTC</p> : null}
+                {backupSchedule.lastRunAt ? <p className="text-xs text-muted">Last run: {new Date(backupSchedule.lastRunAt).toUTCString()}</p> : null}
+                {backupSchedule.nextRunAt ? <p className="text-xs text-muted">Next run: {new Date(backupSchedule.nextRunAt).toUTCString()} UTC</p> : null}
                 <button className="btn-primary" disabled={scheduleBusy} onClick={() => void saveBackupSchedule()}>{scheduleBusy ? "Saving…" : "Save schedule"}</button>
               </>
             ) : <p className="text-sm text-muted">Loading backup settings…</p>}
