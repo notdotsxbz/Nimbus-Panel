@@ -315,7 +315,15 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       name: filename,
       mimeType: "application/octet-stream",
       parents: [folderId],
-      appProperties: { nimbusPanelBackupId: jobId, nimbusArtifactType: artifactType, nimbusSha256: checksum },
+      appProperties: {
+        nimbusPanelBackupId: jobId,
+        nimbusArtifactType: artifactType,
+        nimbusSha256: checksum,
+        nimbusIv: encrypted.metadata.iv,
+        nimbusTag: encrypted.metadata.authTag,
+        nimbusKeyVersion: encrypted.metadata.keyVersion,
+        nimbusAlgorithm: encrypted.metadata.algorithm,
+      },
     };
     const fileId = await this.uploadResumableDriveUpload(accessToken, metadata, encrypted.data);
     const downloaded = await axios.get(
@@ -638,6 +646,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
           service.ownerId.toString(),
           backup._id!.toString(),
           result.checksum,
+          encrypted.metadata,
         );
         backup.verificationStatus = "verified";
         // Remove the temporary plaintext node archive only after Drive read-back verification succeeds.
@@ -913,6 +922,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     customerId: string,
     backupId: string,
     checksum: string,
+    encryptionMetadata: { algorithm: string; iv: string; authTag: string; keyVersion: string },
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
     const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, customerId, serviceType, serviceName, customerFolderName);
@@ -946,6 +956,10 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         nimbusServiceId: filename.split("-")[1] ?? "",
         nimbusCustomerId: customerId,
         nimbusSha256: checksum,
+        nimbusIv: encryptionMetadata.iv,
+        nimbusTag: encryptionMetadata.authTag,
+        nimbusKeyVersion: encryptionMetadata.keyVersion,
+        nimbusAlgorithm: encryptionMetadata.algorithm,
       },
     };
     let fileId: string;
