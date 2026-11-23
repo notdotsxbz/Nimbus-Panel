@@ -68,9 +68,13 @@ export class BackupsService {
       if (destination === "gdrive") {
         const archive = await this.nodes.downloadBackupArchive(node, serviceId, backup._id!.toString());
         if (!this.verifyChecksum(archive, result.checksum)) throw new BadRequestException("Downloaded archive failed checksum verification");
+        const driveOwner = user.role === "customer"
+          ? { id: service.ownerId.toString(), role: "customer" as const }
+          : user;
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           archive,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
+          driveOwner,
         );
       }
       backup.status = "completed";
@@ -104,8 +108,8 @@ export class BackupsService {
     return { ok: true };
   }
 
-  private async uploadGoogleDriveArchive(archive: Buffer, filename: string): Promise<string> {
-    const accessToken = await this.integrations.googleDriveAccessToken();
+  private async uploadGoogleDriveArchive(archive: Buffer, filename: string, driveOwner: Pick<AuthUser, "id" | "role">): Promise<string> {
+    const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
     let metadata;
     try {
       metadata = await axios.post(
