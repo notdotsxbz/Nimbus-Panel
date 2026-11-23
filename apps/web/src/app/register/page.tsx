@@ -43,83 +43,107 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [googleIdToken, setGoogleIdToken] = useState("");
   const [googleClientId, setGoogleClientId] = useState("");
+  const [googleScriptReady, setGoogleScriptReady] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
   const [redirect, setRedirect] = useState("/dashboard");
 
+  // Load Google Identity Services independently from rendering its button.
+  // React must commit the target element before renderButton() is called.
   useEffect(() => {
     let active = true;
-    let script: HTMLScriptElement | null = null;
 
-    const setupGoogle = (clientId: string) => {
-      const google = (window as Window & { google?: GoogleIdentity }).google;
-      const target = document.getElementById("nimbus-google-register");
-      if (!active || !google || !target) return;
-
-      target.replaceChildren();
-      google.accounts.id.initialize({
-        client_id: clientId,
-        callback: (response) => {
-          if (!response.credential) return;
-          const detectedEmail = emailFromGoogleToken(response.credential);
-          if (!detectedEmail) {
-            setError("Google did not provide an email address. Please try again or use email registration.");
-            return;
-          }
-          setMethod("google");
-          setGoogleIdToken(response.credential);
-          setEmail(detectedEmail);
-          setError(null);
-          setStep(2);
-        },
-      });
-      google.accounts.id.renderButton(target, {
-        theme: "filled_black",
-        size: "large",
-        shape: "rectangular",
-        text: "signup_with",
-        width: 300,
-      });
-    };
-
-    api.get<{ googleClientId?: string }>("/auth/firebase-config")
-      .then((config) => {
-        if (!active || !config.googleClientId) return;
-        setGoogleClientId(config.googleClientId);
-        const existing = (window as Window & { google?: GoogleIdentity }).google;
-        if (existing) {
-          setupGoogle(config.googleClientId);
+    const loadGoogle = async () => {
+      try {
+        const config = await api.get<{ googleClientId?: string }>("/auth/firebase-config");
+        if (!active) return;
+        if (!config.googleClientId) {
           setGoogleLoading(false);
           return;
         }
-        script = document.createElement("script");
-        script.src = "https://accounts.google.com/gsi/client";
-        script.async = true;
-        script.onload = () => {
-          if (active) {
-            setupGoogle(config.googleClientId!);
-            setGoogleLoading(false);
-          }
-        };
-        script.onerror = () => {
-          if (active) {
-            setGoogleLoading(false);
-            setError("Google sign-up could not be loaded. You can still register with your email.");
-          }
-        };
-        document.head.appendChild(script);
-      })
-      .catch(() => {
-        if (active) setGoogleLoading(false);
-      });
+        setGoogleClientId(config.googleClientId);
 
+        const currentGoogle = (window as Window & { google?: GoogleIdentity }).google;
+        if (currentGoogle) {
+          setGoogleScriptReady(true);
+          setGoogleLoading(false);
+          return;
+        }
+
+        const scriptUrl = "https://accounts.google.com/gsi/client";
+        let script = document.querySelector<HTMLScriptElement>(`script[src="${scriptUrl}"]`);
+        if (!script) {
+          script = document.createElement("script");
+          script.src = scriptUrl;
+          script.async = true;
+          script.defer = true;
+          document.head.appendChild(script);
+        }
+
+        const onLoad = () => {
+          if (!active) return;
+          const google = (window as Window & { google?: GoogleIdentity }).google;
+          if (google) setGoogleScriptReady(true);
+          else setError("Google sign-up loaded incorrectly. Please try again or use email registration.");
+          setGoogleLoading(false);
+        };
+        const onError = () => {
+          if (!active) return;
+          setGoogleLoading(false);
+          setError("Google sign-up could not be loaded. You can still register with your email.");
+        };
+
+        if ((window as Window & { google?: GoogleIdentity }).google) {
+          onLoad();
+        } else {
+          script.addEventListener("load", onLoad, { once: true });
+          script.addEventListener("error", onError, { once: true });
+        }
+      } catch {
+        if (active) setGoogleLoading(false);
+      }
+    };
+
+    void loadGoogle();
     return () => {
       active = false;
-      if (script?.parentNode) script.parentNode.removeChild(script);
     };
   }, []);
+
+  // This effect runs after React has rendered the Google button container.
+  useEffect(() => {
+    if (!googleClientId || !googleScriptReady || step !== 1) return;
+    const google = (window as Window & { google?: GoogleIdentity }).google;
+    const target = document.getElementById("nimbus-google-register");
+    if (!google || !target) return;
+
+    target.replaceChildren();
+    google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: (response) => {
+        if (!response.credential) return;
+        const detectedEmail = emailFromGoogleToken(response.credential);
+        if (!detectedEmail) {
+          setError("Google did not provide an email address. Please try again or use email registration.");
+          return;
+        }
+        setMethod("google");
+        setGoogleIdToken(response.credential);
+        setEmail(detectedEmail);
+        setError(null);
+        setStep(2);
+      },
+    });
+    google.accounts.id.renderButton(target, {
+      theme: "filled_black",
+      size: "large",
+      shape: "rectangular",
+      text: "signup_with",
+      width: 300,
+    });
+  }, [googleClientId, googleScriptReady, step]);
 
   const goBack = () => {
     setError(null);
