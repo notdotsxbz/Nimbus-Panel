@@ -15,10 +15,29 @@ interface BackupRow {
 }
 interface ServiceOption { _id: string; name: string; type: string; }
 interface DriveStatus { connected: boolean; connectedAt: string | null; reconnectRequired?: boolean; accountEmail?: string | null; }
+interface ScheduleRow {
+  _id: string;
+  serviceId: string;
+  enabled: boolean;
+  frequency: "every6h" | "every12h" | "daily" | "weekly";
+  backupTime: string;
+  retentionMode: "count" | "days" | "never";
+  retentionCount: 5 | 10 | 30;
+  retentionDays?: number;
+  nextRunAt: string;
+  lastStatus?: "running" | "completed" | "failed";
+  lastError?: string;
+}
 
 export default function CustomerBackups() {
   const [rows, setRows] = useState<BackupRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
+  const [frequency, setFrequency] = useState<ScheduleRow["frequency"]>("daily");
+  const [backupTime, setBackupTime] = useState("02:00");
+  const [retentionMode, setRetentionMode] = useState<ScheduleRow["retentionMode"]>("count");
+  const [retentionCount, setRetentionCount] = useState<5 | 10 | 30>(5);
+  const [retentionDays, setRetentionDays] = useState(30);
   const [serviceId, setServiceId] = useState("");
   const [drive, setDrive] = useState<DriveStatus>({ connected: false, connectedAt: null });
   const [busy, setBusy] = useState(false);
@@ -26,14 +45,16 @@ export default function CustomerBackups() {
 
   const load = async () => {
     try {
-      const [backupRows, serviceRows, driveStatus] = await Promise.all([
+      const [backupRows, serviceRows, driveStatus, scheduleRows] = await Promise.all([
         api.get<{ items?: BackupRow[] } | BackupRow[]>("/backups"),
         api.get<ServiceOption[]>("/services"),
         api.get<DriveStatus>("/integrations/google-drive"),
+        api.get<ScheduleRow[]>("/backups/schedules"),
       ]);
       setRows(Array.isArray(backupRows) ? backupRows : backupRows.items ?? []);
       setServices(serviceRows);
       setDrive(driveStatus);
+      setSchedules(scheduleRows);
       if (!serviceId && serviceRows.length) setServiceId(serviceRows[0]._id);
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load backups", "err");
@@ -77,6 +98,70 @@ export default function CustomerBackups() {
       show("Google Drive disconnected. Existing Drive files were not changed.", "ok");
     } catch (error) {
       show(error instanceof Error ? error.message : "Disconnect failed", "err");
+    } finally { setBusy(false); }
+  };
+
+  useEffect(() => {
+    const current = schedules.find(item => item.serviceId === serviceId);
+    if (!current) return;
+    setFrequency(current.frequency);
+    setBackupTime(current.backupTime || "02:00");
+    setRetentionMode(current.retentionMode);
+    setRetentionCount(current.retentionCount || 5);
+    setRetentionDays(current.retentionDays || 30);
+  }, [schedules, serviceId]);
+
+  const saveSchedule = async () => {
+    if (!serviceId) return;
+    setBusy(true);
+    try {
+      await api.post("/backups/schedules", {
+        serviceId,
+        enabled: true,
+        frequency,
+        backupTime,
+        retentionMode,
+        retentionCount,
+        retentionDays: retentionMode === "days" ? retentionDays : undefined,
+        notifyOnCompletion: true,
+      });
+      show("Automatic backup schedule saved", "ok");
+      await load();
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not save backup schedule", "err");
+    } finally { setBusy(false); }
+  };
+
+  const disableSchedule = async () => {
+    if (!serviceId) return;
+    setBusy(true);
+    try {
+      await api.post("/backups/schedules", {
+        serviceId,
+        enabled: false,
+        frequency,
+        backupTime,
+        retentionMode,
+        retentionCount,
+        retentionDays: retentionMode === "days" ? retentionDays : undefined,
+        notifyOnCompletion: true,
+      });
+      show("Automatic backups paused", "ok");
+      await load();
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not pause schedule", "err");
+    } finally { setBusy(false); }
+  };
+
+  const removeSchedule = async () => {
+    if (!serviceId || !window.confirm("Delete this automatic backup schedule? Existing backups will remain in Google Drive.")) return;
+    setBusy(true);
+    try {
+      await api.del(`/backups/schedules/${serviceId}`);
+      setSchedules(current => current.filter(item => item.serviceId !== serviceId));
+      show("Backup schedule deleted", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not delete schedule", "err");
     } finally { setBusy(false); }
   };
 
@@ -183,6 +268,68 @@ export default function CustomerBackups() {
           </div>
         </div>
         {!drive.connected ? <p className="mt-3 text-xs text-amber-400">Connect your Google Drive before creating cloud backups.</p> : null}
+      </GlassCard>
+
+      <GlassCard className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Automatic Backups</h2>
+            <p className="mt-1 text-sm text-muted">Set an independent schedule and retention policy for the selected service. Times use UTC.</p>
+          </div>
+          <span className="text-xs text-muted">{schedules.find(item => item.serviceId === serviceId)?.enabled ? "Schedule active" : "No active schedule"}</span>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <label className="label">Frequency</label>
+            <select className="input w-full" value={frequency} onChange={e => setFrequency(e.target.value as ScheduleRow["frequency"])}>
+              <option value="every6h">Every 6 hours</option>
+              <option value="every12h">Every 12 hours</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Daily / weekly time (UTC)</label>
+            <input className="input w-full" type="time" value={backupTime} onChange={e => setBackupTime(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Retention</label>
+            <select className="input w-full" value={retentionMode === "never" ? "never" : retentionMode === "days" ? "days" : String(retentionCount)} onChange={e => {
+              const value = e.target.value;
+              if (value === "never") setRetentionMode("never");
+              else if (value === "days") setRetentionMode("days");
+              else { setRetentionMode("count"); setRetentionCount(Number(value) as 5 | 10 | 30); }
+            }}>
+              <option value="5">Keep latest 5</option>
+              <option value="10">Keep latest 10</option>
+              <option value="30">Keep latest 30</option>
+              <option value="days">Keep by days</option>
+              <option value="never">Never automatically delete</option>
+            </select>
+          </div>
+          {retentionMode === "days" ? (
+            <div>
+              <label className="label">Keep for days (1–365)</label>
+              <input className="input w-full" type="number" min={1} max={365} value={retentionDays} onChange={e => setRetentionDays(Number(e.target.value))} />
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button className="btn-primary" disabled={busy || !drive.connected || !serviceId} onClick={() => void saveSchedule()}>Save schedule</button>
+          <button className="btn-ghost" disabled={busy || !schedules.some(item => item.serviceId === serviceId && item.enabled)} onClick={() => void disableSchedule()}>Pause</button>
+          <button className="btn-ghost text-red-400" disabled={busy || !schedules.some(item => item.serviceId === serviceId)} onClick={() => void removeSchedule()}>Delete schedule</button>
+        </div>
+        {!drive.connected ? <p className="mt-3 text-xs text-amber-400">Connect your Google Drive before enabling automatic backups.</p> : null}
+        <div className="mt-4 space-y-2">
+          {schedules.map(item => (
+            <div key={item._id} className="flex flex-wrap justify-between gap-2 border-t border-white/5 pt-3 text-xs text-muted">
+              <span>{item.serviceId === serviceId ? "Selected service" : item.serviceId} · {item.enabled ? item.frequency : "paused"}</span>
+              <span>Next run: {new Date(item.nextRunAt).toLocaleString()} UTC</span>
+              <span>Last: {item.lastStatus ?? "not run"}</span>
+            </div>
+          ))}
+          {schedules.length === 0 ? <p className="text-xs text-muted">No automatic backup schedules configured.</p> : null}
+        </div>
       </GlassCard>
 
       <GlassCard className="overflow-x-auto">
