@@ -53,3 +53,29 @@ export class AuditLog {
 export type AuditLogDocument = HydratedDocument<AuditLog>;
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLog);
 AuditLogSchema.index({ createdAt: -1 });
+
+@Schema({ timestamps: true })
+export class BackupSchedule {
+  @Prop({ type: Types.ObjectId, ref: "Service", required: true, unique: true, index: true })
+  serviceId!: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: "User", required: true, index: true })
+  ownerId!: Types.ObjectId;
+  @Prop({ default: false })
+  enabled!: boolean;
+  @Prop({ enum: ["manual", "every6h", "every12h", "daily", "weekly"], default: "manual" })
+  frequency!: "manual" | "every6h" | "every12h" | "daily" | "weekly";
+  @Prop({ default: "02:00" })
+  time!: string;
+  @Prop({ enum: [0, 5, 10, 30], default: 5 })
+  retention!: 0 | 5 | 10 | 30;
+  @Prop({ default: true })
+  notifyOnCompletion!: boolean;
+  @Prop()
+  nextRunAt?: Date;
+  @Prop()
+  lastRunAt?: Date;
+  @Prop()
+  leaseUntil?: Date;
+}
+export const BackupScheduleSchema = SchemaFactory.createForClass(BackupSchedule);
+export type BackupScheduleDocument = HydratedDocument<BackupSchedule>;
