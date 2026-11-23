@@ -262,6 +262,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         if (typeof result.backupId === "string") backupIds.push(result.backupId);
         if (typeof result.driveFileId === "string") fileIds.add(result.driveFileId);
       }
+      for (const backupId of backupIds) {
+        if (!Types.ObjectId.isValid(backupId)) continue;
+        const backup = await this.backups.findById(backupId);
+        if (backup?.remoteFileId && backup.driveOwnerType === "admin") fileIds.add(backup.remoteFileId);
+      }
       const accessToken = await this.integrations.googleDriveAccessToken("admin");
       const failures: string[] = [];
       for (const fileId of fileIds) {
