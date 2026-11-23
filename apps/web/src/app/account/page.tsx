@@ -55,16 +55,15 @@ export default function AccountSettings() {
         return;
       }
       try {
-        const [t, s, me, driveStatus] = await Promise.all([
+        const [t, s, me] = await Promise.all([
           api.get<{ items?: ThemeRow[] } | ThemeRow[]>("/appearance/themes"),
           api.get<PublicSettings>("/appearance/public-settings"),
           api.get<MeAppearance>("/appearance/me"),
-          api.get<DriveStatus>("/integrations/google-drive"),
         ]);
-        setDrive(driveStatus);
         setThemes(Array.isArray(t) ? t : t.items ?? []);
         setPub(s);
         setPrefs(me);
+        try { setDrive(await api.get<DriveStatus>("/integrations/google-drive")); } catch { /* Drive status is optional */ }
       } catch {
         /* appearance is optional — leave defaults */
       }
