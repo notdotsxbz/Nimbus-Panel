@@ -133,6 +133,19 @@ export default function AdminBackups() {
     } finally { setBusy(false); }
   };
 
+  const retryUpload = async (id: string) => {
+    if (!window.confirm("Retry uploading this preserved Admin Drive backup archive?")) return;
+    setBusy(true);
+    try {
+      await api.post(`/backups/${id}/retry-upload`);
+      show("Backup upload retry completed", "ok");
+      await load();
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Backup upload retry failed", "err");
+      await load();
+    } finally { setBusy(false); }
+  };
+
   const restoreSelected = async () => {
     if (!selectedBackupIds.length) return;
     if (!window.confirm(`Restore ${selectedBackupIds.length} selected service backups? Current files for those services will be replaced. A safety backup will be created before each restore.`)) return;
@@ -300,7 +313,7 @@ export default function AdminBackups() {
                 <td className="px-5 py-3 text-xs uppercase text-muted">{b.destination}</td>
                 <td className="px-5 py-3 text-xs text-muted">{b.trigger}</td>
                 <td className="tnum px-5 py-3 text-xs">{b.sizeBytes ? `${(b.sizeBytes / 1048576).toFixed(1)} MB` : "—"}</td>
-                <td className="px-5 py-3"><span className="inline-flex items-center gap-2 text-xs"><span className={`status-dot ${b.status === "completed" ? "status-online" : b.status === "failed" ? "status-error" : "status-installing"}`} />{b.status}</span></td>
+                <td className="px-5 py-3"><div className="flex flex-col items-start gap-1"><span className="inline-flex items-center gap-2 text-xs"><span className={`status-dot ${b.status === "completed" ? "status-online" : b.status === "failed" ? "status-error" : "status-installing"}`} />{b.status}</span>{b.status === "failed" ? <button className="btn-ghost !px-2 !py-1 text-[11px]" disabled={busy} onClick={() => void retryUpload(b._id)}>Retry upload</button> : null}</div></td>
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
               </tr>
             ))}
