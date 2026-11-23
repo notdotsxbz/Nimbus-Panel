@@ -358,6 +358,14 @@ func (s *AgentServer) handleBackupRestoreUpload(w http.ResponseWriter, r *http.R
 	if err := os.MkdirAll(backupDir, 0o750); err != nil { http.Error(w, "could not prepare backup storage", http.StatusInternalServerError); return }
 	target := filepath.Join(backupDir, backupID+".tar.gz")
 	temp := target + ".restore-uploading"
+	// A previous interrupted restore may have left a complete temporary archive.
+	// Replace that cache file; the authoritative copy remains encrypted in Drive.
+	if _, statErr := os.Stat(target); statErr == nil {
+		if removeErr := os.Remove(target); removeErr != nil {
+			http.Error(w, "could not replace prior restore cache", http.StatusInternalServerError)
+			return
+		}
+	}
 	out, err := os.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil { http.Error(w, "restore upload is already running or temporary storage is unavailable", http.StatusConflict); return }
 	keep := false
