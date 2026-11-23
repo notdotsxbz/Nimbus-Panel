@@ -50,7 +50,7 @@ export default function CustomerBackups() {
           <h1 className="text-2xl font-semibold">Backups</h1>
           <p className="mt-1 text-sm text-muted">Snapshots with integrity verification and staged restores.</p>
         </div>
-        <span className="text-xs text-muted">Backups are stored in the Drive configured by your panel owner.</span>
+        <span className="text-xs text-muted">Your backups are stored in your connected personal Google Drive.</span>
       </header>
 
       <GlassCard className="overflow-x-auto">
