@@ -356,7 +356,7 @@ func (s *AgentServer) handleBackupRestoreUpload(w http.ResponseWriter, r *http.R
 	if expected == "" { http.Error(w, "missing archive checksum", http.StatusBadRequest); return }
 	backupDir := filepath.Join(s.cfg.DataDir, "backups")
 	if err := os.MkdirAll(backupDir, 0o750); err != nil { http.Error(w, "could not prepare backup storage", http.StatusInternalServerError); return }
-	target := filepath.Join(backupDir, backupID+".tar.zst")
+	target := filepath.Join(backupDir, backupID+".tar.gz")
 	temp := target + ".restore-uploading"
 	out, err := os.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil { http.Error(w, "restore upload is already running or temporary storage is unavailable", http.StatusConflict); return }
@@ -408,7 +408,7 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		tar := command("tar", "-cf", "-", "-C", dir, ".")
+		tar := command("tar", "-czf", "-", "-C", dir, ".")
 		tar.Stdout = out
 		if err := tar.Run(); err != nil {
 			out.Close()
@@ -440,7 +440,7 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-		w.Header().Set("Content-Disposition", "attachment; filename="+req.BackupID+".tar.zst")
+		w.Header().Set("Content-Disposition", "attachment; filename="+req.BackupID+".tar.gz")
 		_, _ = io.Copy(w, in)
 	case "restore":
 		if !regexp.MustCompile("^[a-fA-F0-9]{24}$").MatchString(req.BackupID) { http.Error(w, "invalid backup id", http.StatusBadRequest); return }
