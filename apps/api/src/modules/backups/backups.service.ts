@@ -418,8 +418,6 @@ export class BackupsService {
     service: { serviceId: string; serviceName: string; serviceType: string; customerName: string; customerId: string },
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
-    const archiveInfo = await stat(archivePath);
-    if (!archiveInfo.isFile() || archiveInfo.size <= 0) throw new BadRequestException("Backup archive is empty or unavailable");
     const rootName = driveOwner.role === "customer" ? "NIMBUS Backups" : "NIMBUS Full Panel Backups";
     const rootId = await this.ensureDriveFolder(accessToken, rootName);
     let parentId = rootId;
@@ -437,12 +435,60 @@ export class BackupsService {
       `${this.safeFolderName(service.serviceName)}_${service.serviceId}`,
       categoryId,
     );
+    return this.uploadResumableFile(accessToken, archivePath, filename, serviceFolderId);
+  }
 
+  async uploadAdminPanelArtifact(
+    inputPath: string,
+    filename: string,
+    folderSegments: string[],
+    actor: AuthUser,
+  ): Promise<{ fileId: string; checksum: string; encryptionIv: string; encryptionTag: string; sizeBytes: number; storedSizeBytes: number }> {
+    if (actor.role !== "owner" && actor.role !== "admin") throw new BadRequestException("Only Admins can upload panel backup artifacts");
+    const accessToken = await this.integrations.googleDriveAccessToken(actor);
+    const rootId = await this.ensureDriveFolder(accessToken, "NIMBUS Full Panel Backups");
+    let parentId = rootId;
+    for (const segment of folderSegments) {
+      parentId = await this.ensureDriveFolder(accessToken, this.safeFolderName(segment), parentId);
+    }
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-panel-backup-"));
+    const encryptedPath = join(tempDir, `${randomBytes(8).toString("hex")}.enc`);
+    try {
+      const checksum = await this.checksumArchiveFile(inputPath);
+      const encryption = await this.encryptArchiveFile(inputPath, encryptedPath);
+      const fileId = await this.uploadResumableFile(accessToken, encryptedPath, `${this.safeFolderName(filename)}.enc`, parentId);
+      return {
+        fileId,
+        checksum: checksum.checksum,
+        encryptionIv: encryption.iv,
+        encryptionTag: encryption.tag,
+        sizeBytes: checksum.sizeBytes,
+        storedSizeBytes: encryption.sizeBytes,
+      };
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private async checksumArchiveFile(filePath: string): Promise<{ checksum: string; sizeBytes: number }> {
+    const hash = createHash("sha256");
+    let sizeBytes = 0;
+    for await (const chunk of createReadStream(filePath)) {
+      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      hash.update(data);
+      sizeBytes += data.length;
+    }
+    return { checksum: hash.digest("base64"), sizeBytes };
+  }
+
+  private async uploadResumableFile(accessToken: string, archivePath: string, filename: string, parentFolderId: string): Promise<string> {
+    const archiveInfo = await stat(archivePath);
+    if (!archiveInfo.isFile() || archiveInfo.size <= 0) throw new BadRequestException("Backup archive is empty or unavailable");
     let uploadUrl = "";
     try {
       const session = await axios.post(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id",
-        { name: filename, mimeType: "application/octet-stream", parents: [serviceFolderId] },
+        { name: filename, mimeType: "application/octet-stream", parents: [parentFolderId] },
         {
           headers: {
             authorization: `Bearer ${accessToken}`,
@@ -460,7 +506,7 @@ export class BackupsService {
       let offset = 0;
       let fileId: string | undefined;
       let noProgressRetries = 0;
-      const chunkSize = 8 * 1024 * 1024; // 8 MiB, a multiple of Google's 256 KiB chunk requirement.
+      const chunkSize = 8 * 1024 * 1024;
       try {
         while (offset < archiveInfo.size) {
           const length = Math.min(chunkSize, archiveInfo.size - offset);
@@ -492,7 +538,6 @@ export class BackupsService {
               attempt += 1;
             }
           }
-
           if (response.status === 200 || response.status === 201) {
             fileId = (response.data as { id?: string })?.id;
             offset = archiveInfo.size;
@@ -515,7 +560,6 @@ export class BackupsService {
       } finally {
         await file.close();
       }
-
       if (!fileId) throw new BadRequestException("Google Drive did not confirm completion of the backup upload");
       const verified = await axios.get(
         `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,size,trashed`,
