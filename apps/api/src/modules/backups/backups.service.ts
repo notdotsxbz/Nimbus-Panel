@@ -299,6 +299,93 @@ export class BackupsService {
     return { ok: true, safetyBackupId: result.safetyBackupId ?? null };
   }
 
+  private async persistSafetyBackup(
+    node: Awaited<ReturnType<NodesService["get"]>>,
+    service: Awaited<ReturnType<ServicesService["get"]>>,
+    user: AuthUser,
+    safetyBackupId: string,
+    checksum: string,
+    sizeBytes: number,
+  ): Promise<BackupDocument> {
+    const backup = await this.backups.create({
+      serviceId: service._id,
+      ownerId: service.ownerId,
+      driveOwnerType: user.role === "customer" ? "customer" : "admin",
+      destination: "gdrive",
+      status: "running",
+      trigger: "pre-restore-safety",
+      createdBy: new Types.ObjectId(user.id),
+    });
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-safety-backup-"));
+    const archivePath = join(tempDir, `${backup._id!.toString()}.tar`);
+    try {
+      const hash = createHash("sha256");
+      const digestStream = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      });
+      await pipeline(
+        await this.nodes.downloadBackupArchiveStream(node, service._id!.toString(), safetyBackupId),
+        digestStream,
+        createWriteStream(archivePath, { flags: "wx", mode: 0o600 }),
+      );
+      const digest = hash.digest();
+      const archiveInfo = await stat(archivePath);
+      if (archiveInfo.size !== sizeBytes ||
+        (digest.toString("base64") !== checksum && digest.toString("hex") !== checksum)) {
+        throw new BadRequestException("Pre-restore safety archive failed integrity verification");
+      }
+      const encryptedPath = join(tempDir, `${backup._id!.toString()}.tar.enc`);
+      const encrypted = await this.encryptArchiveFile(archivePath, encryptedPath);
+      backup.sizeBytes = sizeBytes;
+      backup.checksum = checksum;
+      backup.encryptionAlgorithm = "aes-256-gcm";
+      backup.encryptionIv = encrypted.iv;
+      backup.encryptionTag = encrypted.tag;
+      backup.storedSizeBytes = encrypted.sizeBytes;
+      const customer = await this.users.findById(service.ownerId).select("displayName username").lean();
+      const driveOwner = user.role === "customer"
+        ? { id: service.ownerId.toString(), role: "customer" as const }
+        : user;
+      backup.remoteFileId = await this.uploadGoogleDriveArchive(
+        encryptedPath,
+        `nimbus-${service._id!.toString()}-${backup._id!.toString()}-safety.tar.enc`,
+        driveOwner,
+        {
+          serviceId: service._id!.toString(),
+          serviceName: service.name,
+          serviceType: String(service.type),
+          customerName: customer?.displayName || customer?.username || "customer",
+          customerId: service.ownerId.toString(),
+        },
+      );
+      backup.status = "completed";
+      backup.completedAt = new Date();
+      await backup.save();
+      await this.nodes.agentCall(node, "/backups/delete", {
+        serviceId: service._id!.toString(),
+        backupId: safetyBackupId,
+      });
+      await this.audit.log({
+        actorId: user.id,
+        action: "backups.safety.create",
+        targetId: backup._id!.toString(),
+        detail: `sourceRestoreId=${safetyBackupId}`,
+        sensitive: true,
+      });
+      return backup;
+    } catch (error) {
+      backup.status = "failed";
+      backup.error = error instanceof Error ? error.message : "Pre-restore safety backup failed";
+      await backup.save();
+      throw error;
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
   async download(backupId: string, user: AuthUser): Promise<{ stream: import("node:stream").Readable; filename: string; sizeBytes?: number }> {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
