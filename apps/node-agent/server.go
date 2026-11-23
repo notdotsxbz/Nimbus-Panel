@@ -464,6 +464,13 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 	case "restore-commit":
 		if !regexp.MustCompile("^[a-fA-F0-9]{24}$").MatchString(req.BackupID) { http.Error(w, "invalid backup id", http.StatusBadRequest); return }
 		staging := dir + ".restore-staging"
+		markerDir := filepath.Join(s.cfg.DataDir, "backups", "restore-commits")
+		markerPath := filepath.Join(markerDir, req.ServiceID+"-"+req.BackupID+".done")
+		if _, markerErr := os.Stat(markerPath); markerErr == nil {
+			_ = os.RemoveAll(staging)
+			writeJSON(w, map[string]any{"restored": true, "alreadyApplied": true, "safetyCopyPreserved": true})
+			return
+		}
 		if info, err := os.Stat(staging); err != nil || !info.IsDir() { http.Error(w, "no verified restore staging directory exists", http.StatusConflict); return }
 		containerName := "nimbus-" + req.ServiceID
 		running := false
@@ -498,6 +505,9 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 				_ = os.Rename(dir, failed); _ = os.Rename(safety, dir); _, _ = docker("start", containerName)
 				http.Error(w, "restored service health check failed; previous data was restored", http.StatusBadGateway); return
 			}
+		}
+		if err := os.MkdirAll(markerDir, 0o700); err == nil {
+			_ = os.WriteFile(markerPath, []byte(time.Now().UTC().Format(time.RFC3339)), 0o600)
 		}
 		writeJSON(w, map[string]any{"restored": true, "safetyCopyPreserved": true})
 	default:
