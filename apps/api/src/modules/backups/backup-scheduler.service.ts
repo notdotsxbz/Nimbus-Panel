@@ -7,6 +7,7 @@ import { ServicesService } from "../services/services.service";
 import { BackupsService } from "./backups.service";
 import { BackupSchedule, BackupScheduleDocument } from "./backup-schedule.schema";
 import { NotificationsService } from "../notifications/notifications.service";
+import { AuditService } from "../audit/audit.service";
 import { IntegrationsService } from "../integrations/integrations.service";
 
 type Frequency = "every6h" | "every12h" | "daily" | "weekly";
@@ -24,6 +25,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
     private readonly backups: BackupsService,
     private readonly notifications: NotificationsService,
     private readonly integrations: IntegrationsService,
+    private readonly audit: AuditService,
   ) {}
 
   async onModuleInit() {
@@ -84,7 +86,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
     await this.services.get(dto.serviceId, user);
     await this.integrations.googleDriveAccessToken(user);
     const nextRunAt = this.nextRun(dto.frequency, backupTime, new Date());
-    return this.schedules.findOneAndUpdate(
+    const schedule = await this.schedules.findOneAndUpdate(
       { serviceId: new Types.ObjectId(dto.serviceId), ownerId: new Types.ObjectId(user.id) },
       {
         $set: {
@@ -103,6 +105,8 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
       },
       { upsert: true, new: true, runValidators: true },
     );
+    await this.audit.log({ actorId: user.id, action: "backups.schedule.upsert", targetType: "service", targetId: dto.serviceId, sensitive: true });
+    return schedule;
   }
 
   async remove(user: AuthUser, serviceId: string) {
@@ -114,6 +118,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
       ownerId: new Types.ObjectId(user.id),
     });
     if (!result.deletedCount) throw new NotFoundException("Backup schedule not found");
+    await this.audit.log({ actorId: user.id, action: "backups.schedule.delete", targetType: "service", targetId: serviceId, sensitive: true });
     return { deleted: true };
   }
 
