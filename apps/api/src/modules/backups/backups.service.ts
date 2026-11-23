@@ -208,25 +208,63 @@ export class BackupsService {
         ? { id: (backup.ownerId ?? service.ownerId).toString(), role: "customer" as const }
         : { id: user.id, role: user.role };
       const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
-      const remote = await axios.get(
-        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
-        {
-          headers: { authorization: `Bearer ${accessToken}` },
-          responseType: "stream",
-          timeout: 10 * 60 * 1000,
-          maxContentLength: Infinity,
-        },
-      );
-      const uploaded = await this.nodes.uploadBackupArchiveStream(
-        node,
-        service._id!.toString(),
-        backupId,
-        backup.checksum,
-        backup.sizeBytes,
-        remote.data,
-      );
-      if (!uploaded.uploaded || uploaded.checksum !== backup.checksum || uploaded.sizeBytes !== backup.sizeBytes) {
-        throw new BadRequestException("Node Agent did not verify the downloaded Google Drive archive");
+      const tempDir = await mkdtemp(join(tmpdir(), "nimbus-restore-"));
+      const encryptedPath = join(tempDir, `${backupId}.tar.enc`);
+      const archivePath = join(tempDir, `${backupId}.tar`);
+      try {
+        const remote = await axios.get(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+          {
+            headers: { authorization: `Bearer ${accessToken}` },
+            responseType: "stream",
+            timeout: 10 * 60 * 1000,
+            maxContentLength: Infinity,
+          },
+        );
+        if (backup.encryptionAlgorithm === "aes-256-gcm") {
+          await pipeline(remote.data, createWriteStream(encryptedPath, { flags: "wx", mode: 0o600 }));
+          const encryptedInfo = await stat(encryptedPath);
+          if (backup.storedSizeBytes && encryptedInfo.size !== backup.storedSizeBytes) {
+            throw new BadRequestException("Encrypted Drive archive size does not match its backup manifest");
+          }
+          const decryptedSize = await this.decryptArchiveFile(
+            encryptedPath,
+            archivePath,
+            backup.encryptionIv ?? "",
+            backup.encryptionTag ?? "",
+            backup.checksum,
+          );
+          if (decryptedSize !== backup.sizeBytes) throw new BadRequestException("Decrypted archive size does not match its backup manifest");
+        } else {
+          const hash = createHash("sha256");
+          const digestStream = new Transform({
+            transform(chunk: Buffer, _encoding, callback) {
+              hash.update(chunk);
+              callback(null, chunk);
+            },
+          });
+          await pipeline(remote.data, digestStream, createWriteStream(archivePath, { flags: "wx", mode: 0o600 }));
+          const digest = hash.digest();
+          if (digest.toString("base64") !== backup.checksum && digest.toString("hex") !== backup.checksum) {
+            throw new BadRequestException("Downloaded Drive archive failed SHA-256 verification");
+          }
+          if ((await stat(archivePath)).size !== backup.sizeBytes) {
+            throw new BadRequestException("Downloaded archive size does not match its backup manifest");
+          }
+        }
+        const uploaded = await this.nodes.uploadBackupArchiveStream(
+          node,
+          service._id!.toString(),
+          backupId,
+          backup.checksum,
+          backup.sizeBytes,
+          createReadStream(archivePath),
+        );
+        if (!uploaded.uploaded || uploaded.sizeBytes !== backup.sizeBytes) {
+          throw new BadRequestException("Node Agent did not verify the downloaded Google Drive archive");
+        }
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
       }
     }
     const result = await this.nodes.agentCall(node, "/backups/restore", {
