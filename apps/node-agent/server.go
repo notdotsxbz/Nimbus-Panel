@@ -1,35 +1,3 @@
-// handleBackupRestoreUpload receives a checksum-verified archive as a raw stream.
-func (s *AgentServer) handleBackupRestoreUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "backups" || parts[1] != "restore-upload" { http.Error(w, "bad request", http.StatusBadRequest); return }
-	serviceID, backupID := parts[2], parts[3]
-	if !regexp.MustCompile("^[a-fA-F0-9]{24}$").MatchString(serviceID) || !regexp.MustCompile("^[a-fA-F0-9]{24}$").MatchString(backupID) {
-		http.Error(w, "invalid service or backup id", http.StatusBadRequest); return
-	}
-	if _, err := s.servicePath(serviceID); err != nil { http.Error(w, err.Error(), http.StatusBadRequest); return }
-	expected := strings.TrimSpace(r.Header.Get("X-Nimbus-SHA256"))
-	if expected == "" { http.Error(w, "missing archive checksum", http.StatusBadRequest); return }
-	backupDir := filepath.Join(s.cfg.DataDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o750); err != nil { http.Error(w, "could not prepare backup storage", http.StatusInternalServerError); return }
-	target := filepath.Join(backupDir, backupID+".tar.zst")
-	temp := target + ".restore-uploading"
-	out, err := os.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil { http.Error(w, "restore upload is already running or temporary storage is unavailable", http.StatusConflict); return }
-	keep := false
-	defer func() { _ = out.Close(); if !keep { _ = os.Remove(temp) } }()
-	hash := sha256.New()
-	limited := http.MaxBytesReader(w, r.Body, int64(100)<<30)
-	if _, err := io.Copy(io.MultiWriter(out, hash), limited); err != nil { http.Error(w, "restore archive upload failed or exceeded the 100 GiB limit", http.StatusBadRequest); return }
-	if err := out.Sync(); err != nil { http.Error(w, "could not sync restore archive", http.StatusInternalServerError); return }
-	if err := out.Close(); err != nil { http.Error(w, "could not close restore archive", http.StatusInternalServerError); return }
-	sum := hash.Sum(nil)
-	if expected != hex.EncodeToString(sum) && expected != base64.StdEncoding.EncodeToString(sum) { http.Error(w, "restore archive checksum mismatch", http.StatusBadRequest); return }
-	if err := os.Rename(temp, target); err != nil { http.Error(w, "could not store verified restore archive", http.StatusInternalServerError); return }
-	keep = true
-	writeJSON(w, map[string]any{"uploaded": true, "backupId": backupID})
-}
-
 package main
 
 import (
@@ -372,6 +340,38 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "unknown operation", http.StatusNotFound)
 	}
+}
+
+// handleBackupRestoreUpload receives a checksum-verified archive as a raw stream.
+func (s *AgentServer) handleBackupRestoreUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "backups" || parts[1] != "restore-upload" { http.Error(w, "bad request", http.StatusBadRequest); return }
+	serviceID, backupID := parts[2], parts[3]
+	if !regexp.MustCompile("^[a-fA-F0-9]{24}$").MatchString(serviceID) || !regexp.MustCompile("^[a-fA-F0-9]{24}$").MatchString(backupID) {
+		http.Error(w, "invalid service or backup id", http.StatusBadRequest); return
+	}
+	if _, err := s.servicePath(serviceID); err != nil { http.Error(w, err.Error(), http.StatusBadRequest); return }
+	expected := strings.TrimSpace(r.Header.Get("X-Nimbus-SHA256"))
+	if expected == "" { http.Error(w, "missing archive checksum", http.StatusBadRequest); return }
+	backupDir := filepath.Join(s.cfg.DataDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil { http.Error(w, "could not prepare backup storage", http.StatusInternalServerError); return }
+	target := filepath.Join(backupDir, backupID+".tar.zst")
+	temp := target + ".restore-uploading"
+	out, err := os.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil { http.Error(w, "restore upload is already running or temporary storage is unavailable", http.StatusConflict); return }
+	keep := false
+	defer func() { _ = out.Close(); if !keep { _ = os.Remove(temp) } }()
+	hash := sha256.New()
+	limited := http.MaxBytesReader(w, r.Body, int64(100)<<30)
+	if _, err := io.Copy(io.MultiWriter(out, hash), limited); err != nil { http.Error(w, "restore archive upload failed or exceeded the 100 GiB limit", http.StatusBadRequest); return }
+	if err := out.Sync(); err != nil { http.Error(w, "could not sync restore archive", http.StatusInternalServerError); return }
+	if err := out.Close(); err != nil { http.Error(w, "could not close restore archive", http.StatusInternalServerError); return }
+	sum := hash.Sum(nil)
+	if expected != hex.EncodeToString(sum) && expected != base64.StdEncoding.EncodeToString(sum) { http.Error(w, "restore archive checksum mismatch", http.StatusBadRequest); return }
+	if err := os.Rename(temp, target); err != nil { http.Error(w, "could not store verified restore archive", http.StatusInternalServerError); return }
+	keep = true
+	writeJSON(w, map[string]any{"uploaded": true, "backupId": backupID})
 }
 
 // handleBackup creates tar+sha256 snapshots and staged restores.
