@@ -142,7 +142,7 @@ export class BackupsService {
   }
 
   private safeFolderName(value: string): string {
-    return value.replace(/[\\\\/:*?"<>|]/g, "-").replace(/\\s+/g, " ").trim().slice(0, 80) || "Unnamed";
+    return value.replace(/[\\\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "Unnamed";
   }
 
   private async uploadGoogleDriveArchive(
