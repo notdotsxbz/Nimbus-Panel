@@ -70,6 +70,8 @@ export class BackupsService {
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
           driveOwnerType,
           driveOwnerId?.toString(),
+          service.type,
+          service.name,
         );
       }
       backup.status = "completed";
@@ -107,14 +109,17 @@ export class BackupsService {
     archive: Buffer,
     filename: string,
     ownerType: "admin" | "customer",
-    ownerId?: string,
+    ownerId: string | undefined,
+    serviceType: string,
+    serviceName: string,
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
+    const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, ownerId, serviceType, serviceName);
     let metadata;
     try {
       metadata = await axios.post(
         "https://www.googleapis.com/drive/v3/files?fields=id,name",
-        { name: filename, mimeType: "application/octet-stream" },
+        { name: filename, mimeType: "application/octet-stream", parents: [parentFolderId] },
         { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
       );
     } catch (error) {
