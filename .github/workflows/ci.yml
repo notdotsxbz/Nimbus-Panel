@@ -142,8 +142,8 @@ jobs:
             sleep 1
           done
           if [ "$API_READY" -ne 1 ]; then cat /tmp/nimbus-ci-api.log; exit 1; fi
-          node tests/api-smoke.mjs
-          AGENT_SHARED_SECRET=ci-only-agent-secret node tests/agent-enrollment-smoke.mjs
+          timeout 10m node tests/api-smoke.mjs
+          AGENT_SHARED_SECRET=ci-only-agent-secret timeout 2m node tests/agent-enrollment-smoke.mjs
 
   security:
     runs-on: ubuntu-latest
