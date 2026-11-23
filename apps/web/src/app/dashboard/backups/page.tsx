@@ -236,6 +236,19 @@ export default function CustomerBackups() {
     } finally { setBusy(false); }
   };
 
+  const retryUpload = async (id: string) => {
+    if (!window.confirm("Retry uploading the preserved backup archive to Google Drive? The existing node archive will be verified before upload.")) return;
+    setBusy(true);
+    try {
+      await api.post(`/backups/${id}/retry-upload`);
+      show("Backup upload retry completed", "ok");
+      await load();
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Backup upload retry failed", "err");
+      await load();
+    } finally { setBusy(false); }
+  };
+
   const restore = async (id: string) => {
     if (!confirm("Restore this backup? Current service files will be replaced. Nimbus will create a safety snapshot first.")) return;
     setBusy(true);
@@ -386,6 +399,11 @@ export default function CustomerBackups() {
                     <div className="flex justify-end gap-1">
                       <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void download(b._id)}>Download</button>
                       <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void restore(b._id)}>Restore</button>
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs text-red-400" disabled={busy} onClick={() => void deleteBackup(b._id)}>Delete</button>
+                    </div>
+                  ) : b.status === "failed" ? (
+                    <div className="flex justify-end gap-1">
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void retryUpload(b._id)}>Retry upload</button>
                       <button className="btn-ghost !px-2.5 !py-1 text-xs text-red-400" disabled={busy} onClick={() => void deleteBackup(b._id)}>Delete</button>
                     </div>
                   ) : null}
