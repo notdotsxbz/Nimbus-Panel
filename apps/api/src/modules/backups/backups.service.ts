@@ -354,7 +354,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const customers = new Map<string, { customerId: string; customerName: string; services: Array<Record<string, unknown>> }>();
     for (const record of records as any[]) {
       const customerId = record.ownerId.toString();
-      const customer = customers.get(customerId) ?? {
+      const customer: { customerId: string; customerName: string; services: Array<Record<string, unknown>> } = customers.get(customerId) ?? {
         customerId,
         customerName: userNames.get(customerId) ?? customerId,
         services: [],
