@@ -87,6 +87,21 @@ export default function AdminBackups() {
     }
   };
 
+  const createFullPanelBackup = async () => {
+    if (!summary) return;
+    if (!confirm(`Create a Full Panel Backup? This includes the panel database, encrypted configuration, system metadata and all ${summary.serviceCount} eligible customer services. VPS/VDS disk images are not included.`)) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ jobId: string; total: number }>("/backups/admin/full", {});
+      show(`Full Panel Backup queued (${result.total} tasks, job ${result.jobId.slice(0, 8)})`, "info");
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Full Panel Backup could not be queued", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -96,6 +111,7 @@ export default function AdminBackups() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button className="btn-ghost" disabled={busy || !summary?.serviceCount} onClick={() => void backupAllCustomerServices()}>Back up all customer services</button>
+          <button className="btn-primary" disabled={busy || !summary} onClick={() => void createFullPanelBackup()}>Full Panel Backup</button>
           <select className="input min-w-48" value={serviceId} onChange={e => setServiceId(e.target.value)} aria-label="Select service">
             {services.length === 0 ? <option value="">No services available</option> : services.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
           </select>
@@ -111,8 +127,8 @@ export default function AdminBackups() {
             <div><p className="text-xs text-muted">Services</p><p className="tnum text-xl font-semibold">{summary.serviceCount}</p></div>
             <div><p className="text-xs text-muted">Nodes</p><p className="tnum text-xl font-semibold">{summary.nodeCount}</p></div>
           </div>
-          <p className="mt-4 text-xs text-muted">Service batch backups include: {summary.included.join(" · ")}</p>
-          <p className="mt-2 text-xs text-amber-400">Not included in this operation: {summary.excluded.join(" · ")}. This is not a full panel/database backup.</p>
+          <p className="mt-4 text-xs text-muted">Full Panel Backup includes: {summary.included.join(" · ")}</p>
+          <p className="mt-2 text-xs text-amber-400">Not included: {summary.excluded.join(" · ")}.</p>
         </GlassCard>
       ) : null}
 
