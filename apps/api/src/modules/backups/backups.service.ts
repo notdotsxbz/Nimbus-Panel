@@ -194,9 +194,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     destination = "gdrive",
   ) {
     if (!serviceIds.length || serviceIds.length > 200) throw new BadRequestException("Select between 1 and 200 services");
-    if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
+    if (destination !== "gdrive") throw new BadRequestException("User-requested backups must be stored in Google Drive");
     if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
-    if (user.role === "customer" && destination !== "gdrive") throw new BadRequestException("Customer backups must use the customer's connected Google Drive");
     const uniqueIds = [...new Set(serviceIds)];
     const requested = new Set(uniqueIds);
     const available = await this.services.listFor(user as never);
@@ -332,10 +331,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
 
   async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local", internal = false, jobId?: string) {
     if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
+    if (destination === "local" && !internal) throw new BadRequestException("User-requested backups must be stored in Google Drive");
     if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
-    if (user.role === "customer" && destination !== "gdrive" && !internal) {
-      throw new BadRequestException("Customer backups must be stored in the customer's connected Google Drive");
-    }
     const service = await this.services.get(serviceId, user as never);
     const node = await this.nodes.get(service.nodeId.toString());
     const driveOwnerType = user.role === "customer" ? "customer" : "admin";
