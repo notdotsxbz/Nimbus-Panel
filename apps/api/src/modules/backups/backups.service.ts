@@ -163,6 +163,61 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async adminBackupSummary(user: { id: string; role: string }) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    const services = await this.services.listFor(user as never);
+    const customerIds = new Set(services.map((service) => service.ownerId.toString()));
+    const nodeCount = await this.backups.db.collection("nodes").countDocuments();
+    return {
+      customerCount: customerIds.size,
+      serviceCount: services.length,
+      nodeCount,
+      estimatedBackupSizeBytes: null,
+      included: ["Eligible service data directories", "Service metadata and SHA-256 checksums"],
+      excluded: ["Panel database", "Panel configuration secrets", "VPS/VDS disk images (not supported by the current Docker-only agent)"],
+    };
+  }
+
+  async createAdminBatch(
+    dto: { mode: "all-customers" | "selected-customers" | "selected-services"; customerIds?: string[]; serviceIds?: string[] },
+    user: { id: string; role: string },
+  ) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    const allServices = await this.services.listFor(user as never);
+    let selected = allServices;
+    if (dto.mode === "selected-services") {
+      const ids = new Set(dto.serviceIds ?? []);
+      if (ids.size === 0) throw new BadRequestException("Select at least one service");
+      selected = allServices.filter((service) => ids.has(service._id!.toString()));
+      if (selected.length !== ids.size) throw new BadRequestException("One or more selected services were not found");
+    } else if (dto.mode === "selected-customers") {
+      const ids = new Set(dto.customerIds ?? []);
+      if (ids.size === 0) throw new BadRequestException("Select at least one customer");
+      selected = allServices.filter((service) => ids.has(service.ownerId.toString()));
+      if (selected.length === 0) throw new BadRequestException("The selected customers have no eligible services");
+    }
+    const results: Array<{ serviceId: string; status: string; backupId?: string; error?: string }> = [];
+    for (const service of selected) {
+      try {
+        const backup = await this.create(service._id!.toString(), user, "manual", "gdrive");
+        results.push({ serviceId: service._id!.toString(), status: backup.status, backupId: backup._id!.toString(), ...(backup.error ? { error: backup.error } : {}) });
+      } catch (error) {
+        results.push({ serviceId: service._id!.toString(), status: "failed", error: error instanceof Error ? error.message : "Backup failed" });
+      }
+    }
+    const completed = results.filter((result) => result.status === "completed").length;
+    const failed = results.length - completed;
+    await this.audit.log({
+      actorId: user.id,
+      action: "backups.admin-batch",
+      targetType: "backup-batch",
+      targetId: new Types.ObjectId().toString(),
+      detail: `mode=${dto.mode} total=${results.length} completed=${completed} failed=${failed}`,
+      sensitive: true,
+    });
+    return { mode: dto.mode, total: results.length, completed, failed, results };
+  }
+
   async list(user: { id: string; role: string }, serviceId?: string) {
     const filter: Record<string, unknown> = {};
     if (serviceId) {
