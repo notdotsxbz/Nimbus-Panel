@@ -306,7 +306,35 @@ export class BackupsService {
           maxContentLength: Infinity,
         },
       );
-      return { stream: response.data as import("node:stream").Readable, filename, sizeBytes: backup.sizeBytes };
+      if (backup.encryptionAlgorithm !== "aes-256-gcm") {
+        return { stream: response.data as import("node:stream").Readable, filename, sizeBytes: backup.sizeBytes };
+      }
+      const tempDir = await mkdtemp(join(tmpdir(), "nimbus-download-"));
+      const encryptedPath = join(tempDir, `${backupId}.tar.enc`);
+      const archivePath = join(tempDir, `${backupId}.tar`);
+      try {
+        await pipeline(response.data, createWriteStream(encryptedPath, { flags: "wx", mode: 0o600 }));
+        const encryptedInfo = await stat(encryptedPath);
+        if (backup.storedSizeBytes && encryptedInfo.size !== backup.storedSizeBytes) {
+          throw new BadRequestException("Encrypted Drive archive size does not match its backup manifest");
+        }
+        const decryptedSize = await this.decryptArchiveFile(
+          encryptedPath,
+          archivePath,
+          backup.encryptionIv ?? "",
+          backup.encryptionTag ?? "",
+          backup.checksum ?? "",
+        );
+        if (decryptedSize !== backup.sizeBytes) throw new BadRequestException("Decrypted archive size does not match its backup manifest");
+        const stream = createReadStream(archivePath);
+        const cleanup = () => { void rm(tempDir, { recursive: true, force: true }); };
+        stream.once("close", cleanup);
+        stream.once("error", cleanup);
+        return { stream, filename, sizeBytes: decryptedSize };
+      } catch (error) {
+        await rm(tempDir, { recursive: true, force: true });
+        throw error;
+      }
     }
     const node = await this.nodes.get(service.nodeId.toString());
     return {
