@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -32,6 +33,7 @@ func NewAgentServer(cfg *Config) *AgentServer {
 	s.mux = http.NewServeMux()
 	s.mux.Handle("/services/", s.auth(http.HandlerFunc(s.handleService)))
 	s.mux.Handle("/backups/", s.auth(http.HandlerFunc(s.handleBackup)))
+	s.mux.Handle("/backups/upload", s.auth(http.HandlerFunc(s.handleBackupUpload)))
 	s.mux.Handle("/files/", s.auth(http.HandlerFunc(handleFiles(s))))
 	s.mux.Handle("/logs/", s.auth(http.HandlerFunc(handleLogs(s))))
 	s.mux.Handle("/exec/", s.auth(http.HandlerFunc(handleExec(s))))
@@ -546,6 +548,70 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "unknown operation", http.StatusNotFound)
 	}
+}
+
+// handleBackupUpload streams a verified Drive archive onto the node for a restore.
+func (s *AgentServer) handleBackupUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	query := r.URL.Query()
+	serviceID := query.Get("serviceId")
+	backupID := query.Get("backupId")
+	expectedChecksum := query.Get("checksum")
+	expectedSize, sizeErr := strconv.ParseInt(query.Get("sizeBytes"), 10, 64)
+	if !regexp.MustCompile(`^[a-f0-9]{24}$`).MatchString(serviceID) ||
+		!regexp.MustCompile(`^[a-f0-9]{24}$`).MatchString(backupID) ||
+		expectedChecksum == "" || sizeErr != nil || expectedSize <= 0 {
+		http.Error(w, "invalid backup upload metadata", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.servicePath(serviceID); err != nil {
+		http.Error(w, "invalid service id", http.StatusBadRequest)
+		return
+	}
+	backupDir := filepath.Join(s.cfg.DataDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		http.Error(w, "could not prepare backup directory", http.StatusInternalServerError)
+		return
+	}
+	target := filepath.Join(backupDir, backupID+".tar")
+	if existingChecksum, existingSize, err := checksumFile(target); err == nil {
+		if existingChecksum == expectedChecksum && existingSize == expectedSize {
+			writeJSON(w, map[string]any{"uploaded": true, "alreadyPresent": true, "sizeBytes": existingSize, "checksum": existingChecksum})
+			return
+		}
+		http.Error(w, "a different archive already exists for this backup id", http.StatusConflict)
+		return
+	}
+	temp, err := os.CreateTemp(backupDir, backupID+".upload-*.tmp")
+	if err != nil {
+		http.Error(w, "could not create temporary backup file", http.StatusInternalServerError)
+		return
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	hash := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(temp, hash), r.Body)
+	syncErr := temp.Sync()
+	closeErr := temp.Close()
+	if copyErr != nil || syncErr != nil || closeErr != nil {
+		http.Error(w, "backup stream could not be written safely", http.StatusInternalServerError)
+		return
+	}
+	digest := hash.Sum(nil)
+	base64Checksum := base64.StdEncoding.EncodeToString(digest)
+	hexChecksum := fmt.Sprintf("%x", digest)
+	if size != expectedSize || (base64Checksum != expectedChecksum && hexChecksum != expectedChecksum) {
+		http.Error(w, "uploaded archive size or checksum did not match the backup manifest", http.StatusBadRequest)
+		return
+	}
+	if err := os.Rename(tempPath, target); err != nil {
+		http.Error(w, "could not finalize uploaded backup archive", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"uploaded": true, "sizeBytes": size, "checksum": base64Checksum})
 }
 
 // createTarArchive writes a plain tar archive without buffering the archive in memory.
