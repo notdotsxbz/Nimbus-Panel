@@ -1072,6 +1072,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const ids = ownedServices.map((service) => service._id);
       filter.serviceId = { $in: ids };
     }
+    if (user.role === "customer") filter.driveOwnerType = "customer";
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("ownerId", "displayName username email");
   }
 
@@ -1213,6 +1214,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   async download(backupId: string, user: { id: string; role: string }) {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
+    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Only completed backups can be downloaded");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
     const node = await this.nodes.get(service.nodeId.toString());
@@ -1264,6 +1266,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   async delete(backupId: string, user: { id: string; role: string }) {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
+    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
     const activeRestore = await this.jobs.findOne({
       mode: "restore-batch",
       status: { $in: ["queued", "running"] },
@@ -1418,6 +1421,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (!confirmed) throw new BadRequestException("Explicit confirmation is required before restoring customer data");
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
+    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
     const archivedType = backup.manifest?.serviceType;
