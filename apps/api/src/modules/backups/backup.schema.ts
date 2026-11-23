@@ -6,6 +6,9 @@ import type { BackupDestination, BackupStatus } from "@nimbus/shared";
 export class Backup {
   @Prop({ type: Types.ObjectId, ref: "Service", required: true, index: true })
   serviceId!: Types.ObjectId;
+  // Denormalized owner for auditable customer isolation; optional for legacy records.
+  @Prop({ type: Types.ObjectId, ref: "User", index: true })
+  ownerId?: Types.ObjectId;
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
