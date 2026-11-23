@@ -21,6 +21,12 @@ interface PublicSettings {
   defaultAnimationPreset: string;
 }
 
+interface DriveStats {
+  totalBackups: number;
+  lastSuccessfulBackup: string | null;
+  totalSizeBytes: number;
+}
+
 interface DriveStatus {
   connected: boolean;
   connectedAt: string | null;
@@ -44,6 +50,7 @@ export default function AccountSettings() {
   const [pub, setPub] = useState<PublicSettings | null>(null);
   const [prefs, setPrefs] = useState<MeAppearance | null>(null);
   const [drive, setDrive] = useState<DriveStatus>({ connected: false, connectedAt: null });
+  const [driveStats, setDriveStats] = useState<DriveStats | null>(null);
   const [driveBusy, setDriveBusy] = useState(false);
   const { show, node } = useToast();
   // Visible Back navigation — Settings must never be a dead end.
@@ -76,7 +83,10 @@ export default function AccountSettings() {
   }, [router]);
 
   useEffect(() => {
-    void api.get<DriveStatus>("/integrations/customer/google-drive").then(setDrive).catch(() => undefined);
+    void Promise.all([
+      api.get<DriveStatus>("/integrations/customer/google-drive"),
+      api.get<DriveStats>("/backups/drive-summary"),
+    ]).then(([status, stats]) => { setDrive(status); setDriveStats(stats); }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -88,7 +98,10 @@ export default function AccountSettings() {
     api.post("/integrations/customer/google-drive/exchange", { code, state })
       .then(() => {
         show("Your Google Drive is connected. Your backups will be stored in your Drive.", "ok");
-        return api.get<DriveStatus>("/integrations/customer/google-drive").then(setDrive);
+        return Promise.all([
+          api.get<DriveStatus>("/integrations/customer/google-drive").then(setDrive),
+          api.get<DriveStats>("/backups/drive-summary").then(setDriveStats),
+        ]);
       })
       .catch((error) => show(error instanceof Error ? error.message : "Google Drive connection failed", "err"))
       .finally(() => {
@@ -208,6 +221,7 @@ export default function AccountSettings() {
               <p className="mt-1 text-sm text-muted">Your service backups are stored in your own Google Drive, separate from the panel administrator's backups.</p>
               {drive.accountEmail ? <p className="mt-2 text-xs text-muted">{drive.accountEmail}</p> : null}
               {drive.connectedAt ? <p className="mt-1 text-xs text-muted">Connected {new Date(drive.connectedAt).toLocaleString()}</p> : null}
+              {driveStats ? <p className="mt-1 text-xs text-muted">{driveStats.totalBackups} backups · {driveStats.lastSuccessfulBackup ? "Last successful backup " + new Date(driveStats.lastSuccessfulBackup).toLocaleString() : "No successful backups yet"}</p> : null}
               {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">Authorization expired. Reconnect your Drive.</p> : null}
             </div>
             <div className="flex gap-2">
