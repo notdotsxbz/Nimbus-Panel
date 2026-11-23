@@ -259,6 +259,14 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       for (const artifact of Object.values(oldJob.panelArtifacts ?? {}) as Array<Record<string, unknown>>) {
         if (typeof artifact?.fileId === "string") fileIds.add(artifact.fileId);
       }
+      if ((oldJob.panelArtifacts as Record<string, unknown> | undefined)?.manifestAvailable === true && !(oldJob.panelArtifacts as Record<string, unknown> | undefined)?.manifest) {
+        try {
+          const manifestArtifact = await this.findAdminDriveArtifact(oldJob._id!.toString(), "manifest");
+          fileIds.add(manifestArtifact.fileId);
+        } catch {
+          // A previously removed manifest is already outside the retained Drive set.
+        }
+      }
       const backupIds: string[] = [];
       for (const result of oldJob.results ?? []) {
         if (typeof result.backupId === "string") backupIds.push(result.backupId);
@@ -894,6 +902,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const job = await this.jobs.findById(jobId);
     if (!job || job.mode !== "full-panel") throw new NotFoundException("Full Panel Backup job not found");
     const artifact = await this.findAdminDriveArtifact(jobId, "manifest");
+    job.panelArtifacts = { ...(job.panelArtifacts ?? {}), manifest: artifact, manifestAvailable: true };
+    await job.save();
     const tempDir = await mkdtemp(join(tmpdir(), "nimbus-manifest-"));
     try {
       const manifestPath = join(tempDir, "manifest.json");
