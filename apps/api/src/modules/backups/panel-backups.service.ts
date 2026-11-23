@@ -533,7 +533,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       return {
         prepared: true,
         stagingPath: restoreDir,
-        command: `sudo bash ${join(installDir, "installer", "restore-panel-backup.sh")} ${id}`,
+        command: `sudo env NIMBUS_INSTALL_DIR="${installDir}" bash ${join(installDir, "installer", "restore-panel-backup.sh")} ${id}`,
         note: "This prepares the panel database and configuration restore. Customer service archives are separate and must be restored from the Admin Backups page after the panel restarts.",
       };
     } catch (error) {
