@@ -1,12 +1,13 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
-import { AuthUser } from "../../common/auth.decorators";
+import type { AuthUser } from "../../common/auth.decorators";
 import { User, type UserDocument } from "../users/user.schema";
 import { ServicesService } from "../services/services.service";
 import { BackupsService } from "./backups.service";
 import { BackupSchedule, BackupScheduleDocument } from "./backup-schedule.schema";
 import { NotificationsService } from "../notifications/notifications.service";
+import { IntegrationsService } from "../integrations/integrations.service";
 
 type Frequency = "every6h" | "every12h" | "daily" | "weekly";
 type RetentionMode = "count" | "days" | "never";
@@ -22,6 +23,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
     private readonly services: ServicesService,
     private readonly backups: BackupsService,
     private readonly notifications: NotificationsService,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   async onModuleInit() {
@@ -80,7 +82,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Retention days must be between 1 and 365");
     }
     await this.services.get(dto.serviceId, user);
-    await this.backups["integrations"].googleDriveAccessToken(user);
+    await this.integrations.googleDriveAccessToken(user);
     const nextRunAt = this.nextRun(dto.frequency, backupTime, new Date());
     return this.schedules.findOneAndUpdate(
       { serviceId: new Types.ObjectId(dto.serviceId), ownerId: new Types.ObjectId(user.id) },
