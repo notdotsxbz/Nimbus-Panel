@@ -1000,6 +1000,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (typeof archivedType === "string" && archivedType !== service.type) {
       throw new BadRequestException("This backup was created for a different service type and cannot be restored here");
     }
+    if (!backup.checksum) throw new BadRequestException("This backup has no integrity checksum and cannot be safely restored");
     const node = await this.nodes.get(service.nodeId.toString());
 
     if (backup.remoteFileId) {
