@@ -48,14 +48,18 @@ export default function ServicePage() {
 
   const load = useCallback(async () => {
     try {
-      const [serviceRow, backupList, drive] = await Promise.all([
-        api.get<ServiceDetail>(`/services/${params.id}`),
-        api.get<BackupRow[]>(`/backups?serviceId=${encodeURIComponent(params.id)}`),
-        api.get<DriveStatus>("/integrations/google-drive"),
-      ]);
+      const serviceRow = await api.get<ServiceDetail>(`/services/${params.id}`);
       setService(serviceRow);
-      setBackupRows(backupList);
-      setDriveStatus(drive);
+      try {
+        const [backupList, drive] = await Promise.all([
+          api.get<BackupRow[]>(`/backups?serviceId=${encodeURIComponent(params.id)}`),
+          api.get<DriveStatus>("/integrations/google-drive"),
+        ]);
+        setBackupRows(backupList);
+        setDriveStatus(drive);
+      } catch {
+        // Backup and Drive integrations are optional; keep the service controls available.
+      }
     } catch (err) {
       if (err instanceof ApiError && (err.status === 403 || err.status === 404)) {
         router.replace("/dashboard");
