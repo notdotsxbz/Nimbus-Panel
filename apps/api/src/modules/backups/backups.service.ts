@@ -726,6 +726,41 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     return { deleted: true };
   }
 
+  async enqueueRestoreJob(
+    backupIds: string[],
+    user: { id: string; role: string },
+    confirmed: boolean,
+  ) {
+    if (confirmed !== true) throw new BadRequestException("Explicit confirmation is required before restoring service data");
+    if (!backupIds.length || backupIds.length > 200) throw new BadRequestException("Select between 1 and 200 completed backups");
+    const uniqueIds = [...new Set(backupIds)];
+    const selected = [];
+    for (const backupId of uniqueIds) {
+      if (!Types.ObjectId.isValid(backupId)) throw new BadRequestException("Invalid backup identifier");
+      const backup = await this.backups.findById(backupId);
+      if (!backup || backup.status !== "completed") throw new BadRequestException("One or more selected backups are unavailable");
+      const service = await this.services.get(backup.serviceId.toString(), user as never);
+      selected.push({ backup, service });
+    }
+    const job = await this.jobs.create({
+      requestedBy: new Types.ObjectId(user.id),
+      ownerId: new Types.ObjectId(user.id),
+      ownerType: user.role === "customer" ? "customer" : "admin",
+      requesterRole: user.role,
+      serviceIds: selected.map((item) => item.service._id!),
+      backupIds: selected.map((item) => item.backup._id!),
+      trigger: "manual",
+      destination: "gdrive",
+      mode: "restore-batch",
+      status: "queued",
+      total: selected.length,
+      completed: 0,
+      failed: 0,
+      results: [],
+    });
+    return { jobId: job._id!.toString(), status: job.status, total: job.total };
+  }
+
   async restoreAdminSelection(
     dto: { mode: "selected-services" | "selected-customer"; backupIds?: string[]; customerId?: string; confirm?: boolean },
     user: { id: string; role: string },
@@ -734,7 +769,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (dto.confirm !== true) throw new BadRequestException("Explicit confirmation is required before restoring customer data");
     let backupIds = dto.backupIds ?? [];
     if (dto.mode === "selected-customer") {
-      if (!dto.customerId) throw new BadRequestException("Select a customer");
+      if (!dto.customerId || !Types.ObjectId.isValid(dto.customerId)) throw new BadRequestException("Select a valid customer");
       const backups = await this.backups.find({ ownerId: new Types.ObjectId(dto.customerId), status: "completed" }).sort({ createdAt: -1 });
       const latestByService = new Map<string, string>();
       for (const backup of backups) {
@@ -745,27 +780,60 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     } else if (dto.mode !== "selected-services") {
       throw new BadRequestException("Invalid restore mode");
     }
-    if (!backupIds.length || backupIds.length > 200) throw new BadRequestException("Select between 1 and 200 completed backups");
-    const results: Array<{ backupId: string; restored: boolean; error?: string }> = [];
-    for (const backupId of [...new Set(backupIds)]) {
-      try {
-        await this.restore(backupId, user, true);
-        results.push({ backupId, restored: true });
-      } catch (error) {
-        results.push({ backupId, restored: false, error: error instanceof Error ? error.message : "Restore failed" });
+    return this.enqueueRestoreJob(backupIds, user, true);
+  }
+
+  private async processRestoreJob(job: BackupJobDocument, user: { id: string; role: string }) {
+    const completedIds = new Set((job.results ?? []).map((result) => result.backupId).filter(Boolean));
+    for (const backupObjectId of job.backupIds ?? []) {
+      const backupId = backupObjectId.toString();
+      if (completedIds.has(backupId)) continue;
+      const backup = await this.backups.findById(backupId);
+      if (!backup) {
+        job.results.push({ serviceId: "unknown", backupId, status: "failed", error: "Backup record no longer exists" });
+        job.failed += 1;
+        await job.save();
+        continue;
       }
+      job.currentServiceId = backup.serviceId;
+      job.leaseUntil = new Date(Date.now() + 8 * 60 * 60 * 1000);
+      await job.save();
+      try {
+        if (backup.lastRestoredAt && job.createdAt && backup.lastRestoredAt >= job.createdAt) {
+          job.results.push({ serviceId: backup.serviceId.toString(), backupId, status: "completed" });
+          job.completed += 1;
+        } else {
+          await this.restore(backupId, user, true);
+          job.results.push({ serviceId: backup.serviceId.toString(), backupId, status: "completed" });
+          job.completed += 1;
+        }
+      } catch (error) {
+        job.results.push({ serviceId: backup.serviceId.toString(), backupId, status: "failed", error: error instanceof Error ? error.message : "Restore failed" });
+        job.failed += 1;
+      }
+      await job.save();
     }
-    const restored = results.filter((result) => result.restored).length;
+    job.status = job.failed === job.total ? "failed" : "completed";
+    job.currentServiceId = undefined;
+    job.leaseUntil = undefined;
+    job.completedAt = new Date();
+    await job.save();
+    await this.notifications.notify(
+      job.requestedBy.toString(),
+      "backup",
+      job.status === "completed" ? "Restore job completed" : "Restore job failed",
+      job.completed + " of " + job.total + " service restores completed; " + job.failed + " failed.",
+    );
     await this.audit.log({
-      actorId: user.id,
-      action: "backups.admin-restore",
-      targetType: "backup-selection",
-      targetId: new Types.ObjectId().toString(),
-      detail: `mode=${dto.mode} total=${results.length} restored=${restored}`,
+      actorId: job.requestedBy.toString(),
+      action: "backups.restore-job.completed",
+      targetType: "restore-job",
+      targetId: job._id!.toString(),
+      detail: "total=" + job.total + " restored=" + job.completed + " failed=" + job.failed,
       sensitive: true,
     });
-    return { total: results.length, restored, failed: results.length - restored, results };
   }
+
 
   /** Restore a verified archive only after explicit UI confirmation. */
   async restore(backupId: string, user: { id: string; role: string }, confirmed = false) {
