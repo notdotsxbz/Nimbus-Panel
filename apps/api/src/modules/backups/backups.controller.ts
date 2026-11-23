@@ -10,6 +10,11 @@ import { BackupSchedulerService } from "./backup-scheduler.service";
 export class BackupsController {
   constructor(private readonly backups: BackupsService, private readonly panelBackups: PanelBackupsService, private readonly scheduler: BackupSchedulerService) {}
 
+  @Get("drive-folder")
+  getDriveFolderUrl(@CurrentUser() user: AuthUser) {
+    return this.backups.getDriveFolderUrl(user);
+  }
+
   @Get("schedules")
   @Roles("customer")
   listSchedules(@CurrentUser() user: AuthUser) {
