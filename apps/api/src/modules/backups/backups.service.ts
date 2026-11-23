@@ -195,6 +195,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   ) {
     if (!serviceIds.length || serviceIds.length > 500) throw new BadRequestException("Select between 1 and 500 services");
     if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
+    if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
     if (user.role === "customer" && destination !== "gdrive") throw new BadRequestException("Customer backups must use the customer's connected Google Drive");
     const uniqueIds = [...new Set(serviceIds)];
     const services = [];
@@ -270,14 +271,12 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       job.leaseUntil = undefined;
       job.completedAt = new Date();
       await job.save();
-      if (job.requesterRole === "customer") {
-        await this.notifications.notify(
-          job.ownerId.toString(),
-          "backup",
-          job.status === "completed" ? "Backup job completed" : "Backup job failed",
-          `${job.completed} of ${job.total} service backups completed; ${job.failed} failed.`,
-        );
-      }
+      await this.notifications.notify(
+        job.requestedBy.toString(),
+        "backup",
+        job.status === "completed" ? "Backup job completed" : "Backup job failed",
+        `${job.completed} of ${job.total} service backups completed; ${job.failed} failed.`,
+      );
       await this.audit.log({
         actorId: job.requestedBy.toString(),
         action: "backups.job.completed",
