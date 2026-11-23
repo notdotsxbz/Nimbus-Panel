@@ -19,6 +19,8 @@ export class Backup {
   @Prop() backupName?: string;
   @Prop() backupType?: string;
   @Prop({ type: Object }) manifest?: Record<string, unknown>;
+  @Prop()
+  lastRestoredAt?: Date;
   @Prop() verificationStatus?: "pending" | "verified" | "failed";
   @Prop({ type: Object }) encryptionMetadata?: { algorithm: string; iv: string; authTag: string; keyVersion: string };
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
@@ -91,13 +93,15 @@ export class BackupJob {
   ownerId!: Types.ObjectId;
   @Prop({ enum: ["customer", "admin"], required: true })
   ownerType!: "customer" | "admin";
-  @Prop({ enum: ["service-batch", "full-panel"], default: "service-batch" })
-  mode!: "service-batch" | "full-panel";
+  @Prop({ enum: ["service-batch", "full-panel", "restore-batch"], default: "service-batch" })
+  mode!: "service-batch" | "full-panel" | "restore-batch";
   @Prop({ type: Object }) panelArtifacts?: Record<string, unknown>;
   @Prop({ enum: ["customer", "admin", "owner", "staff"], required: true })
   requesterRole!: string;
   @Prop({ type: [Types.ObjectId], ref: "Service", required: true })
   serviceIds!: Types.ObjectId[];
+  @Prop({ type: [Types.ObjectId], ref: "Backup", default: [] })
+  backupIds!: Types.ObjectId[];
   @Prop({ enum: ["manual", "scheduled", "admin-batch"], default: "manual" })
   trigger!: string;
   @Prop({ enum: ["gdrive", "local"], default: "gdrive" })
