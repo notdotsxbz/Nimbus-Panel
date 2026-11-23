@@ -203,7 +203,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     trigger = "manual",
     destination = "gdrive",
   ) {
-    if (!serviceIds.length || serviceIds.length > 200) throw new BadRequestException("Select between 1 and 200 services");
+    if (!serviceIds.length || serviceIds.length > 1000) throw new BadRequestException("Select between 1 and 1000 services");
     if (destination !== "gdrive") throw new BadRequestException("User-requested backups must be stored in Google Drive");
     if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
     const driveStatus = user.role === "customer"
@@ -212,7 +212,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (!driveStatus.connected) throw new BadRequestException("Connect the correct Google Drive account before starting backups");
     const uniqueIds = [...new Set(serviceIds)];
     const requested = new Set(uniqueIds);
-    const available = await this.services.listFor(user as never);
+    const available = await this.services.listFor(user as never, {}, 1000);
     const services = available.filter((service) => requested.has(service._id!.toString()));
     if (services.length !== uniqueIds.length) throw new BadRequestException("One or more selected services were not found or are not owned by this account");
     const ownerType = user.role === "customer" ? "customer" : "admin";
@@ -572,8 +572,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
     const driveStatus = await this.integrations.googleDriveStatus("admin");
     if (!driveStatus.connected) throw new BadRequestException("Connect the Admin Google Drive before creating a Full Panel Backup");
-    const services = await this.services.listFor(user as never);
-    if (services.length > 200) throw new BadRequestException("This panel has more than 200 services; create service batches in smaller groups.");
+    const services = await this.services.listFor(user as never, {}, 1000);
+    if (services.length >= 1000) throw new BadRequestException("This panel exceeds the 1000-service Full Panel Backup limit.");
     const job = await this.jobs.create({
       requestedBy: new Types.ObjectId(user.id),
       ownerId: new Types.ObjectId(user.id),
@@ -599,7 +599,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   ) {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
     if (!["all-customers", "selected-customers", "selected-services"].includes(dto.mode)) throw new BadRequestException("Invalid Admin backup mode");
-    const allServices = await this.services.listFor(user as never);
+    const allServices = await this.services.listFor(user as never, {}, 1000);
     let selected = allServices;
     if (dto.mode === "selected-services") {
       const ids = new Set(dto.serviceIds ?? []);
@@ -642,7 +642,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const service = await this.services.get(serviceId, user as never);
       filter.serviceId = service._id;
     } else if (user.role === "customer") {
-      const ownedServices = await this.services.listFor(user as never);
+      const ownedServices = await this.services.listFor(user as never, {}, 1000);
       const ids = ownedServices.map((service) => service._id);
       filter.serviceId = { $in: ids };
     }
