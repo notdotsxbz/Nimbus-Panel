@@ -79,3 +79,41 @@ export class BackupSchedule {
 }
 export const BackupScheduleSchema = SchemaFactory.createForClass(BackupSchedule);
 export type BackupScheduleDocument = HydratedDocument<BackupSchedule>;
+
+@Schema({ collection: "backupjobs", timestamps: true })
+export class BackupJob {
+  @Prop({ type: Types.ObjectId, ref: "User", required: true, index: true })
+  requestedBy!: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: "User", required: true, index: true })
+  ownerId!: Types.ObjectId;
+  @Prop({ enum: ["customer", "admin"], required: true })
+  ownerType!: "customer" | "admin";
+  @Prop({ enum: ["customer", "admin", "owner", "staff"], required: true })
+  requesterRole!: string;
+  @Prop({ type: [Types.ObjectId], ref: "Service", required: true })
+  serviceIds!: Types.ObjectId[];
+  @Prop({ enum: ["manual", "scheduled", "admin-batch"], default: "manual" })
+  trigger!: string;
+  @Prop({ enum: ["gdrive", "local"], default: "gdrive" })
+  destination!: string;
+  @Prop({ enum: ["queued", "running", "completed", "failed"], default: "queued", index: true })
+  status!: "queued" | "running" | "completed" | "failed";
+  @Prop({ default: 0 })
+  total!: number;
+  @Prop({ default: 0 })
+  completed!: number;
+  @Prop({ default: 0 })
+  failed!: number;
+  @Prop({ type: Types.ObjectId, ref: "Service" })
+  currentServiceId?: Types.ObjectId;
+  @Prop({ type: [Object], default: [] })
+  results!: Array<{ serviceId: string; status: string; backupId?: string; error?: string }>;
+  @Prop()
+  leaseUntil?: Date;
+  @Prop()
+  startedAt?: Date;
+  @Prop()
+  completedAt?: Date;
+}
+export const BackupJobSchema = SchemaFactory.createForClass(BackupJob);
+export type BackupJobDocument = HydratedDocument<BackupJob>;
