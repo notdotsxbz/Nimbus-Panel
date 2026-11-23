@@ -294,7 +294,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   }
   private async applyScheduleRetention(schedule: BackupScheduleDocument, user: { id: string; role: string }) {
     if (!schedule.retention || schedule.retention <= 0) return;
-    const completed = await this.backups.find({ serviceId: schedule.serviceId, status: "completed" }).sort({ createdAt: -1 }).select("_id").lean();
+    const completed = await this.backups.find({ serviceId: schedule.serviceId, driveOwnerType: "customer", status: "completed" }).sort({ createdAt: -1 }).select("_id").lean();
     for (const old of completed.slice(schedule.retention)) {
       try { await this.delete(String(old._id), user); }
       catch (error) { console.error("[backup-retention] could not delete expired backup:", error instanceof Error ? error.message : "unknown error"); }
