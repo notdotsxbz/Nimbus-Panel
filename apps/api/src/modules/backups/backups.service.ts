@@ -269,7 +269,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       createdAt: new Date().toISOString(),
       panel: "NIMBUS",
       nodeVersion: process.version,
-      environment: process.env,
+      environment: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "INTEGRATION_ENCRYPTION_KEY")),
+      encryptionKeyRecovery: "Supply INTEGRATION_ENCRYPTION_KEY from the operator's separate secure escrow during recovery.",
     };
     const archive = Buffer.from(JSON.stringify(config, null, 2), "utf8");
     return this.uploadPanelArtifact(archive, "nimbus-configuration-" + jobId + ".json.enc", "Configuration", jobId, "configuration");
@@ -345,7 +346,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const users = ownerIds.length
       ? await this.backups.db.collection("users").find({ _id: { $in: ownerIds } }).project({ displayName: 1, username: 1, email: 1 }).toArray()
       : [];
-    const userNames = new Map(users.map((user: any) => [String(user._id), String(user.displayName || user.username || user.email || user._id)]));
+    const userNames = new Map<string, string>(users.map((user: any): [string, string] => [String(user._id), String(user.displayName || user.username || user.email || user._id)]));
     const customers = new Map<string, { customerId: string; customerName: string; services: Array<Record<string, unknown>> }>();
     for (const record of records as any[]) {
       const customerId = record.ownerId.toString();
