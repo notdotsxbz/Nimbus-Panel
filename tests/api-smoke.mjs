@@ -38,6 +38,7 @@ async function call(path, { method = "GET", token, body } = {}) {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(30_000),
   });
   let json = null;
   try {
