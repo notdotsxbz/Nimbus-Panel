@@ -170,7 +170,11 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async performFullPanelBackup(record: PanelBackupDocument, user: AuthUser) {
-    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-panel-full-backup-"));
+    const installDir = process.env.NIMBUS_INSTALL_DIR || "/opt/nimbus";
+    const pendingRoot = join(installDir, "var", "pending-backups");
+    await mkdir(pendingRoot, { recursive: true, mode: 0o700 });
+    const tempDir = await mkdtemp(join(pendingRoot, `${record._id!.toString()}-`));
+    let preserveSourceArtifacts = false;
     const updateProgress = async (step: string, progress: number) => {
       record.currentStep = step;
       record.progress = progress;
@@ -354,7 +358,8 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       record.status = "failed";
       record.currentStep = "Failed";
-      record.error = error instanceof Error ? error.message : "Full panel backup failed";
+      record.error = `${error instanceof Error ? error.message : "Full panel backup failed"}. Source artifacts preserved at ${tempDir}`;
+      preserveSourceArtifacts = true;
       await record.save();
       await this.audit.log({
         actorId: user.id,
@@ -364,7 +369,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         sensitive: true,
       }).catch(() => undefined);
     } finally {
-      await rm(tempDir, { recursive: true, force: true });
+      if (!preserveSourceArtifacts) await rm(tempDir, { recursive: true, force: true });
     }
   }
 
