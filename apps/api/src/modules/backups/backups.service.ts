@@ -118,6 +118,60 @@ export class BackupsService {
     return backup;
   }
 
+  async download(backupId: string, user: { id: string; role: string }) {
+    const backup = await this.backups.findById(backupId);
+    if (!backup) throw new NotFoundException("Backup not found");
+    if (backup.status !== "completed") throw new BadRequestException("Only completed backups can be downloaded");
+    const service = await this.services.get(backup.serviceId.toString(), user as never);
+    const node = await this.nodes.get(service.nodeId.toString());
+    let archive: Buffer;
+    if (backup.remoteFileId) {
+      const ownerType = backup.driveOwnerType ?? "admin";
+      const ownerId = ownerType === "customer" ? backup.driveOwnerId?.toString() : undefined;
+      const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
+      const response = await axios.get(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+        { headers: { authorization: `Bearer ${accessToken}` }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
+      );
+      const downloaded = Buffer.from(response.data);
+      archive = backup.encryptionMetadata ? this.decryptArchive(downloaded, backup.encryptionMetadata) : downloaded;
+    } else {
+      archive = await this.nodes.downloadBackupArchive(node, service._id!.toString(), backupId);
+    }
+    if (!backup.checksum || !this.verifyChecksum(archive, backup.checksum)) {
+      throw new BadRequestException("Backup integrity verification failed. Download was stopped.");
+    }
+    await this.audit.log({ actorId: user.id, action: "backups.download", targetType: "backup", targetId: backupId, sensitive: true });
+    const safeName = service.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80) || "service";
+    return { buffer: archive, filename: `nimbus-${safeName}-${backupId}.tar` };
+  }
+
+  async delete(backupId: string, user: { id: string; role: string }) {
+    const backup = await this.backups.findById(backupId);
+    if (!backup) throw new NotFoundException("Backup not found");
+    const service = await this.services.get(backup.serviceId.toString(), user as never);
+    if (backup.remoteFileId) {
+      const ownerType = backup.driveOwnerType ?? "admin";
+      const ownerId = ownerType === "customer" ? backup.driveOwnerId?.toString() : undefined;
+      const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
+      try {
+        await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        });
+      } catch (error) {
+        if (!(axios.isAxiosError(error) && error.response?.status === 404)) {
+          throw new BadRequestException("Could not delete the backup file from Google Drive");
+        }
+      }
+    }
+    const node = await this.nodes.get(service.nodeId.toString());
+    await this.nodes.agentCall(node, "/backups/delete", { serviceId: service._id!.toString(), backupId }, "POST", 30_000)
+      .catch(() => undefined); // The remote Drive copy is authoritative; local cache may already be absent.
+    await this.backups.deleteOne({ _id: backup._id });
+    await this.audit.log({ actorId: user.id, action: "backups.delete", targetType: "backup", targetId: backupId, sensitive: true });
+    return { deleted: true };
+  }
+
   /** Restore a verified archive only after explicit UI confirmation. */
   async restore(backupId: string, user: { id: string; role: string }, confirmed = false) {
     if (!confirmed) throw new BadRequestException("Explicit confirmation is required before restoring customer data");
