@@ -143,7 +143,7 @@ export class BackupJob {
   @Prop({ type: Types.ObjectId, ref: "Service" })
   currentServiceId?: Types.ObjectId;
   @Prop({ type: [Object], default: [] })
-  results!: Array<{ serviceId: string; status: string; backupId?: string; error?: string }>;
+  results!: Array<{ serviceId: string; status: string; backupId?: string; driveFileId?: string; checksum?: string; encryptionMetadata?: { algorithm: string; iv: string; authTag: string; keyVersion: string }; error?: string }>;
   @Prop()
   leaseUntil?: Date;
   @Prop()
