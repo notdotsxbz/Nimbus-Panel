@@ -173,10 +173,12 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   async adminBackupSummary(user: { id: string; role: string }) {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
     const services = await this.services.listFor(user as never);
-    const customerIds = new Set(services.map((service) => service.ownerId.toString()));
-    const nodeCount = await this.backups.db.collection("nodes").countDocuments();
+    const [customerCount, nodeCount] = await Promise.all([
+      this.backups.db.collection("users").countDocuments({ role: "customer", deletedAt: { $exists: false }, suspended: { $ne: true } }),
+      this.backups.db.collection("nodes").countDocuments(),
+    ]);
     return {
-      customerCount: customerIds.size,
+      customerCount,
       serviceCount: services.length,
       nodeCount,
       estimatedBackupSizeBytes: null,
