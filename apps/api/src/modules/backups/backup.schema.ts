@@ -104,7 +104,7 @@ export class BackupJob {
   serviceIds!: Types.ObjectId[];
   @Prop({ type: [Types.ObjectId], ref: "Backup", default: [] })
   backupIds!: Types.ObjectId[];
-  @Prop({ enum: ["manual", "scheduled", "admin-batch"], default: "manual" })
+  @Prop({ enum: ["manual", "scheduled", "admin-batch", "pre-update", "pre-reinstall", "pre-restore"], default: "manual" })
   trigger!: string;
   @Prop({ enum: ["gdrive", "local"], default: "gdrive" })
   destination!: string;
