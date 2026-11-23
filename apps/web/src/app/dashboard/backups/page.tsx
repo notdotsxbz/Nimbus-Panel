@@ -31,6 +31,38 @@ export default function CustomerBackups() {
     void load();
   }, []);
 
+  const download = async (id: string) => {
+    try {
+      const response = await api.raw(`/backups/${id}/download`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({})) as { message?: string };
+        throw new Error(error.message ?? "Download failed");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `nimbus-backup-${id}.tar`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Download failed", "err");
+    }
+  };
+
+  const deleteBackup = async (id: string) => {
+    if (!confirm("Delete this backup archive? This will not delete your service files.")) return;
+    try {
+      await api.del(`/backups/${id}`);
+      setRows(current => current.filter(row => row._id !== id));
+      show("Backup deleted", "ok");
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Delete failed", "err");
+    }
+  };
+
   const restore = async (id: string) => {
     if (!confirm("Restore this backup? Current data is staged and only replaced after verification.")) return;
     try {
@@ -73,7 +105,11 @@ export default function CustomerBackups() {
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
                 <td className="px-5 py-3 text-right">
                   {b.status === "completed" ? (
-                    <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => void restore(b._id)}>Restore</button>
+                    <div className="flex justify-end gap-2">
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => void download(b._id)}>Download</button>
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={() => void restore(b._id)}>Restore</button>
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs text-red-400" onClick={() => void deleteBackup(b._id)}>Delete</button>
+                    </div>
                   ) : null}
                 </td>
               </tr>
