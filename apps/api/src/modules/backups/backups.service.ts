@@ -222,7 +222,7 @@ export class BackupsService {
       action: "backups.create",
       targetId: backup._id!.toString(),
       sensitive: true,
-    });
+    }).catch(() => undefined);
     return backup;
   }
 
@@ -338,7 +338,7 @@ export class BackupsService {
         ? `safetyBackupRecordId=${safetyBackupRecord._id!.toString()}; source=${result.safetyBackupId}`
         : `restore verified; safety backup remains on node or needs attention: ${safetyBackupError ?? "unknown"}`,
       sensitive: true,
-    });
+    }).catch(() => undefined);
     return {
       ok: true,
       safetyBackupId: safetyBackupRecord?._id?.toString() ?? result.safetyBackupId ?? null,
@@ -550,7 +550,7 @@ export class BackupsService {
       action: "backups.delete",
       targetId: backupId,
       sensitive: true,
-    });
+    }).catch(() => undefined);
     return { deleted: true };
   }
 
