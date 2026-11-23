@@ -558,15 +558,19 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const filter = user.role === "customer"
       ? { ownerId: new Types.ObjectId(user.id), driveOwnerType: "customer", status: "completed" }
       : { driveOwnerType: "admin", status: "completed" };
-    const [totalBackups, latest, sizes] = await Promise.all([
+    const [totalBackups, latest, sizes, fullPanelBackupCount, latestFullPanelBackup] = await Promise.all([
       this.backups.countDocuments(filter),
       this.backups.findOne(filter).sort({ createdAt: -1 }).select("createdAt").lean(),
       this.backups.aggregate([{ $match: filter }, { $group: { _id: null, totalBytes: { $sum: "$sizeBytes" } } }]),
+      user.role === "customer" ? Promise.resolve(0) : this.jobs.countDocuments({ mode: "full-panel", status: "completed" }),
+      user.role === "customer" ? Promise.resolve(null) : this.jobs.findOne({ mode: "full-panel", status: "completed" }).sort({ createdAt: -1 }).select("createdAt").lean(),
     ]);
     return {
       totalBackups,
       lastSuccessfulBackup: latest?.createdAt ?? null,
       totalSizeBytes: sizes[0]?.totalBytes ?? 0,
+      fullPanelBackupCount,
+      lastFullPanelBackupAt: latestFullPanelBackup?.createdAt ?? null,
     };
   }
 
