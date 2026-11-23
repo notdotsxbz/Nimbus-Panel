@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
@@ -8,6 +8,7 @@ import { Backup, BackupDocument } from "./backup.schema";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
 import { IntegrationsService } from "../integrations/integrations.service";
+import { env } from "../../config/env";
 
 /**
  * Backup orchestration. Heavy lifting (tar + integrity) happens on the node
@@ -82,8 +83,10 @@ export class BackupsService {
           { projection: { displayName: 1, username: 1, email: 1 } },
         );
         const ownerName = String(ownerRecord?.displayName || ownerRecord?.username || ownerRecord?.email || service.ownerId.toString());
+        const encrypted = this.encryptArchive(archive);
+        backup.encryptionMetadata = encrypted.metadata;
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
-          archive,
+          encrypted.data,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
           driveOwnerType,
           driveOwnerId?.toString(),
@@ -127,6 +130,25 @@ export class BackupsService {
     });
     await this.audit.log({ actorId: user.id, action: "backups.restore", targetId: backupId, sensitive: true });
     return { ok: true };
+  }
+
+  private encryptArchive(archive: Buffer): {
+    data: Buffer;
+    metadata: { algorithm: string; iv: string; authTag: string; keyVersion: string };
+  } {
+    const key = createHash("sha256").update(env.integrationEncryptionKey).digest();
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    const data = Buffer.concat([cipher.update(archive), cipher.final()]);
+    return {
+      data,
+      metadata: {
+        algorithm: "aes-256-gcm",
+        iv: iv.toString("base64"),
+        authTag: cipher.getAuthTag().toString("base64"),
+        keyVersion: "integration-key-v1",
+      },
+    };
   }
 
   private async uploadGoogleDriveArchive(
@@ -176,6 +198,19 @@ export class BackupsService {
           timeout: 10 * 60 * 1000,
         },
       );
+      const downloaded = await axios.get(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          responseType: "arraybuffer",
+          maxContentLength: Infinity,
+          timeout: 10 * 60 * 1000,
+        },
+      );
+      const uploadedBytes = Buffer.from(downloaded.data);
+      const expectedDigest = createHash("sha256").update(archive).digest("hex");
+      const actualDigest = createHash("sha256").update(uploadedBytes).digest("hex");
+      if (expectedDigest !== actualDigest) throw new BadRequestException("Google Drive upload verification failed: downloaded content did not match the uploaded archive");
       return fileId;
     } catch (error) {
       await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
