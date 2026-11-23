@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, open, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
@@ -68,19 +74,39 @@ export class BackupsService {
       backup.sizeBytes = result.sizeBytes;
       backup.checksum = result.checksum;
       if (destination === "gdrive") {
-        const archive = await this.nodes.downloadBackupArchive(node, serviceId, backup._id!.toString());
-        if (!this.verifyChecksum(archive, result.checksum)) throw new BadRequestException("Downloaded archive failed checksum verification");
-        const driveOwner = user.role === "customer"
-          ? { id: service.ownerId.toString(), role: "customer" as const }
-          : user;
-        const customer = await this.users.findById(service.ownerId).select("displayName username").lean();
-        const customerName = customer?.displayName || customer?.username || "customer";
-        backup.remoteFileId = await this.uploadGoogleDriveArchive(
-          archive,
-          `nimbus-${serviceId}-${backup._id!.toString()}.tar`,
-          driveOwner,
-          { serviceId, serviceName: service.name, serviceType: String(service.type), customerName, customerId: service.ownerId.toString() },
-        );
+        const tempDir = await mkdtemp(join(tmpdir(), "nimbus-backup-"));
+        const archivePath = join(tempDir, `${backup._id!.toString()}.tar`);
+        try {
+          const hash = createHash("sha256");
+          const digestStream = new Transform({
+            transform(chunk: Buffer, _encoding, callback) {
+              hash.update(chunk);
+              callback(null, chunk);
+            },
+          });
+          await pipeline(
+            await this.nodes.downloadBackupArchiveStream(node, serviceId, backup._id!.toString()),
+            digestStream,
+            createWriteStream(archivePath, { flags: "wx", mode: 0o600 }),
+          );
+          const digest = hash.digest();
+          if (digest.toString("base64") !== result.checksum && digest.toString("hex") !== result.checksum) {
+            throw new BadRequestException("Downloaded archive failed checksum verification");
+          }
+          const driveOwner = user.role === "customer"
+            ? { id: service.ownerId.toString(), role: "customer" as const }
+            : user;
+          const customer = await this.users.findById(service.ownerId).select("displayName username").lean();
+          const customerName = customer?.displayName || customer?.username || "customer";
+          backup.remoteFileId = await this.uploadGoogleDriveArchive(
+            archivePath,
+            `nimbus-${serviceId}-${backup._id!.toString()}.tar`,
+            driveOwner,
+            { serviceId, serviceName: service.name, serviceType: String(service.type), customerName, customerId: service.ownerId.toString() },
+          );
+        } finally {
+          await rm(tempDir, { recursive: true, force: true });
+        }
       }
       backup.status = "completed";
       backup.completedAt = new Date();
@@ -150,12 +176,14 @@ export class BackupsService {
   }
 
   private async uploadGoogleDriveArchive(
-    archive: Buffer,
+    archivePath: string,
     filename: string,
     driveOwner: Pick<AuthUser, "id" | "role">,
     service: { serviceId: string; serviceName: string; serviceType: string; customerName: string; customerId: string },
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
+    const archiveInfo = await stat(archivePath);
+    if (!archiveInfo.isFile() || archiveInfo.size <= 0) throw new BadRequestException("Backup archive is empty or unavailable");
     const rootName = driveOwner.role === "customer" ? "NIMBUS Backups" : "NIMBUS Full Panel Backups";
     const rootId = await this.ensureDriveFolder(accessToken, rootName);
     let parentId = rootId;
@@ -173,41 +201,101 @@ export class BackupsService {
       `${this.safeFolderName(service.serviceName)}_${service.serviceId}`,
       categoryId,
     );
-    let metadata;
+
+    let uploadUrl = "";
     try {
-      metadata = await axios.post(
-        "https://www.googleapis.com/drive/v3/files?fields=id,name",
+      const session = await axios.post(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id",
         { name: filename, mimeType: "application/octet-stream", parents: [serviceFolderId] },
-        { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
-      );
-    } catch (error) {
-      const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
-      throw new BadRequestException(details ?? "Google Drive could not create the backup file. Check the connected Google account and Drive permissions.");
-    }
-    const fileId = metadata.data?.id as string | undefined;
-    if (!fileId) throw new BadRequestException("Google Drive did not create a backup file");
-    try {
-      await axios.patch(
-        `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`,
-        archive,
         {
           headers: {
             authorization: `Bearer ${accessToken}`,
-            "content-type": "application/octet-stream",
-            "content-length": String(archive.length),
+            "content-type": "application/json",
+            "x-upload-content-type": "application/octet-stream",
+            "x-upload-content-length": String(archiveInfo.size),
           },
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity,
-          timeout: 10 * 60 * 1000,
+          timeout: 30_000,
         },
       );
+      uploadUrl = session.headers.location as string;
+      if (!uploadUrl) throw new BadRequestException("Google Drive did not return a resumable upload session");
+
+      const file = await open(archivePath, "r");
+      let offset = 0;
+      let fileId: string | undefined;
+      let noProgressRetries = 0;
+      const chunkSize = 8 * 1024 * 1024; // 8 MiB, a multiple of Google's 256 KiB chunk requirement.
+      try {
+        while (offset < archiveInfo.size) {
+          const length = Math.min(chunkSize, archiveInfo.size - offset);
+          const chunk = Buffer.allocUnsafe(length);
+          const read = await file.read(chunk, 0, length, offset);
+          if (read.bytesRead !== length) throw new BadRequestException("Could not read the complete backup archive for upload");
+          const end = offset + length - 1;
+          let response;
+          let attempt = 0;
+          while (true) {
+            try {
+              response = await axios.put(uploadUrl, chunk, {
+                headers: {
+                  authorization: `Bearer ${accessToken}`,
+                  "content-type": "application/octet-stream",
+                  "content-length": String(length),
+                  "content-range": `bytes ${offset}-${end}/${archiveInfo.size}`,
+                },
+                maxBodyLength: Infinity,
+                timeout: 120_000,
+                validateStatus: status => status === 308 || status === 200 || status === 201,
+              });
+              break;
+            } catch (error) {
+              const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+              const retryable = !status || status === 429 || status >= 500;
+              if (!retryable || attempt >= 5) throw error;
+              await new Promise(resolve => setTimeout(resolve, 500 * (2 ** attempt)));
+              attempt += 1;
+            }
+          }
+
+          if (response.status === 200 || response.status === 201) {
+            fileId = (response.data as { id?: string })?.id;
+            offset = archiveInfo.size;
+            break;
+          }
+          const acknowledged = String(response.headers.range ?? "").match(/-(\d+)$/);
+          if (acknowledged) {
+            const nextOffset = Number(acknowledged[1]) + 1;
+            if (!Number.isSafeInteger(nextOffset) || nextOffset <= offset || nextOffset > archiveInfo.size) {
+              throw new BadRequestException("Google Drive returned an invalid upload progress range");
+            }
+            offset = nextOffset;
+            noProgressRetries = 0;
+          } else {
+            noProgressRetries += 1;
+            if (noProgressRetries > 5) throw new BadRequestException("Google Drive upload made no progress after repeated retries");
+            await new Promise(resolve => setTimeout(resolve, 500 * (2 ** (noProgressRetries - 1))));
+          }
+        }
+      } finally {
+        await file.close();
+      }
+
+      if (!fileId) throw new BadRequestException("Google Drive did not confirm completion of the backup upload");
+      const verified = await axios.get(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,size,trashed`,
+        { headers: { authorization: `Bearer ${accessToken}` }, timeout: 30_000 },
+      );
+      if (verified.data?.id !== fileId || verified.data?.name !== filename || Number(verified.data?.size) !== archiveInfo.size || verified.data?.trashed) {
+        throw new BadRequestException("Google Drive upload verification failed");
+      }
       return fileId;
     } catch (error) {
-      await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
-        headers: { authorization: `Bearer ${accessToken}` },
-      }).catch(() => undefined);
-      const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
-      throw new BadRequestException(details ?? "Google Drive upload failed. Reconnect the shared Drive account and try again.");
+      if (uploadUrl) await axios.delete(uploadUrl).catch(() => undefined);
+      if (error instanceof BadRequestException) throw error;
+      const details = axios.isAxiosError(error)
+        ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message
+        : undefined;
+      throw new BadRequestException(details ?? "Google Drive resumable upload failed. Preserve the local backup and retry.");
     }
   }
 
