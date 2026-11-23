@@ -12,6 +12,7 @@ interface BackupRow {
   currentStep?: string;
   trigger: string;
   sizeBytes?: number;
+  checksum?: string;
   createdAt: string;
   serviceId: { name?: string } | string;
 }
