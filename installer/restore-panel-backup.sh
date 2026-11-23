@@ -68,7 +68,7 @@ write_mongo_config() {
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", chunk => { uri += chunk; });
     process.stdin.on("end", () => {
-      fs.writeFileSync(process.argv[1], "uri: " + JSON.stringify(uri) + "\\n", { mode: 0o600 });
+      fs.writeFileSync(process.argv[1], "uri: " + JSON.stringify(uri) + "\n", { mode: 0o600 });
     });
   ' "$output"
   chmod 600 "$output"
