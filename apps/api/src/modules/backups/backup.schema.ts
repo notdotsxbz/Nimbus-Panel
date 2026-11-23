@@ -87,6 +87,30 @@ export class BackupSchedule {
 export const BackupScheduleSchema = SchemaFactory.createForClass(BackupSchedule);
 export type BackupScheduleDocument = HydratedDocument<BackupSchedule>;
 
+@Schema({ collection: "fullpanelschedules", timestamps: true })
+export class FullPanelSchedule {
+  @Prop({ type: Types.ObjectId, ref: "User", required: true, unique: true, index: true })
+  ownerId!: Types.ObjectId;
+  @Prop({ default: false })
+  enabled!: boolean;
+  @Prop({ enum: ["daily", "weekly"], default: "daily" })
+  frequency!: "daily" | "weekly";
+  @Prop({ default: "02:00" })
+  time!: string;
+  @Prop({ enum: [0, 5, 10, 30], default: 5 })
+  retention!: 0 | 5 | 10 | 30;
+  @Prop({ default: true })
+  notifyOnCompletion!: boolean;
+  @Prop()
+  nextRunAt?: Date;
+  @Prop()
+  lastRunAt?: Date;
+  @Prop()
+  leaseUntil?: Date;
+}
+export const FullPanelScheduleSchema = SchemaFactory.createForClass(FullPanelSchedule);
+export type FullPanelScheduleDocument = HydratedDocument<FullPanelSchedule>;
+
 @Schema({ collection: "backupjobs", timestamps: true })
 export class BackupJob {
   @Prop({ type: Types.ObjectId, ref: "User", required: true, index: true })
