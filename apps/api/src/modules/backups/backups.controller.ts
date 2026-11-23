@@ -80,7 +80,7 @@ export class BackupsController {
   @Get(":id/download")
   async download(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     const file = await this.backups.download(id, user);
-    return new StreamableFile(file.buffer, {
+    return new StreamableFile(file.stream, {
       type: "application/octet-stream",
       disposition: `attachment; filename="${file.filename}"`,
     });
