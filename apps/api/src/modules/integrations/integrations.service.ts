@@ -208,7 +208,7 @@ export class IntegrationsService implements OnModuleInit {
       throw new BadRequestException("Invalid panel origin for Google OAuth");
     }
     const keys = this.googleDriveSettingKeys(actor);
-    const redirectUri = panelOrigin.origin + "/admin/settings";
+    const redirectUri = panelOrigin.origin + (actor.role === "customer" ? "/dashboard/backups" : "/admin/settings");
     await this.settings.findOneAndUpdate(
       { key: keys.configKey },
       { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret })), connectedAt: new Date(), updatedBy: actor.id } },
