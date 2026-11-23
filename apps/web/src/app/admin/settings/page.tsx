@@ -156,7 +156,7 @@ export default function AdminSettings() {
             <h2 className="font-semibold">Google Drive Backups</h2>
             <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Admin Drive connected" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
           </div>
-          <p className="mt-2 text-sm text-muted">This separate Admin Google Drive is used for staff-triggered service backups and Admin backup operations. Customer accounts connect their own Google Drive. Nimbus verifies backup checksums before upload.</p>
+          <p className="mt-2 text-sm text-muted">This separate Admin Google Drive is used for Admin backup operations. Customer accounts connect their own Drive with individual encrypted tokens. In Google Cloud Console, authorize both redirect URIs: https://panel.qubixhost.cyou/admin/settings and https://panel.qubixhost.cyou/dashboard/backups. Nimbus encrypts archives and verifies uploads.</p>
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
           {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Admin account: {drive.accountEmail}</p> : null}
           <div className="mt-4 flex gap-2">
