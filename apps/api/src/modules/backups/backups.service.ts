@@ -1310,6 +1310,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       if (!Types.ObjectId.isValid(backupId)) throw new BadRequestException("Invalid backup identifier");
       const backup = await this.backups.findById(backupId);
       if (!backup || backup.status !== "completed") throw new BadRequestException("One or more selected backups are unavailable");
+      if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
       const service = await this.services.get(backup.serviceId.toString(), user as never);
       selected.push({ backup, service });
     }
