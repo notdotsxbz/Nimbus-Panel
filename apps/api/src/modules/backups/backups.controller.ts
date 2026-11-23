@@ -19,6 +19,11 @@ export class BackupsController {
     return this.backups.enqueueBackupJob([dto.serviceId], user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
   }
 
+  @Get("drive-summary")
+  driveSummary(@CurrentUser() user: AuthUser) {
+    return this.backups.driveSummary(user);
+  }
+
   @Get("jobs")
   listJobs(@CurrentUser() user: AuthUser) {
     return this.backups.listJobs(user);
