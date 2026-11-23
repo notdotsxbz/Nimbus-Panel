@@ -26,6 +26,8 @@ export class Backup {
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
+  @Prop({ enum: ["queued", "preparing", "creating_snapshot", "compressing", "encrypting", "uploading", "verifying", "restoring", "completed", "failed"], default: "queued" })
+  progressStage!: string;
   @Prop() sizeBytes?: number;
   @Prop() checksum?: string; // sha256 integrity verification
   @Prop() remoteFileId?: string;
