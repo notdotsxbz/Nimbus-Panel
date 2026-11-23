@@ -129,6 +129,13 @@ async function call(path, { method = "GET", token, body } = {}) {
   const forbidden = await call("/users", { token: cust });
   check("RBAC: customer blocked from /users", forbidden.status === 403, `status=${forbidden.status}`);
 
+  const customerDriveStatus = await call("/integrations/customer/google-drive", { token: cust });
+  check("customer can read only their personal Drive connection", customerDriveStatus.status === 200 && customerDriveStatus.body?.connected === false, `status=${customerDriveStatus.status}`);
+  const sharedDriveAsCustomer = await call("/integrations/google-drive", { token: cust });
+  check("customer cannot read Admin Drive connection", sharedDriveAsCustomer.status === 403, `status=${sharedDriveAsCustomer.status}`);
+  const customerDriveAsOwner = await call("/integrations/customer/google-drive", { token: owner });
+  check("Admin cannot access a customer's personal Drive endpoint", customerDriveAsOwner.status === 403, `status=${customerDriveAsOwner.status}`);
+
   const own = await call("/services", { token: cust });
   check("customer reads own (empty) services", own.status === 200 && Array.isArray(own.body) && own.body.length === 0);
 
