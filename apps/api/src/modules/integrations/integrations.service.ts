@@ -323,10 +323,10 @@ export class IntegrationsService implements OnModuleInit {
 
   async disconnectGoogleDrive(actor: AuthUser) {
     const keys = this.googleDriveSettingKeys(actor);
-    await this.settings.deleteMany({ key: { $in: [keys.driveKey, keys.configKey] } });
-    if (keys.ownerType === "admin") {
-      await this.settings.deleteMany({ key: { $in: ["google-drive", "google-oauth-config"] } });
-    }
+    // Disconnecting a Drive removes only that account's refresh token.
+    // The shared OAuth application credentials remain configured for customers.
+    const keysToDelete = keys.ownerType === "admin" ? [keys.driveKey, "google-drive"] : [keys.driveKey];
+    await this.settings.deleteMany({ key: { $in: keysToDelete } });
     this.logger.warn("Google Drive disconnected by " + actor.id);
     return { connected: false };
   }
