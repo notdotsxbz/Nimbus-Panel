@@ -14,6 +14,8 @@ export class Backup {
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
+  @Prop({ default: 0 }) progress!: number;
+  @Prop() currentStep?: string;
   @Prop() sizeBytes?: number; // plaintext archive size
   @Prop() storedSizeBytes?: number; // encrypted archive size in Google Drive
   @Prop() checksum?: string; // plaintext SHA-256 integrity verification
