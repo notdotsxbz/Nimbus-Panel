@@ -153,17 +153,35 @@ export class IntegrationsService implements OnModuleInit {
     return JSON.parse(this.decrypt(saved.encryptedValue)) as { token: string; zoneId: string };
   }
 
-  async googleDriveStatus() {
-    const [saved, config] = await Promise.all([
-      this.settings.findOne({ key: "google-drive" }).select("connectedAt").lean(),
-      this.settings.findOne({ key: "google-oauth-config" }).select("_id").lean(),
-    ]);
-    if (!saved || !config) return { connected: false, connectedAt: null };
+  private googleDriveConnectionKey(ownerType: "admin" | "customer", ownerId?: string): string {
+    if (ownerType === "admin") return "google-drive:admin";
+    if (!ownerId) throw new BadRequestException("Customer account is required for a personal Google Drive connection");
+    return "google-drive:customer:" + ownerId;
+  }
+
+  async googleDriveStatus(ownerType: "admin" | "customer" = "admin", ownerId?: string) {
+    const key = this.googleDriveConnectionKey(ownerType, ownerId);
+    let saved = await this.settings.findOne({ key }).select("connectedAt accountEmail folderId").lean();
+    // Backward-compatible adoption of the former single shared connection as
+    // the Admin Drive only. Customer connections are never derived from it.
+    if (!saved && ownerType === "admin") {
+      const legacy = await this.settings.findOne({ key: "google-drive" });
+      if (legacy) {
+        await this.settings.findOneAndUpdate(
+          { key },
+          { $setOnInsert: { encryptedValue: legacy.encryptedValue, connectedAt: legacy.connectedAt, updatedBy: legacy.updatedBy } },
+          { upsert: true },
+        );
+        saved = await this.settings.findOne({ key }).select("connectedAt accountEmail folderId").lean();
+      }
+    }
+    const config = await this.settings.findOne({ key: "google-oauth-config" }).select("_id").lean();
+    if (!saved || !config) return { connected: false, connectedAt: null, accountEmail: null };
     try {
-      await this.googleDriveAccessToken();
-      return { connected: true, connectedAt: saved.connectedAt ?? null };
+      await this.googleDriveAccessToken(ownerType, ownerId);
+      return { connected: true, connectedAt: saved.connectedAt ?? null, accountEmail: saved.accountEmail ?? null, folderId: saved.folderId ?? null };
     } catch {
-      return { connected: false, connectedAt: saved.connectedAt ?? null, reconnectRequired: true };
+      return { connected: false, connectedAt: saved.connectedAt ?? null, accountEmail: saved.accountEmail ?? null, reconnectRequired: true };
     }
   }
 
@@ -171,6 +189,24 @@ export class IntegrationsService implements OnModuleInit {
     if (!clientId || !clientSecret || clientId.length > 512 || clientSecret.length > 1024) {
       throw new BadRequestException("Google OAuth Client ID and Client Secret are required");
     }
+    await this.settings.findOneAndUpdate(
+      { key: "google-oauth-config" },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret })), connectedAt: new Date(), updatedBy: actorId } },
+      { upsert: true, new: true },
+    );
+    return this.beginGoogleDriveOAuth("admin", undefined, actorId, origin);
+  }
+
+  async beginCustomerGoogleDriveConnect(actorId: string, origin?: string) {
+    const config = await this.settings.findOne({ key: "google-oauth-config" });
+    if (!config) throw new BadRequestException("The panel administrator must configure Google OAuth before customers can connect Drive");
+    return this.beginGoogleDriveOAuth("customer", actorId, actorId, origin);
+  }
+
+  private async beginGoogleDriveOAuth(ownerType: "admin" | "customer", ownerId: string | undefined, actorId: string, origin?: string) {
+    const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
+    if (!configDoc) throw new BadRequestException("Google OAuth settings are missing");
+    const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
     let panelOrigin: URL;
     try { panelOrigin = new URL(origin || env.webUrl); }
     catch { throw new BadRequestException("Could not determine the panel URL for Google OAuth"); }
@@ -180,19 +216,18 @@ export class IntegrationsService implements OnModuleInit {
     if (panelOrigin.pathname !== "/" || panelOrigin.search || panelOrigin.hash || panelOrigin.username || panelOrigin.password) {
       throw new BadRequestException("Invalid panel origin for Google OAuth");
     }
-    const redirectUri = panelOrigin.origin + "/admin/settings";
-    await this.settings.findOneAndUpdate(
-      { key: "google-oauth-config" },
-      { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret })), connectedAt: new Date(), updatedBy: actorId } },
-      { upsert: true, new: true },
-    );
+    const redirectUri = panelOrigin.origin + (ownerType === "admin" ? "/admin/settings" : "/account");
     const state = randomBytes(24).toString("hex");
-    await this.settings.create({ key: "google-oauth-state:" + state, encryptedValue: this.encrypt(JSON.stringify({ actorId, redirectUri })), connectedAt: new Date() });
+    await this.settings.create({
+      key: "google-oauth-state:" + state,
+      encryptedValue: this.encrypt(JSON.stringify({ actorId, ownerType, ownerId, redirectUri })),
+      connectedAt: new Date(),
+    });
     const params = new URLSearchParams({
-      client_id: clientId,
+      client_id: config.clientId,
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "https://www.googleapis.com/auth/drive.file",
+      scope: "openid email https://www.googleapis.com/auth/drive.file",
       access_type: "offline",
       prompt: "consent",
       state,
@@ -200,18 +235,19 @@ export class IntegrationsService implements OnModuleInit {
     return { url: "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString() };
   }
 
-  async exchangeGoogleDriveCode(code: string, state: string) {
+  async exchangeGoogleDriveCode(code: string, state: string, actorId: string) {
     if (!code || !state || !/^[a-f0-9]{48}$/.test(state)) throw new BadRequestException("Invalid Google OAuth callback");
     const pendingKey = "google-oauth-state:" + state;
     const pending = await this.settings.findOne({ key: pendingKey });
     if (!pending || !pending.connectedAt || Date.now() - pending.connectedAt.getTime() > 10 * 60 * 1000) {
       throw new BadRequestException("Google connection request expired. Start again from Settings.");
     }
+    const pendingData = JSON.parse(this.decrypt(pending.encryptedValue)) as { actorId: string; ownerType?: "admin" | "customer"; ownerId?: string; redirectUri: string };
+    if (pendingData.actorId !== actorId) throw new BadRequestException("Google OAuth state belongs to a different signed-in account");
     await this.settings.deleteOne({ key: pendingKey });
     const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
     if (!configDoc) throw new BadRequestException("Google OAuth settings are missing");
     const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
-    const pendingData = JSON.parse(this.decrypt(pending.encryptedValue)) as { actorId: string; redirectUri: string };
     const body = new URLSearchParams({
       client_id: config.clientId,
       client_secret: config.clientSecret,
@@ -225,28 +261,39 @@ export class IntegrationsService implements OnModuleInit {
       body,
     });
     const tokens = await response.json() as { refresh_token?: string; access_token?: string; error_description?: string; error?: string };
-    if (!response.ok) {
+    if (!response.ok || !tokens.access_token) {
       throw new BadRequestException(tokens.error_description ?? tokens.error ?? "Google rejected the OAuth authorization code");
     }
-    const previous = await this.settings.findOne({ key: "google-drive" });
+    const ownerType = pendingData.ownerType ?? "admin";
+    const ownerId = pendingData.ownerId;
+    const key = this.googleDriveConnectionKey(ownerType, ownerId);
+    const previous = await this.settings.findOne({ key });
     const previousToken = previous ? (JSON.parse(this.decrypt(previous.encryptedValue)) as { refreshToken?: string }).refreshToken : undefined;
     const refreshToken = tokens.refresh_token ?? previousToken;
     if (!refreshToken) {
       throw new BadRequestException("Google did not provide a refresh token. Remove Nimbus from your Google Account connections, then reconnect and approve Drive access.");
     }
+    let accountEmail: string | undefined;
+    try {
+      const profile = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: "Bearer " + tokens.access_token } });
+      if (profile.ok) {
+        const data = await profile.json() as { email?: string };
+        accountEmail = data.email;
+      }
+    } catch { /* Drive connection remains valid if profile lookup is temporarily unavailable. */ }
     await this.settings.findOneAndUpdate(
-      { key: "google-drive" },
-      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken })), connectedAt: new Date(), updatedBy: "google-oauth" } },
+      { key },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken })), connectedAt: new Date(), updatedBy: actorId, ...(accountEmail ? { accountEmail } : {}) } },
       { upsert: true, new: true },
     );
-    return { connected: true };
+    return { connected: true, ownerType };
   }
 
-  async googleDriveAccessToken(): Promise<string> {
-    const [tokenDoc, configDoc] = await Promise.all([
-      this.settings.findOne({ key: "google-drive" }),
-      this.settings.findOne({ key: "google-oauth-config" }),
-    ]);
+  async googleDriveAccessToken(ownerType: "admin" | "customer" = "admin", ownerId?: string): Promise<string> {
+    const key = this.googleDriveConnectionKey(ownerType, ownerId);
+    let tokenDoc = await this.settings.findOne({ key });
+    if (!tokenDoc && ownerType === "admin") tokenDoc = await this.settings.findOne({ key: "google-drive" });
+    const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
     if (!tokenDoc || !configDoc) throw new BadRequestException("Connect Google Drive in Settings first");
     const token = JSON.parse(this.decrypt(tokenDoc.encryptedValue)) as { refreshToken: string };
     const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
@@ -266,10 +313,12 @@ export class IntegrationsService implements OnModuleInit {
     return result.access_token;
   }
 
-  async disconnectGoogleDrive(actorId: string) {
-    await this.settings.deleteMany({ key: { $in: ["google-drive", "google-oauth-config"] } });
-    await this.settings.deleteMany({ key: { $regex: "^google-oauth-state:" } });
-    this.logger.warn("Google Drive disconnected by " + actorId);
+  async disconnectGoogleDrive(actorId: string, ownerType: "admin" | "customer" = "admin", ownerId?: string) {
+    const key = this.googleDriveConnectionKey(ownerType, ownerId);
+    await this.settings.deleteOne({ key });
+    if (ownerType === "admin") await this.settings.deleteOne({ key: "google-drive" });
+    await this.settings.deleteMany({ key: { $regex: "^google-oauth-state:" }, updatedBy: actorId });
+    this.logger.warn("Google Drive disconnected by " + actorId + " (" + ownerType + ")");
     return { connected: false };
   }
 
