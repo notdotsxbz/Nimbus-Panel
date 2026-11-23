@@ -231,7 +231,7 @@ export class BackupsService {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
-    const service = await this.services.get(backup.serviceId.toString(), user as never);
+    const service = await this.services.get(backup.serviceId.toString(), user);
     if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
     const node = await this.nodes.get(service.nodeId.toString());
     if (!backup.checksum) throw new BadRequestException("Backup has no integrity checksum and cannot be restored safely");
@@ -440,58 +440,86 @@ export class BackupsService {
     if (!backup) throw new NotFoundException("Backup not found");
     const service = await this.services.get(backup.serviceId.toString(), user);
     if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
-    const filename = `nimbus-backup-${backupId}.tar`;
-    if (backup.destination === "gdrive") {
-      if (!backup.remoteFileId) throw new BadRequestException("Backup has no Google Drive file reference");
-      const driveOwner = backup.driveOwnerType === "customer"
-        ? { id: (backup.ownerId ?? service.ownerId).toString(), role: "customer" as const }
-        : { id: user.id, role: user.role };
-      const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
-      const response = await axios.get(
-        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
-        {
-          headers: { authorization: `Bearer ${accessToken}` },
-          responseType: "stream",
-          timeout: 10 * 60 * 1000,
-          maxContentLength: Infinity,
-        },
-      );
-      if (backup.encryptionAlgorithm !== "aes-256-gcm") {
-        return { stream: response.data as import("node:stream").Readable, filename, sizeBytes: backup.sizeBytes };
-      }
-      const tempDir = await mkdtemp(join(tmpdir(), "nimbus-download-"));
-      const encryptedPath = join(tempDir, `${backupId}.tar.enc`);
-      const archivePath = join(tempDir, `${backupId}.tar`);
-      try {
-        await pipeline(response.data, createWriteStream(encryptedPath, { flags: "wx", mode: 0o600 }));
-        const encryptedInfo = await stat(encryptedPath);
-        if (backup.storedSizeBytes && encryptedInfo.size !== backup.storedSizeBytes) {
-          throw new BadRequestException("Encrypted Drive archive size does not match its backup manifest");
-        }
-        const decryptedSize = await this.decryptArchiveFile(
-          encryptedPath,
-          archivePath,
-          backup.encryptionIv ?? "",
-          backup.encryptionTag ?? "",
-          backup.checksum ?? "",
-        );
-        if (decryptedSize !== backup.sizeBytes) throw new BadRequestException("Decrypted archive size does not match its backup manifest");
-        const stream = createReadStream(archivePath);
-        const cleanup = () => { void rm(tempDir, { recursive: true, force: true }); };
-        stream.once("close", cleanup);
-        stream.once("error", cleanup);
-        return { stream, filename, sizeBytes: decryptedSize };
-      } catch (error) {
-        await rm(tempDir, { recursive: true, force: true });
-        throw error;
-      }
-    }
+    if (!backup.checksum || !backup.sizeBytes) throw new BadRequestException("Backup integrity metadata is incomplete");
+
     const node = await this.nodes.get(service.nodeId.toString());
-    return {
-      stream: await this.nodes.downloadBackupArchiveStream(node, service._id!.toString(), backupId),
-      filename,
-      sizeBytes: backup.sizeBytes,
-    };
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-download-"));
+    const encryptedPath = join(tempDir, `${backupId}.tar.enc`);
+    const archivePath = join(tempDir, `${backupId}.tar`);
+    try {
+      if (backup.destination === "gdrive") {
+        if (!backup.remoteFileId) throw new BadRequestException("Backup has no Google Drive file reference");
+        const driveOwner = backup.driveOwnerType === "customer"
+          ? { id: (backup.ownerId ?? service.ownerId).toString(), role: "customer" as const }
+          : { id: user.id, role: user.role };
+        const accessToken = await this.integrations.googleDriveAccessToken(driveOwner);
+        const response = await axios.get(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backup.remoteFileId)}?alt=media`,
+          {
+            headers: { authorization: `Bearer ${accessToken}` },
+            responseType: "stream",
+            timeout: 10 * 60 * 1000,
+            maxContentLength: Infinity,
+          },
+        );
+        if (backup.encryptionAlgorithm === "aes-256-gcm") {
+          await pipeline(response.data, createWriteStream(encryptedPath, { flags: "wx", mode: 0o600 }));
+          const encryptedInfo = await stat(encryptedPath);
+          if (backup.storedSizeBytes && encryptedInfo.size !== backup.storedSizeBytes) {
+            throw new BadRequestException("Encrypted Drive archive size does not match its backup manifest");
+          }
+          const decryptedSize = await this.decryptArchiveFile(
+            encryptedPath,
+            archivePath,
+            backup.encryptionIv ?? "",
+            backup.encryptionTag ?? "",
+            backup.checksum,
+          );
+          if (decryptedSize !== backup.sizeBytes) throw new BadRequestException("Decrypted archive size does not match its backup manifest");
+        } else {
+          const hash = createHash("sha256");
+          const digestStream = new Transform({
+            transform(chunk: Buffer, _encoding, callback) {
+              hash.update(chunk);
+              callback(null, chunk);
+            },
+          });
+          await pipeline(response.data, digestStream, createWriteStream(archivePath, { flags: "wx", mode: 0o600 }));
+          const digest = hash.digest();
+          if (digest.toString("base64") !== backup.checksum && digest.toString("hex") !== backup.checksum) {
+            throw new BadRequestException("Downloaded Drive archive failed SHA-256 verification");
+          }
+          if ((await stat(archivePath)).size !== backup.sizeBytes) throw new BadRequestException("Downloaded archive size does not match its manifest");
+        }
+      } else {
+        const hash = createHash("sha256");
+        const digestStream = new Transform({
+          transform(chunk: Buffer, _encoding, callback) {
+            hash.update(chunk);
+            callback(null, chunk);
+          },
+        });
+        await pipeline(
+          await this.nodes.downloadBackupArchiveStream(node, service._id!.toString(), backupId),
+          digestStream,
+          createWriteStream(archivePath, { flags: "wx", mode: 0o600 }),
+        );
+        const digest = hash.digest();
+        if (digest.toString("base64") !== backup.checksum && digest.toString("hex") !== backup.checksum) {
+          throw new BadRequestException("Node backup failed SHA-256 verification");
+        }
+        if ((await stat(archivePath)).size !== backup.sizeBytes) throw new BadRequestException("Node backup size does not match its manifest");
+      }
+
+      const stream = createReadStream(archivePath);
+      const cleanup = () => { void rm(tempDir, { recursive: true, force: true }); };
+      stream.once("close", cleanup);
+      stream.once("error", cleanup);
+      return { stream, filename: `nimbus-backup-${backupId}.tar`, sizeBytes: backup.sizeBytes };
+    } catch (error) {
+      await rm(tempDir, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   async delete(backupId: string, user: AuthUser) {
