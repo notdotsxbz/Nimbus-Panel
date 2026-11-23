@@ -955,18 +955,16 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                 },
               });
             }
-            if (backup.remoteFileId !== String(item.driveFileId) || !backup.encryptionMetadata) {
-              backup.remoteFileId = String(item.driveFileId);
-              backup.checksum = String(item.checksum);
-              backup.sizeBytes = Number(item.sizeBytes ?? 0);
-              backup.encryptionMetadata = item.encryptionMetadata;
-              backup.driveOwnerType = "admin";
-              backup.destination = "gdrive";
-              backup.status = "completed";
-              backup.progressStage = "completed";
-              backup.verificationStatus = "verified";
-              await backup.save();
-            }
+            backup.remoteFileId = String(item.driveFileId);
+            backup.checksum = String(item.checksum);
+            backup.sizeBytes = Number(item.sizeBytes ?? 0);
+            backup.encryptionMetadata = item.encryptionMetadata;
+            backup.driveOwnerType = "admin";
+            backup.destination = "gdrive";
+            backup.status = "completed";
+            backup.progressStage = "completed";
+            backup.verificationStatus = "verified";
+            await backup.save();
             backupIds.push(backup._id!.toString());
           } catch (error) {
             failures.push(serviceId + ": " + (error instanceof Error ? error.message : "could not restore manifest record"));
