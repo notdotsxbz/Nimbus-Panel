@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -682,6 +682,107 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       manifestPath,
       warning: "This restores the panel database and configuration during maintenance. Customer service data archives must then be restored from the manifest using the Admin restore workflow.",
     };
+  }
+
+  private async findAdminDriveArtifact(jobId: string, artifactType: string) {
+    const accessToken = await this.integrations.googleDriveAccessToken("admin");
+    const query = new URLSearchParams({
+      q: \`appProperties has { key='nimbusPanelBackupId' and value='\${jobId}' } and appProperties has { key='nimbusArtifactType' and value='\${artifactType}' } and trashed = false\`,
+      pageSize: "1",
+      orderBy: "createdTime desc",
+      fields: "files(id,appProperties)",
+    });
+    const response = await axios.get("https://www.googleapis.com/drive/v3/files?" + query.toString(), {
+      headers: { authorization: "Bearer " + accessToken },
+    });
+    const file = response.data?.files?.[0];
+    const props = file?.appProperties ?? {};
+    if (!file?.id || !props.nimbusSha256 || !props.nimbusIv || !props.nimbusTag || !props.nimbusKeyVersion || !props.nimbusAlgorithm) {
+      throw new NotFoundException("The requested Full Panel Backup artifact could not be found in the Admin Drive");
+    }
+    return {
+      fileId: String(file.id),
+      checksum: String(props.nimbusSha256),
+      encryptionMetadata: {
+        algorithm: String(props.nimbusAlgorithm),
+        iv: String(props.nimbusIv),
+        authTag: String(props.nimbusTag),
+        keyVersion: String(props.nimbusKeyVersion),
+      },
+    };
+  }
+
+  async restoreServicesFromFullPanelManifest(jobId: string, user: { id: string; role: string }, confirmed: boolean) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    if (confirmed !== true) throw new BadRequestException("Explicit confirmation is required before restoring customer services");
+    const job = await this.jobs.findById(jobId);
+    if (!job || job.mode !== "full-panel") throw new NotFoundException("Full Panel Backup job not found");
+    const artifact = await this.findAdminDriveArtifact(jobId, "manifest");
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-manifest-"));
+    try {
+      const manifestPath = join(tempDir, "manifest.json");
+      await this.downloadAdminPanelArtifact(artifact, manifestPath);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        customers?: Array<{ customerId: string; customerName: string; services?: Array<Record<string, any>> }>;
+      };
+      const backupIds: string[] = [];
+      const failures: string[] = [];
+      for (const customer of manifest.customers ?? []) {
+        if (!Types.ObjectId.isValid(customer.customerId)) continue;
+        for (const item of customer.services ?? []) {
+          const serviceId = String(item.serviceId ?? "");
+          const backupId = String(item.backupId ?? "");
+          const ownerId = String(customer.customerId);
+          if (!Types.ObjectId.isValid(serviceId) || !Types.ObjectId.isValid(backupId) || !item.driveFileId || !item.checksum || !item.encryptionMetadata) {
+            failures.push("Invalid manifest entry for customer " + customer.customerName);
+            continue;
+          }
+          try {
+            const service = await this.services.get(serviceId, user as never);
+            if (service.ownerId.toString() !== ownerId) throw new BadRequestException("Service owner does not match the manifest customer");
+            let backup = await this.backups.findById(backupId);
+            if (!backup) {
+              backup = await this.backups.create({
+                _id: new Types.ObjectId(backupId),
+                serviceId: new Types.ObjectId(serviceId),
+                ownerId: new Types.ObjectId(ownerId),
+                requestedBy: new Types.ObjectId(user.id),
+                driveOwnerType: "admin",
+                destination: "gdrive",
+                status: "completed",
+                progressStage: "completed",
+                trigger: item.trigger === "scheduled" ? "scheduled" : "manual",
+                createdBy: new Types.ObjectId(user.id),
+                backupName: String(item.backupName ?? (service.name + " backup")),
+                backupType: "service",
+                remoteFileId: String(item.driveFileId),
+                checksum: String(item.checksum),
+                sizeBytes: Number(item.sizeBytes ?? 0),
+                encryptionMetadata: item.encryptionMetadata,
+                verificationStatus: "verified",
+                manifest: {
+                  backupId,
+                  serviceId,
+                  ownerId,
+                  serviceName: service.name,
+                  serviceType: service.type,
+                  archiveChecksum: String(item.checksum),
+                  recoveredFromFullPanelJob: jobId,
+                },
+              });
+            }
+            backupIds.push(backup._id!.toString());
+          } catch (error) {
+            failures.push(serviceId + ": " + (error instanceof Error ? error.message : "could not restore manifest record"));
+          }
+        }
+      }
+      if (!backupIds.length) throw new BadRequestException("No valid service backup entries were found in the Full Panel manifest. " + failures.slice(0, 3).join("; "));
+      const restoreJob = await this.enqueueRestoreJob(backupIds, user, true);
+      return { ...restoreJob, manifestJobId: jobId, skipped: failures.length, warnings: failures.slice(0, 20) };
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   }
 
   async createFullPanelBackup(user: { id: string; role: string }) {
