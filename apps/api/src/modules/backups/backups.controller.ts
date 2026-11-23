@@ -134,6 +134,11 @@ export class BackupsController {
     return this.backups.delete(id, user);
   }
 
+  @Post(":id/retry-upload")
+  retryUpload(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.backups.retryUpload(id, user);
+  }
+
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.backups.restore(id, user);
