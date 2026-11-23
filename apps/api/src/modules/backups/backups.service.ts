@@ -648,7 +648,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const ids = ownedServices.map((service) => service._id);
       filter.serviceId = { $in: ids };
     }
-    return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type");
+    return this.backups.find(filter).sort({ createdAt: -1 }).limit(100).populate("serviceId", "name type").populate("ownerId", "displayName username email");
   }
 
   async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "gdrive", internal = false, jobId?: string) {
