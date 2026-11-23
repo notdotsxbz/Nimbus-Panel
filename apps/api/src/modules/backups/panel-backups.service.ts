@@ -91,26 +91,31 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
   private async processNextQueuedBackup() {
     if (this.workerBusy) return;
     this.workerBusy = true;
+    let claimed: PanelBackupDocument | null = null;
     try {
-      const record = await this.panelBackups.findOneAndUpdate(
+      claimed = await this.panelBackups.findOneAndUpdate(
         { status: "queued" },
         { $set: { status: "running", startedAt: new Date(), currentStep: "Starting", progress: 1 } },
         { sort: { createdAt: 1 }, new: true },
       );
-      if (!record) return;
-      const creator = await this.users.findById(record.createdBy).select("role suspended deletedAt");
+      if (!claimed) return;
+      const creator = await this.users.findById(claimed.createdBy).select("role suspended deletedAt");
       if (!creator || creator.suspended || creator.deletedAt || (creator.role !== "owner" && creator.role !== "admin")) {
-        record.status = "failed";
-        record.currentStep = "Failed";
-        record.error = "The Admin who requested this backup is no longer authorized.";
-        await record.save();
+        claimed.status = "failed";
+        claimed.currentStep = "Failed";
+        claimed.error = "The Admin who requested this backup is no longer authorized.";
+        await claimed.save();
         return;
       }
-      const actor = { id: record.createdBy.toString(), role: creator.role } as AuthUser;
-      await this.performFullPanelBackup(record, actor);
-    } catch {
-      // A claimed record is marked failed by performFullPanelBackup; this
-      // guard keeps the worker alive if claiming or loading a record fails.
+      const actor = { id: claimed.createdBy.toString(), role: creator.role } as AuthUser;
+      await this.performFullPanelBackup(claimed, actor);
+    } catch (error) {
+      if (claimed) {
+        claimed.status = "failed";
+        claimed.currentStep = "Failed";
+        claimed.error = error instanceof Error ? error.message : "Background backup worker failed";
+        await claimed.save().catch(() => undefined);
+      }
     } finally {
       this.workerBusy = false;
     }
