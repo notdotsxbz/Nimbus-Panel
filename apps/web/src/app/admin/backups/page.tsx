@@ -243,7 +243,7 @@ export default function AdminBackups() {
               {job.mode === "full-panel" ? (
                 <div className="flex flex-wrap gap-2">
                   {job.panelArtifacts?.manifest && job.panelArtifacts?.database && job.panelArtifacts?.configuration ? <button className="btn-ghost text-xs" disabled={busy} onClick={() => void prepareFullPanelRecovery(job._id)}>Prepare DB/config recovery</button> : null}
-                  <button className="btn-ghost text-xs" disabled={busy} onClick={() => void restoreFullPanelServices(job._id)}>Restore services from manifest</button>
+                  {job.panelArtifacts?.manifest || job.panelArtifacts?.manifestAvailable ? <button className="btn-ghost text-xs" disabled={busy} onClick={() => void restoreFullPanelServices(job._id)}>Restore services from manifest</button> : null}
                 </div>
               ) : null}
             </div>
