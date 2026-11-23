@@ -44,7 +44,7 @@ export class IntegrationsController {
   }
 
   @Post("google-drive/connect")
-  beginGoogleDriveConnect(@Body() dto: { clientId: string; clientSecret: string }, @CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
+  beginGoogleDriveConnect(@Body() dto: { clientId?: string; clientSecret?: string }, @CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
     return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user, origin);
   }
 
