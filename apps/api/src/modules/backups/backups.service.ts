@@ -611,6 +611,9 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             serviceId,
             status: backup.status,
             backupId: backup._id!.toString(),
+            ...(backup.remoteFileId ? { driveFileId: backup.remoteFileId } : {}),
+            ...(backup.checksum ? { checksum: backup.checksum } : {}),
+            ...(backup.encryptionMetadata ? { encryptionMetadata: backup.encryptionMetadata } : {}),
             ...(backup.error ? { error: backup.error } : {}),
           });
           if (backup.status === "completed") job.completed += 1;
