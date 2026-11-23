@@ -91,6 +91,9 @@ export class BackupJob {
   ownerId!: Types.ObjectId;
   @Prop({ enum: ["customer", "admin"], required: true })
   ownerType!: "customer" | "admin";
+  @Prop({ enum: ["service-batch", "full-panel"], default: "service-batch" })
+  mode!: "service-batch" | "full-panel";
+  @Prop({ type: Object }) panelArtifacts?: Record<string, unknown>;
   @Prop({ enum: ["customer", "admin", "owner", "staff"], required: true })
   requesterRole!: string;
   @Prop({ type: [Types.ObjectId], ref: "Service", required: true })
