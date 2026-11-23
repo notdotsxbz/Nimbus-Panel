@@ -9,6 +9,7 @@ import { Model, Types } from "mongoose";
 import type { AuthUser } from "../../common/auth.decorators";
 import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { IntegrationsService } from "../integrations/integrations.service";
 import { NodesService } from "../nodes/nodes.service";
 import { ServicesService } from "../services/services.service";
@@ -33,6 +34,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     private readonly nodes: NodesService,
     private readonly integrations: IntegrationsService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private assertAdmin(user: AuthUser) {
@@ -97,6 +99,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       detail: `queued; customers=${customerCount}; services=${services.length}; nodes=${nodes.length}`,
       sensitive: true,
     }).catch(() => undefined);
+    await this.notifications.notify(user.id, "backup", "Full panel backup queued", "Your NIMBUS full panel backup has been queued.").catch(() => undefined);
     return record;
   }
 
@@ -236,6 +239,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       detail: `queued; customers=${record.customerCount}; services=${record.serviceCount}`,
       sensitive: true,
     }).catch(() => undefined);
+    await this.notifications.notify(user.id, "backup", "Selected Admin backup queued", "Your selected customer/service backup job has been queued.").catch(() => undefined);
     return record;
   }
 
@@ -458,6 +462,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         ).catch(() => undefined);
       }
 
+      await this.notifications.notify(user.id, "backup", record.status === "completed" ? "Full panel backup completed" : "Full panel backup partially completed", `Full panel backup ${record.status}. Review the backup manifest for exclusions or failures.`).catch(() => undefined);
       await this.audit.log({
         actorId: user.id,
         action: "backups.panel.full.completed",
@@ -478,6 +483,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
           { $set: { lastStatus: "failed", lastError: record.error } },
         ).catch(() => undefined);
       }
+      await this.notifications.notify(user.id, "backup", "Full panel backup failed", record.error ?? "The full panel backup could not be completed.").catch(() => undefined);
       await this.audit.log({
         actorId: user.id,
         action: "backups.panel.full.failed",
