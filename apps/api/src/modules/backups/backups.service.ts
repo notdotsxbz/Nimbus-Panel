@@ -1,10 +1,10 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { Transform } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -340,7 +340,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
       );
       const actualHash = createHash("sha256");
-      for await (const chunk of downloaded.data as NodeJS.ReadableStream) actualHash.update(chunk as Buffer);
+      for await (const chunk of downloaded.data as Readable) actualHash.update(chunk as Buffer);
       const expectedHash = await this.hashFile(encryptedPath, "hex");
       if (actualHash.digest("hex") !== expectedHash) {
         await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId), {
@@ -1333,7 +1333,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
       );
       const existingHash = createHash("sha256");
-      for await (const chunk of existingBytes.data as NodeJS.ReadableStream) existingHash.update(chunk as Buffer);
+      for await (const chunk of existingBytes.data as Readable) existingHash.update(chunk as Buffer);
       if (existingHash.digest("hex") === newDigest) return existingFileId;
       await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(existingFileId), {
         headers: { authorization: "Bearer " + accessToken },
@@ -1369,7 +1369,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
       );
       const actualHash = createHash("sha256");
-      for await (const chunk of downloaded.data as NodeJS.ReadableStream) actualHash.update(chunk as Buffer);
+      for await (const chunk of downloaded.data as Readable) actualHash.update(chunk as Buffer);
       if (newDigest !== actualHash.digest("hex")) {
         throw new BadRequestException("Google Drive upload verification failed: downloaded content did not match the uploaded archive");
       }
