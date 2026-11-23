@@ -108,13 +108,15 @@ export class BackupsService {
     if (serviceId) {
       await this.services.get(serviceId, user); // ownership check
       filter.serviceId = new Types.ObjectId(serviceId);
-      if (user.role === "customer") filter.driveOwnerType = "customer";
+      filter.driveOwnerType = user.role === "customer" ? "customer" : "admin";
     } else if (!isStaffRole(user.role)) {
       const ownedServices = await this.services.listFor(user);
       const serviceIds = ownedServices.map((service) => service._id);
       if (serviceIds.length === 0) return [];
       filter.serviceId = { $in: serviceIds };
       filter.driveOwnerType = "customer";
+    } else {
+      filter.driveOwnerType = "admin";
     }
     return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
   }
@@ -451,7 +453,7 @@ export class BackupsService {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
     const service = await this.services.get(backup.serviceId.toString(), user);
-    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
+    if (backup.driveOwnerType !== (user.role === "customer" ? "customer" : "admin")) throw new NotFoundException("Backup not found");
     if (!backup.checksum || !backup.sizeBytes) throw new BadRequestException("Backup integrity metadata is incomplete");
 
     const node = await this.nodes.get(service.nodeId.toString());
