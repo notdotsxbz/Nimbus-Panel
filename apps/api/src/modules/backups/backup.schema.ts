@@ -18,6 +18,7 @@ export class Backup {
   @Prop() backupType?: string;
   @Prop() manifest?: Record<string, unknown>;
   @Prop() verificationStatus?: "pending" | "verified" | "failed";
+  @Prop({ type: Object }) encryptionMetadata?: { algorithm: string; iv: string; authTag: string; keyVersion: string };
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
