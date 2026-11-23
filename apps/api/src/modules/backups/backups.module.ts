@@ -8,6 +8,7 @@ import { Backup, BackupSchema } from "./backup.schema";
 import { User, UserSchema } from "../users/user.schema";
 import { PanelBackup, PanelBackupSchema } from "./panel-backup.schema";
 import { BackupSchedule, BackupScheduleSchema } from "./backup-schedule.schema";
+import { PanelBackupSchedule, PanelBackupScheduleSchema } from "./panel-backup-schedule.schema";
 import { BackupsController } from "./backups.controller";
 import { BackupsService } from "./backups.service";
 import { PanelBackupsService } from "./panel-backups.service";
@@ -21,6 +22,7 @@ import { NotificationsModule } from "../notifications/notifications.module";
       { name: User.name, schema: UserSchema },
       { name: PanelBackup.name, schema: PanelBackupSchema },
       { name: BackupSchedule.name, schema: BackupScheduleSchema },
+      { name: PanelBackupSchedule.name, schema: PanelBackupScheduleSchema },
     ]),
     NodesModule,
     ServicesModule,
