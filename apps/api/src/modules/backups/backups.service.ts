@@ -687,7 +687,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   private async findAdminDriveArtifact(jobId: string, artifactType: string) {
     const accessToken = await this.integrations.googleDriveAccessToken("admin");
     const query = new URLSearchParams({
-      q: \`appProperties has { key='nimbusPanelBackupId' and value='\${jobId}' } and appProperties has { key='nimbusArtifactType' and value='\${artifactType}' } and trashed = false\`,
+      q: `appProperties has { key='nimbusPanelBackupId' and value='${jobId}' } and appProperties has { key='nimbusArtifactType' and value='${artifactType}' } and trashed = false`,
       pageSize: "1",
       orderBy: "createdTime desc",
       fields: "files(id,appProperties)",
