@@ -1,4 +1,9 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
@@ -10,6 +15,8 @@ import { ServicesService } from "../services/services.service";
 import { IntegrationsService } from "../integrations/integrations.service";
 import { env } from "../../config/env";
 import { NotificationsService } from "../notifications/notifications.service";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Backup orchestration. Heavy lifting (tar + integrity) happens on the node
@@ -230,6 +237,148 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const job = await this.jobs.findOne(filter);
     if (!job) throw new NotFoundException("Backup job not found");
     return job;
+  }
+
+  private async createPanelDatabaseArtifact(jobId: string) {
+    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-panel-db-"));
+    try {
+      const configPath = join(tempDir, "mongodump.yml");
+      const archivePath = join(tempDir, "nimbus-database.archive.gz");
+      // The MongoDB URI is written only to a mode-0600 temporary config file,
+      // never passed as a process argument or written to logs.
+      await writeFile(configPath, "uri: " + JSON.stringify(env.mongoUri) + "\n", { mode: 0o600 });
+      await execFileAsync("mongodump", ["--config", configPath, "--db", "nimbus", "--archive=" + archivePath, "--gzip"], {
+        timeout: 4 * 60 * 60 * 1000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      const archive = await readFile(archivePath);
+      return this.uploadPanelArtifact(archive, "nimbus-database-" + jobId + ".archive.gz", "Database", jobId, "database");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "mongodump failed";
+      if (message.includes("ENOENT") || message.includes("not found")) {
+        throw new BadRequestException("mongodump is not installed on the panel server. Install MongoDB Database Tools before running a Full Panel Backup.");
+      }
+      throw new BadRequestException("Panel database backup failed: " + message.slice(0, 500));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  private async createPanelConfigurationArtifact(jobId: string) {
+    const config = {
+      createdAt: new Date().toISOString(),
+      panel: "NIMBUS",
+      nodeVersion: process.version,
+      environment: process.env,
+    };
+    const archive = Buffer.from(JSON.stringify(config, null, 2), "utf8");
+    return this.uploadPanelArtifact(archive, "nimbus-configuration-" + jobId + ".json.enc", "Configuration", jobId, "configuration");
+  }
+
+  private async createPanelSystemMetadataArtifact(jobId: string) {
+    const metadata = {
+      createdAt: new Date().toISOString(),
+      platform: process.platform,
+      architecture: process.arch,
+      nodeVersion: process.version,
+      appVersion: process.env.npm_package_version ?? "unknown",
+      panelDomain: env.panelDomain,
+      hostingDomain: env.hostingDomain,
+      databaseName: "nimbus",
+    };
+    return this.uploadPanelArtifact(
+      Buffer.from(JSON.stringify(metadata, null, 2), "utf8"),
+      "nimbus-system-metadata-" + jobId + ".json.enc",
+      "System Metadata",
+      jobId,
+      "system-metadata",
+    );
+  }
+
+  private async uploadPanelArtifact(
+    plaintext: Buffer,
+    filename: string,
+    folder: "Database" | "Configuration" | "System Metadata" | "Full Backup Manifests",
+    jobId: string,
+    artifactType: string,
+  ) {
+    const accessToken = await this.integrations.googleDriveAccessToken("admin");
+    const folderId = await this.integrations.googleDriveAdminPanelFolder(folder);
+    const checksum = createHash("sha256").update(plaintext).digest("hex");
+    const encrypted = this.encryptArchive(plaintext);
+    const metadata = {
+      name: filename,
+      mimeType: "application/octet-stream",
+      parents: [folderId],
+      appProperties: { nimbusPanelBackupId: jobId, nimbusArtifactType: artifactType, nimbusSha256: checksum },
+    };
+    const fileId = await this.uploadResumableDriveUpload(accessToken, metadata, encrypted.data);
+    const downloaded = await axios.get(
+      "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media",
+      { headers: { authorization: "Bearer " + accessToken }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
+    );
+    const downloadedDigest = createHash("sha256").update(Buffer.from(downloaded.data)).digest("hex");
+    const uploadedDigest = createHash("sha256").update(encrypted.data).digest("hex");
+    if (downloadedDigest !== uploadedDigest) {
+      await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId), {
+        headers: { authorization: "Bearer " + accessToken },
+      }).catch(() => undefined);
+      throw new BadRequestException("Admin panel artifact upload verification failed");
+    }
+    return {
+      fileId,
+      filename,
+      folderId,
+      checksum,
+      sizeBytes: plaintext.length,
+      encryptionMetadata: encrypted.metadata,
+      verificationStatus: "verified",
+    };
+  }
+
+  private async createFullPanelManifest(job: BackupJobDocument) {
+    const backupIds = (job.results ?? []).map((result) => result.backupId).filter((id): id is string => Boolean(id));
+    const records = backupIds.length
+      ? await this.backups.find({ _id: { $in: backupIds.map((id) => new Types.ObjectId(id)) } }).populate("serviceId", "name type").lean()
+      : [];
+    const ownerIds = [...new Set(records.map((record) => record.ownerId.toString()))].map((id) => new Types.ObjectId(id));
+    const users = ownerIds.length
+      ? await this.backups.db.collection("users").find({ _id: { $in: ownerIds } }).project({ displayName: 1, username: 1, email: 1 }).toArray()
+      : [];
+    const userNames = new Map(users.map((user: any) => [String(user._id), String(user.displayName || user.username || user.email || user._id)]));
+    const customers = new Map<string, { customerId: string; customerName: string; services: Array<Record<string, unknown>> }>();
+    for (const record of records as any[]) {
+      const customerId = record.ownerId.toString();
+      const customer = customers.get(customerId) ?? {
+        customerId,
+        customerName: userNames.get(customerId) ?? customerId,
+        services: [],
+      };
+      const service = record.serviceId as { _id?: Types.ObjectId; name?: string; type?: string };
+      customer.services.push({
+        serviceId: service?._id?.toString(),
+        serviceName: service?.name ?? "Unknown service",
+        serviceType: service?.type ?? "unknown",
+        backupId: record._id.toString(),
+        driveFileId: record.remoteFileId,
+        checksum: record.checksum,
+        sizeBytes: record.sizeBytes,
+        verificationStatus: record.verificationStatus,
+        createdAt: record.createdAt,
+      });
+      customers.set(customerId, customer);
+    }
+    const manifest = {
+      schemaVersion: 1,
+      backupJobId: job._id!.toString(),
+      createdAt: job.createdAt,
+      panelArtifacts: job.panelArtifacts ?? {},
+      customers: [...customers.values()],
+      serviceBackupResults: job.results,
+      totals: { services: job.total - 4, completed: job.completed, failed: job.failed },
+    };
+    const buffer = Buffer.from(JSON.stringify(manifest, null, 2), "utf8");
+    return this.uploadPanelArtifact(buffer, "nimbus-full-panel-manifest-" + job._id!.toString() + ".json.enc", "Full Backup Manifests", job._id!.toString(), "manifest");
   }
 
   private async runBackupJobs() {
