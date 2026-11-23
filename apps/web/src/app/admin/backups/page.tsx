@@ -34,7 +34,7 @@ export default function AdminBackups() {
       setRows(backupRows);
       setServices(serviceRows);
       setPanelRows(fullBackups);
-      if (!serviceId && serviceRows.length) setServiceId(serviceRows[0]._id);
+      setServiceId(current => current || serviceRows[0]?._id || "");
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load backups", "err");
     }
