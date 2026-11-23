@@ -7,9 +7,12 @@ import { IntegrationsModule } from "../integrations/integrations.module";
 import { Backup, BackupSchema } from "./backup.schema";
 import { User, UserSchema } from "../users/user.schema";
 import { PanelBackup, PanelBackupSchema } from "./panel-backup.schema";
+import { BackupSchedule, BackupScheduleSchema } from "./backup-schedule.schema";
 import { BackupsController } from "./backups.controller";
 import { BackupsService } from "./backups.service";
 import { PanelBackupsService } from "./panel-backups.service";
+import { BackupSchedulerService } from "./backup-scheduler.service";
+import { NotificationsModule } from "../notifications/notifications.module";
 
 @Module({
   imports: [
@@ -17,14 +20,16 @@ import { PanelBackupsService } from "./panel-backups.service";
       { name: Backup.name, schema: BackupSchema },
       { name: User.name, schema: UserSchema },
       { name: PanelBackup.name, schema: PanelBackupSchema },
+      { name: BackupSchedule.name, schema: BackupScheduleSchema },
     ]),
     NodesModule,
     ServicesModule,
     IntegrationsModule,
     AuditModule,
+    NotificationsModule,
   ],
   controllers: [BackupsController],
-  providers: [BackupsService, PanelBackupsService],
-  exports: [BackupsService, PanelBackupsService],
+  providers: [BackupsService, PanelBackupsService, BackupSchedulerService],
+  exports: [BackupsService, PanelBackupsService, BackupSchedulerService],
 })
 export class BackupsModule {}
