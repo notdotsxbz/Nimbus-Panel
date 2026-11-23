@@ -1174,7 +1174,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async uploadGoogleDriveArchive(
-    archive: Buffer,
+    archivePath: string,
+    archiveSize: number,
     filename: string,
     ownerType: "admin" | "customer",
     ownerId: string | undefined,
@@ -1190,22 +1191,23 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
     const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, customerId, serviceType, serviceName, customerFolderName);
     const existingQuery = new URLSearchParams({
-      q: `'${parentFolderId}' in parents and appProperties has { key='nimbusBackupId' and value='${backupId}' } and trashed = false`,
+      q: \`'\${parentFolderId}' in parents and appProperties has { key='nimbusBackupId' and value='\${backupId}' } and trashed = false\`,
       pageSize: "1",
       fields: "files(id)",
     });
     const existingResponse = await axios.get("https://www.googleapis.com/drive/v3/files?" + existingQuery.toString(), {
       headers: { authorization: "Bearer " + accessToken },
     });
-    const existingFileId = (existingResponse.data?.files?.[0]?.id as string | undefined);
+    const existingFileId = existingResponse.data?.files?.[0]?.id as string | undefined;
+    const newDigest = await this.hashFile(archivePath, "hex");
     if (existingFileId) {
       const existingBytes = await axios.get(
         "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(existingFileId) + "?alt=media",
-        { headers: { authorization: "Bearer " + accessToken }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
+        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
       );
-      const existingDigest = createHash("sha256").update(Buffer.from(existingBytes.data)).digest("hex");
-      const newDigest = createHash("sha256").update(archive).digest("hex");
-      if (existingDigest === newDigest) return existingFileId;
+      const existingHash = createHash("sha256");
+      for await (const chunk of existingBytes.data as NodeJS.ReadableStream) existingHash.update(chunk as Buffer);
+      if (existingHash.digest("hex") === newDigest) return existingFileId;
       await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(existingFileId), {
         headers: { authorization: "Bearer " + accessToken },
       });
@@ -1228,7 +1230,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     let fileId: string;
     try {
       await onStage?.("uploading");
-      fileId = await this.uploadResumableDriveUpload(accessToken, fileMetadata, archive);
+      fileId = await this.uploadResumableDriveFile(accessToken, fileMetadata, archivePath, archiveSize);
       await onStage?.("verifying");
     } catch (error) {
       const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
@@ -1237,17 +1239,13 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     try {
       const downloaded = await axios.get(
         "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media",
-        {
-          headers: { authorization: "Bearer " + accessToken },
-          responseType: "arraybuffer",
-          maxContentLength: Infinity,
-          timeout: 10 * 60 * 1000,
-        },
+        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
       );
-      const uploadedBytes = Buffer.from(downloaded.data);
-      const expectedDigest = createHash("sha256").update(archive).digest("hex");
-      const actualDigest = createHash("sha256").update(uploadedBytes).digest("hex");
-      if (expectedDigest !== actualDigest) throw new BadRequestException("Google Drive upload verification failed: downloaded content did not match the uploaded archive");
+      const actualHash = createHash("sha256");
+      for await (const chunk of downloaded.data as NodeJS.ReadableStream) actualHash.update(chunk as Buffer);
+      if (newDigest !== actualHash.digest("hex")) {
+        throw new BadRequestException("Google Drive upload verification failed: downloaded content did not match the uploaded archive");
+      }
       return fileId;
     } catch (error) {
       await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId), {
