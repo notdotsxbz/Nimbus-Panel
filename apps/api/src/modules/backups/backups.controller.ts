@@ -35,6 +35,15 @@ export class BackupsController {
     return this.backups.adminBackupSummary(user);
   }
 
+  @Post("admin/restore-selection")
+  @Roles("owner", "admin")
+  restoreAdminSelection(
+    @Body() dto: { mode: "selected-services" | "selected-customer"; backupIds?: string[]; customerId?: string; confirm?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.restoreAdminSelection(dto, user);
+  }
+
   @Post("admin/full")
   @Roles("owner", "admin")
   createFullPanelBackup(@CurrentUser() user: AuthUser) {
