@@ -996,6 +996,10 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
+    const archivedType = backup.manifest?.serviceType;
+    if (typeof archivedType === "string" && archivedType !== service.type) {
+      throw new BadRequestException("This backup was created for a different service type and cannot be restored here");
+    }
     const node = await this.nodes.get(service.nodeId.toString());
 
     if (backup.remoteFileId) {
