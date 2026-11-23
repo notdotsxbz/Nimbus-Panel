@@ -24,6 +24,7 @@ export default function AdminBackups() {
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [restoreCommand, setRestoreCommand] = useState("");
   const [serviceId, setServiceId] = useState("");
   const [busy, setBusy] = useState(false);
   const { show, node } = useToast();
@@ -57,6 +58,19 @@ export default function AdminBackups() {
       await load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Could not queue full panel backup", "err");
+    } finally { setBusy(false); }
+  };
+
+  const prepareRestore = async (id: string) => {
+    if (!window.confirm("Download and verify the panel database and configuration restore package? This does not modify the live panel. The actual restore requires a maintenance window and an explicit SSH command.")) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ prepared: boolean; command: string; note: string }>(`/backups/admin/full/${id}/prepare-restore`);
+      setRestoreCommand(result.command);
+      show("Restore package prepared and verified", "ok");
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Could not prepare restore package", "err");
     } finally { setBusy(false); }
   };
 
@@ -129,6 +143,9 @@ export default function AdminBackups() {
                 <span>{item.totalSizeBytes ? `${(item.totalSizeBytes / 1073741824).toFixed(2)} GB` : "Size pending"}</span>
               </div>
               {item.error ? <p className="mt-2 text-xs text-red-400">{item.error}</p> : null}
+              {item.mode === "full" && ["completed", "partial"].includes(item.status) ? (
+                <button className="btn-ghost mt-3 !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void prepareRestore(item._id)}>Prepare restore package</button>
+              ) : null}
             </div>
           ))}
           {panelRows.length === 0 ? <p className="text-sm text-muted">No full panel backups yet.</p> : null}
@@ -155,6 +172,15 @@ export default function AdminBackups() {
           </div>
         </div>
       </GlassCard>
+
+      {restoreCommand ? (
+        <GlassCard className="p-4">
+          <h3 className="font-semibold">Restore package ready</h3>
+          <p className="mt-1 text-sm text-muted">The verified database and .env files are staged on the VPS. This command performs a destructive panel database/configuration restore after creating a safety dump. Customer service files must be restored separately afterward.</p>
+          <code className="mt-3 block break-all rounded-lg bg-black/20 p-3 text-xs">{restoreCommand}</code>
+          <button className="btn-ghost mt-3" onClick={() => void navigator.clipboard.writeText(restoreCommand)}>Copy command</button>
+        </GlassCard>
+      ) : null}
 
       <GlassCard className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
