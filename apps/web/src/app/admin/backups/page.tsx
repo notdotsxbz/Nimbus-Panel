@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { GlassCard, useToast } from "@/components/glass";
 
@@ -16,10 +16,15 @@ interface BackupRow {
 interface ServiceOption { _id: string; name: string; type: string; }
 interface CustomerOption { _id: string; username: string; email: string; role: string; }
 interface PanelBackupRow { _id: string; mode?: string; status: string; progress: number; currentStep?: string; customerCount?: number; serviceCount?: number; nodeCount?: number; totalSizeBytes?: number; createdAt: string; error?: string; }
+interface PanelScheduleRow { enabled: boolean; frequency: "daily" | "weekly"; backupTime: string; nextRunAt: string; lastStatus?: string; lastError?: string; }
 
 export default function AdminBackups() {
   const [rows, setRows] = useState<BackupRow[]>([]);
   const [panelRows, setPanelRows] = useState<PanelBackupRow[]>([]);
+  const [panelSchedule, setPanelSchedule] = useState<PanelScheduleRow | null>(null);
+  const [panelFrequency, setPanelFrequency] = useState<"daily" | "weekly">("daily");
+  const [panelBackupTime, setPanelBackupTime] = useState("03:00");
+  const scheduleLoaded = useRef(false);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
@@ -32,16 +37,23 @@ export default function AdminBackups() {
 
   const load = async () => {
     try {
-      const [backupRows, serviceRows, fullBackups, userRows] = await Promise.all([
+      const [backupRows, serviceRows, fullBackups, userRows, schedule] = await Promise.all([
         api.get<BackupRow[]>("/backups"),
         api.get<ServiceOption[]>("/services"),
         api.get<PanelBackupRow[]>("/backups/admin/full"),
         api.get<{ items: CustomerOption[] }>("/users"),
+        api.get<PanelScheduleRow | null>("/backups/admin/full/schedule"),
       ]);
       setRows(backupRows);
       setServices(serviceRows);
       setCustomers(userRows.items.filter(user => user.role === "customer"));
       setPanelRows(fullBackups);
+      setPanelSchedule(schedule);
+      if (schedule && !scheduleLoaded.current) {
+        setPanelFrequency(schedule.frequency);
+        setPanelBackupTime(schedule.backupTime || "03:00");
+        scheduleLoaded.current = true;
+      }
       setServiceId(current => current || serviceRows[0]?._id || "");
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load backups", "err");
@@ -49,6 +61,35 @@ export default function AdminBackups() {
   };
 
   useEffect(() => { void load(); const timer = setInterval(() => { void load(); }, 5000); return () => clearInterval(timer); }, []);
+
+  const saveFullBackupSchedule = async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      const result = await api.post<PanelScheduleRow>("/backups/admin/full/schedule", {
+        enabled,
+        frequency: panelFrequency,
+        backupTime: panelBackupTime,
+      });
+      setPanelSchedule(result);
+      scheduleLoaded.current = true;
+      show(enabled ? "Scheduled full-panel backup enabled" : "Scheduled full-panel backup paused", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not save full-backup schedule", "err");
+    } finally { setBusy(false); }
+  };
+
+  const deleteFullBackupSchedule = async () => {
+    if (!window.confirm("Delete the scheduled full-panel backup? Existing backups will remain in Google Drive.")) return;
+    setBusy(true);
+    try {
+      await api.del("/backups/admin/full/schedule");
+      setPanelSchedule(null);
+      scheduleLoaded.current = false;
+      show("Full-panel backup schedule deleted", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not delete schedule", "err");
+    } finally { setBusy(false); }
+  };
 
   const createFullPanelBackup = async () => {
     if (!window.confirm("Start a full NIMBUS panel backup? This creates service snapshots and encrypted panel database/configuration archives. The snapshot is sequential and does not pause all services.")) return;
@@ -173,6 +214,35 @@ export default function AdminBackups() {
           ))}
           {panelRows.length === 0 ? <p className="text-sm text-muted">No full panel backups yet.</p> : null}
         </div>
+      </GlassCard>
+
+      <GlassCard className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Scheduled Full-Panel Backup</h2>
+            <p className="mt-1 text-sm text-muted">Automatically queue a complete Admin Drive backup daily or weekly. Schedule times use UTC.</p>
+          </div>
+          <span className="text-xs text-muted">{panelSchedule?.enabled ? "Active" : "Not active"}</span>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="label">Frequency</label>
+            <select className="input w-full" value={panelFrequency} onChange={event => setPanelFrequency(event.target.value as "daily" | "weekly")}>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Backup time (UTC)</label>
+            <input className="input w-full" type="time" value={panelBackupTime} onChange={event => setPanelBackupTime(event.target.value)} />
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button className="btn-primary" disabled={busy} onClick={() => void saveFullBackupSchedule(true)}>Save schedule</button>
+          <button className="btn-ghost" disabled={busy || !panelSchedule?.enabled} onClick={() => void saveFullBackupSchedule(false)}>Pause</button>
+          <button className="btn-ghost text-red-400" disabled={busy || !panelSchedule} onClick={() => void deleteFullBackupSchedule()}>Delete schedule</button>
+        </div>
+        {panelSchedule ? <p className="mt-3 text-xs text-muted">Next run: {new Date(panelSchedule.nextRunAt).toLocaleString()} UTC · Last run: {panelSchedule.lastStatus ?? "not run"}{panelSchedule.lastError ? ` · ${panelSchedule.lastError}` : ""}</p> : null}
       </GlassCard>
 
       <GlassCard className="p-5">
