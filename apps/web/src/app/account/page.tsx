@@ -25,6 +25,7 @@ interface DriveStatus {
   connected: boolean;
   connectedAt: string | null;
   accountEmail?: string | null;
+  folderId?: string | null;
   reconnectRequired?: boolean;
 }
 
@@ -105,6 +106,24 @@ export default function AccountSettings() {
       show(error instanceof Error ? error.message : "Could not start Google Drive connection", "err");
       setDriveBusy(false);
     }
+  };
+
+  const testDriveConnection = async () => {
+    setDriveBusy(true);
+    try {
+      const status = await api.get<DriveStatus>("/integrations/customer/google-drive");
+      setDrive(status);
+      if (!status.connected) throw new Error("Google Drive authorization needs to be reconnected");
+      show("Google Drive connection is working", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Google Drive test failed", "err");
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
+  const openDriveFolder = () => {
+    if (drive.folderId) window.open(`https://drive.google.com/drive/folders/${encodeURIComponent(drive.folderId)}`, "_blank", "noopener,noreferrer");
   };
 
   const disconnectDrive = async () => {
@@ -194,7 +213,13 @@ export default function AccountSettings() {
             <div className="flex gap-2">
               <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected" : "Not connected"}</span>
               <button className="btn-primary" disabled={driveBusy} onClick={() => void connectDrive()}>{driveBusy ? "Please wait…" : drive.connected ? "Reconnect" : "Connect Google Drive"}</button>
-              {drive.connected ? <button className="btn-ghost" disabled={driveBusy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
+              {drive.connected ? (
+                <>
+                  <button className="btn-ghost" disabled={driveBusy} onClick={() => void testDriveConnection()}>Test connection</button>
+                  {drive.folderId ? <button className="btn-ghost" onClick={openDriveFolder}>Open backup folder</button> : null}
+                  <button className="btn-ghost" disabled={driveBusy} onClick={() => void disconnectDrive()}>Disconnect</button>
+                </>
+              ) : null}
             </div>
           </div>
         </GlassCard>
