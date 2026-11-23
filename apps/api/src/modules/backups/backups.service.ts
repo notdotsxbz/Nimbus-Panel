@@ -689,6 +689,7 @@ export class BackupsService {
     const archiveInfo = await stat(archivePath);
     if (!archiveInfo.isFile() || archiveInfo.size <= 0) throw new BadRequestException("Backup archive is empty or unavailable");
     let uploadUrl = "";
+    let fileId: string | undefined;
     try {
       const session = await axios.post(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id",
@@ -708,7 +709,6 @@ export class BackupsService {
 
       const file = await open(archivePath, "r");
       let offset = 0;
-      let fileId: string | undefined;
       let noProgressRetries = 0;
       const chunkSize = 8 * 1024 * 1024;
       try {
@@ -774,7 +774,8 @@ export class BackupsService {
       }
       return fileId;
     } catch (error) {
-      if (uploadUrl) await axios.delete(uploadUrl).catch(() => undefined);
+      if (fileId) await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, { headers: { authorization: `Bearer ${accessToken}` } }).catch(() => undefined);
+      else if (uploadUrl) await axios.delete(uploadUrl).catch(() => undefined);
       if (error instanceof BadRequestException) throw error;
       const details = axios.isAxiosError(error)
         ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message
