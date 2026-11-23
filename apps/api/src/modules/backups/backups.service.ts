@@ -818,7 +818,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       }
       await job.save();
     }
-    job.status = job.failed === job.total ? "failed" : "completed";
+    job.status = job.failed === 0 ? "completed" : "failed";
     job.currentServiceId = undefined;
     job.leaseUntil = undefined;
     job.completedAt = new Date();
