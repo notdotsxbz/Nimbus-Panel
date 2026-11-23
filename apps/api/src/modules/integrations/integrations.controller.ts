@@ -42,19 +42,43 @@ export class IntegrationsController {
   }
 
   @Post("google-drive/connect")
-  @Roles("owner")
+  @Roles("owner", "admin")
   beginGoogleDriveConnect(@Body() dto: { clientId: string; clientSecret: string }, @CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
     return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user.id, origin);
   }
 
   @Post("google-drive/exchange")
-  @Roles("owner")
-  exchangeGoogleDriveCode(@Body() dto: { code: string; state: string }) {
-    return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state);
+  @Roles("owner", "admin")
+  exchangeGoogleDriveCode(@Body() dto: { code: string; state: string }, @CurrentUser() user: AuthUser) {
+    return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state, user.id);
+  }
+
+  @Get("customer/google-drive")
+  @Roles("customer")
+  customerGoogleDriveStatus(@CurrentUser() user: AuthUser) {
+    return this.integrations.googleDriveStatus("customer", user.id);
+  }
+
+  @Post("customer/google-drive/connect")
+  @Roles("customer")
+  beginCustomerGoogleDriveConnect(@CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
+    return this.integrations.beginCustomerGoogleDriveConnect(user.id, origin);
+  }
+
+  @Post("customer/google-drive/exchange")
+  @Roles("customer")
+  exchangeCustomerGoogleDriveCode(@Body() dto: { code: string; state: string }, @CurrentUser() user: AuthUser) {
+    return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state, user.id);
+  }
+
+  @Delete("customer/google-drive")
+  @Roles("customer")
+  disconnectCustomerGoogleDrive(@CurrentUser() user: AuthUser) {
+    return this.integrations.disconnectGoogleDrive(user.id, "customer", user.id);
   }
 
   @Delete("google-drive")
-  @Roles("owner")
+  @Roles("owner", "admin")
   disconnectGoogleDrive(@CurrentUser() user: AuthUser) {
     return this.integrations.disconnectGoogleDrive(user.id);
   }

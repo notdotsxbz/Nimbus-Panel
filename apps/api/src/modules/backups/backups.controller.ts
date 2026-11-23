@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
-import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, StreamableFile } from "@nestjs/common";
+import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
 
 @Controller("backups")
@@ -16,12 +16,125 @@ export class BackupsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: { serviceId: string; trigger?: string; destination?: string },
   ) {
-    return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
+    return this.backups.enqueueBackupJob([dto.serviceId], user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
+  }
+
+  @Get("drive-summary")
+  driveSummary(@CurrentUser() user: AuthUser) {
+    return this.backups.driveSummary(user);
+  }
+
+  @Get("jobs")
+  listJobs(@CurrentUser() user: AuthUser) {
+    return this.backups.listJobs(user);
+  }
+
+  @Get("jobs/:id")
+  getJob(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.backups.getJob(id, user);
+  }
+
+  @Get("admin/customers")
+  @Roles("owner", "admin")
+  adminCustomerOptions(@CurrentUser() user: AuthUser) {
+    return this.backups.adminCustomerOptions(user);
+  }
+
+  @Get("admin/summary")
+  @Roles("owner", "admin")
+  adminBackupSummary(@CurrentUser() user: AuthUser) {
+    return this.backups.adminBackupSummary(user);
+  }
+
+  @Post("admin/restore-selection")
+  @Roles("owner", "admin")
+  restoreAdminSelection(
+    @Body() dto: { mode: "selected-services" | "selected-customer"; backupIds?: string[]; customerId?: string; confirm?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.restoreAdminSelection(dto, user);
+  }
+
+  @Post("admin/full")
+  @Roles("owner", "admin")
+  createFullPanelBackup(@CurrentUser() user: AuthUser) {
+    return this.backups.createFullPanelBackup(user);
+  }
+
+  @Post("admin/batch")
+  @Roles("owner", "admin")
+  createAdminBatch(
+    @Body() dto: { mode: "all-customers" | "selected-customers" | "selected-services"; customerIds?: string[]; serviceIds?: string[] },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.createAdminBatch(dto, user);
+  }
+
+  @Post("admin/full/:id/restore-services")
+  @Roles("owner", "admin")
+  restoreServicesFromFullPanelManifest(
+    @Param("id") id: string,
+    @Body() dto: { confirm?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.restoreServicesFromFullPanelManifest(id, user, dto.confirm === true);
+  }
+
+  @Post("admin/full/:id/prepare-restore")
+  @Roles("owner", "admin")
+  prepareFullPanelRestore(
+    @Param("id") id: string,
+    @Body() dto: { confirm?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.prepareFullPanelRestore(id, user, dto.confirm === true);
+  }
+
+  @Get("admin/full-schedule")
+  @Roles("owner", "admin")
+  getFullPanelSchedule(@CurrentUser() user: AuthUser) {
+    return this.backups.getFullPanelSchedule(user);
+  }
+
+  @Patch("admin/full-schedule")
+  @Roles("owner", "admin")
+  saveFullPanelSchedule(
+    @Body() dto: { enabled?: boolean; frequency?: string; time?: string; retention?: number; notifyOnCompletion?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.saveFullPanelSchedule(dto, user);
+  }
+
+  @Get("schedule")
+  getSchedule(@Query("serviceId") serviceId: string, @CurrentUser() user: AuthUser) {
+    return this.backups.getSchedule(serviceId, user);
+  }
+
+  @Put("schedule")
+  saveSchedule(
+    @Body() dto: { serviceId: string; enabled?: boolean; frequency?: string; time?: string; retention?: number; notifyOnCompletion?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.saveSchedule(dto, user);
+  }
+
+  @Get(":id/download")
+  async download(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    const file = await this.backups.download(id, user);
+    return new StreamableFile(file.stream, {
+      type: "application/octet-stream",
+      disposition: `attachment; filename="${file.filename}"`,
+    });
+  }
+
+  @Delete(":id")
+  delete(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.backups.delete(id, user);
   }
 
   @Post(":id/restore")
-  restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
-    return this.backups.restore(id, user);
+  restore(@Param("id") id: string, @Body() dto: { confirm?: boolean }, @CurrentUser() user: AuthUser) {
+    return this.backups.enqueueRestoreJob([id], user, dto.confirm === true);
   }
 
 

@@ -358,6 +358,11 @@ curl -fsSL "https://pgp.mongodb.com/server-${MONGO_KEY_VERSION}.asc" \
   # Package verification
   dpkg -s mongodb-org-server >/dev/null 2>&1 || die "mongodb-org-server package is not installed after installation — APT reported success but the package is missing."
   [ -x "$(command -v mongod)" ] || die "mongod executable not found on PATH after installation."
+  if ! command -v mongodump >/dev/null 2>&1 || ! command -v mongorestore >/dev/null 2>&1; then
+    apt-get install -y -qq mongodb-database-tools || die "MongoDB Database Tools installation failed; Full Panel backups require mongodump and mongorestore."
+  fi
+  command -v mongodump >/dev/null 2>&1 || die "mongodump is missing after MongoDB Database Tools installation."
+  command -v mongorestore >/dev/null 2>&1 || die "mongorestore is missing after MongoDB Database Tools installation."
 
   # Service verification
   systemctl daemon-reload || true

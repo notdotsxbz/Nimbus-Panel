@@ -39,9 +39,9 @@ export class ServicesService {
   ) {}
 
   /** Customers see only their own services; staff sees all. */
-  async listFor(user: AuthUser, filter: Record<string, unknown> = {}) {
+  async listFor(user: AuthUser, filter: Record<string, unknown> = {}, limit = 200) {
     const query: Record<string, unknown> = isStaffRole(user.role) ? { ...filter } : { ownerId: new Types.ObjectId(user.id), ...filter };
-    return this.services.find(query).populate("nodeId", "name location online").limit(200);
+    return this.services.find(query).populate("nodeId", "name location online").limit(Math.max(1, Math.min(limit, 5000)));
   }
 
   /** Ownership-enforced read — the base for every per-service operation. */

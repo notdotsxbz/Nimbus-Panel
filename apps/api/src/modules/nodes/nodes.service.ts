@@ -5,6 +5,8 @@ import { Model, Types } from "mongoose";
 import * as bcrypt from "bcryptjs";
 import axios from "axios";
 import { Agent as HttpsAgent } from "node:https";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import { createHmac, randomBytes, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from "node:crypto";
 import { env } from "../../config/env";
 import { AuditService } from "../audit/audit.service";
@@ -352,6 +354,50 @@ export class NodesService {
     return res.data;
   }
 
+  /** Stream a completed archive from the authenticated node agent without buffering it in memory. */
+  async downloadBackupArchiveStream(node: NodeDocument, serviceId: string, backupId: string) {
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
+    const response = await axios({
+      method: "POST",
+      url: `${node.agentUrl}/backups/download`,
+      data: { serviceId, backupId },
+      headers: { authorization: `Bearer ${token}`, "x-nimbus-node": node._id!.toString() },
+      timeout: 60 * 60 * 1000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      responseType: "stream",
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
+    });
+    return response.data as NodeJS.ReadableStream;
+  }
+
+  /** Stream a verified local archive to the node agent for staged restore. */
+  async uploadBackupArchiveFile(node: NodeDocument, serviceId: string, backupId: string, archivePath: string, checksum: string): Promise<void> {
+    if (!/^[a-f\\d]{24}$/i.test(serviceId) || !/^[a-f\\d]{24}$/i.test(backupId)) {
+      throw new BadRequestException("Invalid service or backup identifier");
+    }
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
+    const archiveStat = await stat(archivePath);
+    await axios({
+      method: "PUT",
+      url: `${node.agentUrl}/backups/restore-upload/${encodeURIComponent(serviceId)}/${encodeURIComponent(backupId)}`,
+      data: createReadStream(archivePath),
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-nimbus-node": node._id!.toString(),
+        "x-nimbus-sha256": checksum,
+        "content-type": "application/octet-stream",
+        "content-length": String(archiveStat.size),
+      },
+      timeout: 60 * 60 * 1000,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
+    });
+  }
+
   /** Download a completed archive from the authenticated node agent. */
   async downloadBackupArchive(node: NodeDocument, serviceId: string, backupId: string): Promise<Buffer> {
     const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
@@ -368,6 +414,31 @@ export class NodesService {
       httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
     });
     return Buffer.from(response.data);
+  }
+
+  /** Stream a verified Drive archive back to its owning node for staged restoration. */
+  async uploadBackupArchive(node: NodeDocument, serviceId: string, backupId: string, archive: Buffer, checksum: string): Promise<void> {
+    if (!/^[a-f\\d]{24}$/i.test(serviceId) || !/^[a-f\\d]{24}$/i.test(backupId)) {
+      throw new BadRequestException("Invalid service or backup identifier");
+    }
+    const credential = await this.nodes.findById(node._id).select("+agentTokenEncrypted");
+    const token = decryptAgentToken(credential?.agentTokenEncrypted);
+    await axios({
+      method: "PUT",
+      url: `${node.agentUrl}/backups/restore-upload/${encodeURIComponent(serviceId)}/${encodeURIComponent(backupId)}`,
+      data: archive,
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-nimbus-node": node._id!.toString(),
+        "x-nimbus-sha256": checksum,
+        "content-type": "application/octet-stream",
+        "content-length": String(archive.length),
+      },
+      timeout: 10 * 60 * 1000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      httpsAgent: new HttpsAgent({ rejectUnauthorized: false }),
+    });
   }
 
   async markOffline(id: string) {

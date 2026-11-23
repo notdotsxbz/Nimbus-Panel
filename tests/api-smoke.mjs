@@ -38,6 +38,7 @@ async function call(path, { method = "GET", token, body } = {}) {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(30_000),
   });
   let json = null;
   try {
@@ -88,6 +89,22 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("seeded software presets are not exposed to customers by default", (seededCatalog.body ?? []).filter(item => seededIds.includes(item.identifier)).every(item => item.customerAvailable === false), "review required");
   const me = await call("/auth/me", { token: owner });
   check("authenticated /auth/me", me.status === 200 && !!me.body?.username, `username=${me.body?.username}`);
+  const adminBackupScope = await call("/backups/admin/summary", { token: owner });
+  check("Admin can read full backup scope summary", adminBackupScope.status === 200 && typeof adminBackupScope.body?.serviceCount === "number", `status=${adminBackupScope.status}`);
+  const adminBackupCustomers = await call("/backups/admin/customers", { token: owner });
+  check("Admin can list customer backup targets", adminBackupCustomers.status === 200 && Array.isArray(adminBackupCustomers.body), `status=${adminBackupCustomers.status}`);
+  const adminFullPanelSchedule = await call("/backups/admin/full-schedule", { token: owner });
+  check("Admin can read Full Panel schedule settings", adminFullPanelSchedule.status === 200 && typeof adminFullPanelSchedule.body?.frequency === "string", `status=${adminFullPanelSchedule.status}`);
+  const savedFullPanelSchedule = await call("/backups/admin/full-schedule", { method: "PATCH", token: owner, body: { enabled: false, frequency: "daily", time: "02:00", retention: 5, notifyOnCompletion: true } });
+  check("Admin can save Full Panel schedule settings", savedFullPanelSchedule.status === 200 && savedFullPanelSchedule.body?.retention === 5, `status=${savedFullPanelSchedule.status}`);
+  const adminDriveBackupSummary = await call("/backups/drive-summary", { token: owner });
+  check("Admin can read Admin Drive backup summary", adminDriveBackupSummary.status === 200 && typeof adminDriveBackupSummary.body?.totalBackups === "number", `status=${adminDriveBackupSummary.status}`);
+  const adminBackupJobs = await call("/backups/jobs", { token: owner });
+  check("Admin can inspect backup jobs", adminBackupJobs.status === 200 && Array.isArray(adminBackupJobs.body), `status=${adminBackupJobs.status}`);
+  const adminRecoveryConfirmation = await call("/backups/admin/full/000000000000000000000000/prepare-restore", { method: "POST", token: owner, body: { confirm: false } });
+  check("Full Panel recovery requires explicit Admin confirmation", adminRecoveryConfirmation.status === 400, `status=${adminRecoveryConfirmation.status}`);
+  const adminManifestConfirmation = await call("/backups/admin/full/000000000000000000000000/restore-services", { method: "POST", token: owner, body: { confirm: false } });
+  check("Manifest service restore requires explicit Admin confirmation", adminManifestConfirmation.status === 400, `status=${adminManifestConfirmation.status}`);
 
   // Users CRUD + RBAC
   const users = await call("/users", { token: owner });
@@ -128,6 +145,34 @@ async function call(path, { method = "GET", token, body } = {}) {
 
   const forbidden = await call("/users", { token: cust });
   check("RBAC: customer blocked from /users", forbidden.status === 403, `status=${forbidden.status}`);
+
+  const customerDriveStatus = await call("/integrations/customer/google-drive", { token: cust });
+  check("customer can read only their personal Drive connection", customerDriveStatus.status === 200 && customerDriveStatus.body?.connected === false, `status=${customerDriveStatus.status}`);
+  const sharedDriveAsCustomer = await call("/integrations/google-drive", { token: cust });
+  check("customer cannot read Admin Drive connection", sharedDriveAsCustomer.status === 403, `status=${sharedDriveAsCustomer.status}`);
+  const customerDriveAsOwner = await call("/integrations/customer/google-drive", { token: owner });
+  check("Admin cannot access a customer's personal Drive endpoint", customerDriveAsOwner.status === 403, `status=${customerDriveAsOwner.status}`);
+
+  const customerBackupJobs = await call("/backups/jobs", { token: cust });
+  check("customer can read only their backup jobs", customerBackupJobs.status === 200 && Array.isArray(customerBackupJobs.body), `status=${customerBackupJobs.status}`);
+  const customerBackupSummary = await call("/backups/drive-summary", { token: cust });
+  check("customer can read personal Drive backup summary", customerBackupSummary.status === 200 && typeof customerBackupSummary.body?.totalBackups === "number", `status=${customerBackupSummary.status}`);
+  const customerAdminBackupSummary = await call("/backups/admin/summary", { token: cust });
+  check("customer cannot read Admin backup scope", customerAdminBackupSummary.status === 403, `status=${customerAdminBackupSummary.status}`);
+  const customerAdminList = await call("/backups/admin/customers", { token: cust });
+  check("customer cannot list Admin backup customers", customerAdminList.status === 403, `status=${customerAdminList.status}`);
+  const customerFullPanelSchedule = await call("/backups/admin/full-schedule", { token: cust });
+  check("customer cannot read Admin Full Panel schedule", customerFullPanelSchedule.status === 403, `status=${customerFullPanelSchedule.status}`);
+  const customerFullBackup = await call("/backups/admin/full", { method: "POST", token: cust, body: {} });
+  check("customer cannot start Full Panel Backup", customerFullBackup.status === 403, `status=${customerFullBackup.status}`);
+  const customerAdminBatch = await call("/backups/admin/batch", { method: "POST", token: cust, body: { mode: "all-customers" } });
+  check("customer cannot start Admin batch backups", customerAdminBatch.status === 403, `status=${customerAdminBatch.status}`);
+  const customerAdminRestore = await call("/backups/admin/restore-selection", { method: "POST", token: cust, body: { mode: "selected-services", backupIds: [], confirm: true } });
+  check("customer cannot invoke Admin restore selection", customerAdminRestore.status === 403, `status=${customerAdminRestore.status}`);
+  const customerPanelPrepare = await call("/backups/admin/full/000000000000000000000000/prepare-restore", { method: "POST", token: cust, body: { confirm: true } });
+  check("customer cannot prepare Full Panel recovery", customerPanelPrepare.status === 403, `status=${customerPanelPrepare.status}`);
+  const customerPanelServiceRestore = await call("/backups/admin/full/000000000000000000000000/restore-services", { method: "POST", token: cust, body: { confirm: true } });
+  check("customer cannot restore all services from an Admin manifest", customerPanelServiceRestore.status === 403, `status=${customerPanelServiceRestore.status}`);
 
   const own = await call("/services", { token: cust });
   check("customer reads own (empty) services", own.status === 200 && Array.isArray(own.body) && own.body.length === 0);
@@ -346,6 +391,8 @@ async function call(path, { method = "GET", token, body } = {}) {
   const svcId = (Array.isArray(svcRow.body ?? svcRow) ? (svcRow.body ?? svcRow) : []).find?.((s) => s.name === "smoke-svc-" + suffix)?._id
     ?? (Array.isArray(svcRow) ? svcRow : svcRow.items ?? []).find((s) => s.name === "smoke-svc-" + suffix)?._id;
   if (svcId) {
+    const crossBackupList = await call(`/backups?serviceId=${svcId}`, { token: custToken });
+    check("customer cannot list another customer's service backups", crossBackupList.status === 403, `status=${crossBackupList.status}`);
     const xlogs = await call(`/services/${svcId}/console/logs`, { token: custToken });
     check("customer cannot read another customer's console logs", xlogs.status === 403, `status=${xlogs.status}`);
     const xfiles = await call(`/services/${svcId}/files?path=/`, { token: custToken });
