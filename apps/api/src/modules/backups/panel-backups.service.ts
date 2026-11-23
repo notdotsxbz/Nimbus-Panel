@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -466,6 +466,75 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       }).catch(() => undefined);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  async prepareRestore(id: string, user: AuthUser) {
+    this.assertAdmin(user);
+    const record = await this.get(id, user);
+    if (record.mode !== "full" || !["completed", "partial"].includes(record.status)) {
+      throw new BadRequestException("Only a completed full panel backup can be prepared for restore");
+    }
+    const manifest = record.manifest as {
+      artifacts?: {
+        database?: { fileId: string; checksum: string; encryptionIv: string; encryptionTag: string; sizeBytes: number; storedSizeBytes: number };
+        configuration?: { fileId: string; checksum: string; encryptionIv: string; encryptionTag: string; sizeBytes: number; storedSizeBytes: number };
+        systemMetadata?: { fileId: string; checksum: string; encryptionIv: string; encryptionTag: string; sizeBytes: number; storedSizeBytes: number };
+      };
+    } | undefined;
+    const database = manifest?.artifacts?.database;
+    const configuration = manifest?.artifacts?.configuration;
+    const systemMetadata = manifest?.artifacts?.systemMetadata;
+    if (!database || !configuration || !systemMetadata) {
+      throw new BadRequestException("Full backup manifest is missing required restore artifacts");
+    }
+
+    const installDir = process.env.NIMBUS_INSTALL_DIR || "/opt/nimbus";
+    const restoreRoot = join(installDir, "var", "restore-staging");
+    const restoreDir = join(restoreRoot, id);
+    await mkdir(restoreRoot, { recursive: true, mode: 0o700 });
+    try {
+      await mkdir(restoreDir, { recursive: false, mode: 0o700 });
+    } catch {
+      throw new BadRequestException("A restore package for this backup already exists. Move it aside before preparing another.");
+    }
+
+    try {
+      await this.backups.downloadAdminPanelArtifact(database.fileId, database, user, join(restoreDir, "database.archive.gz"));
+      await this.backups.downloadAdminPanelArtifact(configuration.fileId, configuration, user, join(restoreDir, "environment.env"));
+      await this.backups.downloadAdminPanelArtifact(systemMetadata.fileId, systemMetadata, user, join(restoreDir, "system-metadata.json"));
+      await writeFile(join(restoreDir, "manifest.json"), JSON.stringify(record.manifest, null, 2), { mode: 0o600, flag: "wx" });
+      await writeFile(
+        join(restoreDir, "README-RESTORE.txt"),
+        [
+          "NIMBUS full panel restore package",
+          "",
+          "This package has been downloaded and integrity-verified. It does not modify the live panel.",
+          "Review manifest.json and excluded service entries before proceeding.",
+          "Run the restore script only during a planned maintenance window and after reviewing its prompts.",
+          "After the panel database and configuration are restored, use the Admin Backups page to restore the listed customer service backups.",
+          "",
+          "Restore script: " + join(installDir, "installer", "restore-panel-backup.sh"),
+          "Backup ID: " + id,
+        ].join("\n"),
+        { mode: 0o600, flag: "wx" },
+      );
+      await this.audit.log({
+        actorId: user.id,
+        action: "backups.panel.full.restore-prepared",
+        targetType: "panel-backup",
+        targetId: id,
+        sensitive: true,
+      }).catch(() => undefined);
+      return {
+        prepared: true,
+        stagingPath: restoreDir,
+        command: `sudo bash ${join(installDir, "installer", "restore-panel-backup.sh")} ${id}`,
+        note: "This prepares the panel database and configuration restore. Customer service archives are separate and must be restored from the Admin Backups page after the panel restarts.",
+      };
+    } catch (error) {
+      await rm(restoreDir, { recursive: true, force: true });
+      throw error;
     }
   }
 
