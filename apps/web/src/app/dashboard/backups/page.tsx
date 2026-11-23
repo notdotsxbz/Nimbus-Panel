@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { GlassCard, Toast, useToast } from "@/components/glass";
 
+interface BackupJobRow {
+  _id: string;
+  status: string;
+  total: number;
+  completed: number;
+  failed: number;
+  createdAt: string;
+}
+
 interface BackupRow {
   _id: string;
   destination: string;
@@ -16,12 +25,17 @@ interface BackupRow {
 
 export default function CustomerBackups() {
   const [rows, setRows] = useState<BackupRow[]>([]);
+  const [jobs, setJobs] = useState<BackupJobRow[]>([]);
   const { show, node } = useToast();
 
   const load = async () => {
     try {
-      const res = await api.get<{ items?: BackupRow[] } | BackupRow[]>("/backups");
+      const [res, jobRows] = await Promise.all([
+        api.get<{ items?: BackupRow[] } | BackupRow[]>("/backups"),
+        api.get<BackupJobRow[]>("/backups/jobs"),
+      ]);
       setRows(Array.isArray(res) ? res : res.items ?? []);
+      setJobs(jobRows);
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load backups", "err");
     }
@@ -84,6 +98,21 @@ export default function CustomerBackups() {
         </div>
         <span className="text-xs text-muted">Your backups are stored in your connected personal Google Drive.</span>
       </header>
+
+      {jobs.length > 0 ? (
+        <GlassCard className="p-5">
+          <h2 className="font-semibold">Backup jobs</h2>
+          <div className="mt-3 space-y-2">
+            {jobs.map((job) => (
+              <div key={job._id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2 text-sm">
+                <span className="font-mono text-xs">{job._id.slice(0, 8)}</span>
+                <span className="text-xs text-muted">{job.completed}/{job.total} completed · {job.failed} failed</span>
+                <span className="text-xs uppercase">{job.status}</span>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      ) : null}
 
       <GlassCard className="overflow-x-auto">
         <table className="w-full min-w-[560px] text-sm">
