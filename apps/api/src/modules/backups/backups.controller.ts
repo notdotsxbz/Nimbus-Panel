@@ -90,6 +90,21 @@ export class BackupsController {
     return this.backups.prepareFullPanelRestore(id, user, dto.confirm === true);
   }
 
+  @Get("admin/full-schedule")
+  @Roles("owner", "admin")
+  getFullPanelSchedule(@CurrentUser() user: AuthUser) {
+    return this.backups.getFullPanelSchedule(user);
+  }
+
+  @Patch("admin/full-schedule")
+  @Roles("owner", "admin")
+  saveFullPanelSchedule(
+    @Body() dto: { enabled?: boolean; frequency?: string; time?: string; retention?: number; notifyOnCompletion?: boolean },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.saveFullPanelSchedule(dto, user);
+  }
+
   @Get("schedule")
   getSchedule(@Query("serviceId") serviceId: string, @CurrentUser() user: AuthUser) {
     return this.backups.getSchedule(serviceId, user);
