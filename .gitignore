@@ -42,3 +42,6 @@ coverage/
 # Node agent builds
 apps/node-agent/bin/
 apps/node-agent/nimbus-agent
+
+# Temporary full-panel restore packages (contain decrypted database and .env files)
+var/restore-staging/
