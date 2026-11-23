@@ -337,7 +337,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       const fileId = await this.uploadResumableDriveFile(accessToken, metadata, encryptedPath, encryptedStat.size);
       const downloaded = await axios.get(
         "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media",
-        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
+        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 60 * 60 * 1000 },
       );
       const actualHash = createHash("sha256");
       for await (const chunk of downloaded.data as Readable) actualHash.update(chunk as Buffer);
@@ -390,7 +390,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const fileId = await this.uploadResumableDriveUpload(accessToken, metadata, encrypted.data);
     const downloaded = await axios.get(
       "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media",
-      { headers: { authorization: "Bearer " + accessToken }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 10 * 60 * 1000 },
+      { headers: { authorization: "Bearer " + accessToken }, responseType: "arraybuffer", maxContentLength: Infinity, timeout: 60 * 60 * 1000 },
     );
     const downloadedDigest = createHash("sha256").update(Buffer.from(downloaded.data)).digest("hex");
     const uploadedDigest = createHash("sha256").update(encrypted.data).digest("hex");
@@ -801,7 +801,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         const encryptedPath = join(tempDir, "download.enc");
         const response = await axios.get(
           \`https://www.googleapis.com/drive/v3/files/\${encodeURIComponent(backup.remoteFileId)}?alt=media\`,
-          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 10 * 60 * 1000 },
+          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 60 * 60 * 1000 },
         );
         await pipeline(response.data, createWriteStream(encryptedPath, { mode: 0o600 }));
         if (backup.encryptionMetadata) {
@@ -990,7 +990,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         const archivePath = join(tempDir, "restore.tar.gz");
         const response = await axios.get(
           \`https://www.googleapis.com/drive/v3/files/\${encodeURIComponent(backup.remoteFileId)}?alt=media\`,
-          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 10 * 60 * 1000 },
+          { headers: { authorization: \`Bearer \${accessToken}\` }, responseType: "stream", timeout: 60 * 60 * 1000 },
         );
         await pipeline(response.data, createWriteStream(encryptedPath, { mode: 0o600 }));
         if (backup.encryptionMetadata) {
@@ -1147,7 +1147,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
               "content-length": String(chunk.length),
               "content-range": "bytes " + offset + "-" + end + "/" + archive.length,
             },
-            timeout: 10 * 60 * 1000,
+            timeout: 60 * 60 * 1000,
             maxBodyLength: Infinity,
             validateStatus: (status) => status === 308 || status === 200 || status === 201,
           });
@@ -1242,7 +1242,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
               "content-length": String(end - offset + 1),
               "content-range": "bytes " + offset + "-" + end + "/" + totalBytes,
             },
-            timeout: 10 * 60 * 1000,
+            timeout: 60 * 60 * 1000,
             maxBodyLength: Infinity,
             validateStatus: (status) => status === 308 || status === 200 || status === 201,
           });
@@ -1330,7 +1330,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     if (existingFileId) {
       const existingBytes = await axios.get(
         "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(existingFileId) + "?alt=media",
-        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
+        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 60 * 60 * 1000 },
       );
       const existingHash = createHash("sha256");
       for await (const chunk of existingBytes.data as Readable) existingHash.update(chunk as Buffer);
@@ -1366,7 +1366,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     try {
       const downloaded = await axios.get(
         "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media",
-        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 10 * 60 * 1000 },
+        { headers: { authorization: "Bearer " + accessToken }, responseType: "stream", timeout: 60 * 60 * 1000 },
       );
       const actualHash = createHash("sha256");
       for await (const chunk of downloaded.data as Readable) actualHash.update(chunk as Buffer);
