@@ -102,6 +102,10 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     const validId = (id: string) => /^[a-f0-9]{24}$/i.test(id);
     if (![...customerIds, ...serviceIds].every(validId)) throw new BadRequestException("One or more selected IDs are invalid");
     const allServices = await this.services.listAllForStaff(user);
+    if (customerIds.length) {
+      const foundCustomers = await this.users.find({ _id: { $in: customerIds.map(id => new Types.ObjectId(id)) }, role: "customer" }).select("_id").lean();
+      if (foundCustomers.length !== customerIds.length) throw new NotFoundException("One or more selected customers were not found");
+    }
     const selected = customerIds.length
       ? allServices.filter(service => customerIds.includes(service.ownerId.toString()))
       : allServices.filter(service => serviceIds.includes(service._id!.toString()));
@@ -115,7 +119,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       status: "queued",
       progress: 0,
       currentStep: "Queued",
-      customerCount: new Set(selected.map(service => service.ownerId.toString())).size,
+      customerCount: customerIds.length || new Set(selected.map(service => service.ownerId.toString())).size,
       serviceCount: selected.length,
       nodeCount: new Set(selected.map(service => service.nodeId.toString())).size,
       serviceBackupIds: [],
