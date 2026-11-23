@@ -143,19 +143,6 @@ export default function AccountSettings() {
     } finally { setDriveBusy(false); }
   };
 
-  const openDriveFolder = async () => {
-    const tab = window.open("about:blank", "_blank");
-    setDriveBusy(true);
-    try {
-      const result = await api.get<{ url: string }>("/backups/drive-folder");
-      if (tab) tab.location.href = result.url;
-      else show("Allow pop-ups to open your Google Drive folder", "err");
-    } catch (error) {
-      tab?.close();
-      show(error instanceof Error ? error.message : "Could not open backup folder", "err");
-    } finally { setDriveBusy(false); }
-  };
-
   const changePassword = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
