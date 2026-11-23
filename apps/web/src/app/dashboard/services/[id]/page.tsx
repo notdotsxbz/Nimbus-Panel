@@ -9,6 +9,17 @@ import { FileManager } from "@/components/file-manager";
 import { MinecraftProperties } from "@/components/minecraft-properties";
 import { SoftwareManager } from "@/components/software-manager";
 
+interface BackupSchedule {
+  serviceId: string;
+  enabled: boolean;
+  frequency: "manual" | "every6h" | "every12h" | "daily" | "weekly";
+  time: string;
+  retention: 0 | 5 | 10 | 30;
+  notifyOnCompletion: boolean;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+}
+
 interface ServiceDetail {
   _id: string;
   name: string;
@@ -35,6 +46,8 @@ export default function ServicePage() {
   const [tab, setTab] = useState<Tab>("Overview");
   const [confirm, setConfirm] = useState<"reinstall" | null>(null);
   const [busy, setBusy] = useState(false);
+  const [backupSchedule, setBackupSchedule] = useState<BackupSchedule | null>(null);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [mcCommand, setMcCommand] = useState<string | null>(null);
   const [mcFile, setMcFile] = useState<string | null>(null);
@@ -55,6 +68,27 @@ export default function ServicePage() {
   useEffect(() => {
     if (currentUser()) void load();
   }, [load]);
+
+  useEffect(() => {
+    if (tab !== "Backups" || !service) return;
+    void api.get<BackupSchedule>(`/backups/schedule?serviceId=${encodeURIComponent(service._id)}`)
+      .then(setBackupSchedule)
+      .catch((error) => show(error instanceof Error ? error.message : "Could not load backup schedule", "err"));
+  }, [tab, service?._id, show]);
+
+  const saveBackupSchedule = async () => {
+    if (!service || !backupSchedule) return;
+    setScheduleBusy(true);
+    try {
+      const saved = await api.put<BackupSchedule>("/backups/schedule", { ...backupSchedule, serviceId: service._id });
+      setBackupSchedule(saved);
+      show("Automatic backup settings saved", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not save backup settings", "err");
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
 
   const power = async (action: "start" | "stop" | "restart" | "reinstall") => {
     setBusy(true);
@@ -257,22 +291,70 @@ export default function ServicePage() {
       {tab === "Minecraft" && service.type !== "minecraft" ? null : null}
 
       {tab === "Backups" && (
-        <GlassCard className="p-6">
-          <button
-            className="btn-primary"
-            onClick={() =>
-              void api
-                .post("/backups", { serviceId: service._id })
-                .then(() => show("Backup queued", "ok"))
-                .catch((e: Error) => show(e.message, "err"))
-            }
-          >
-            Create backup now
-          </button>
-          <p className="mt-3 text-xs text-muted">
-            Snapshots include sha256 integrity checksums. Connect your personal Google Drive in Account Settings to store your backups privately.
-          </p>
-        </GlassCard>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <GlassCard className="space-y-4 p-6">
+            <div>
+              <h2 className="font-semibold">Automatic backups</h2>
+              <p className="mt-1 text-xs text-muted">Schedules use UTC. Backups are uploaded to your personal Google Drive.</p>
+            </div>
+            {backupSchedule ? (
+              <>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>Enable automatic backups</span>
+                  <input type="checkbox" checked={backupSchedule.enabled} onChange={(e) => setBackupSchedule({ ...backupSchedule, enabled: e.target.checked })} />
+                </label>
+                <div>
+                  <label className="label" htmlFor="backup-frequency">Frequency</label>
+                  <select id="backup-frequency" className="input" value={backupSchedule.frequency} onChange={(e) => setBackupSchedule({ ...backupSchedule, frequency: e.target.value as BackupSchedule["frequency"], enabled: e.target.value === "manual" ? false : backupSchedule.enabled })}>
+                    <option value="manual">Manual only</option>
+                    <option value="every6h">Every 6 hours</option>
+                    <option value="every12h">Every 12 hours</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label" htmlFor="backup-time">Backup time (UTC)</label>
+                  <input id="backup-time" type="time" className="input" value={backupSchedule.time} onChange={(e) => setBackupSchedule({ ...backupSchedule, time: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label" htmlFor="backup-retention">Retention</label>
+                  <select id="backup-retention" className="input" value={backupSchedule.retention} onChange={(e) => setBackupSchedule({ ...backupSchedule, retention: Number(e.target.value) as BackupSchedule["retention"] })}>
+                    <option value={5}>Keep latest 5</option>
+                    <option value={10}>Keep latest 10</option>
+                    <option value={30}>Keep latest 30</option>
+                    <option value={0}>Never automatically delete</option>
+                  </select>
+                </div>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  <span>Notify me when a scheduled backup finishes</span>
+                  <input type="checkbox" checked={backupSchedule.notifyOnCompletion} onChange={(e) => setBackupSchedule({ ...backupSchedule, notifyOnCompletion: e.target.checked })} />
+                </label>
+                {backupSchedule.lastRunAt ? <p className="text-xs text-muted">Last run: {new Date(backupSchedule.lastRunAt).toLocaleString()}</p> : null}
+                {backupSchedule.nextRunAt ? <p className="text-xs text-muted">Next run: {new Date(backupSchedule.nextRunAt).toLocaleString()} UTC</p> : null}
+                <button className="btn-primary" disabled={scheduleBusy} onClick={() => void saveBackupSchedule()}>{scheduleBusy ? "Saving…" : "Save schedule"}</button>
+              </>
+            ) : <p className="text-sm text-muted">Loading backup settings…</p>}
+          </GlassCard>
+          <GlassCard className="p-6">
+            <h2 className="font-semibold">Manual backup</h2>
+            <p className="mt-1 text-xs text-muted">Create a verified snapshot of this service and upload it to your connected personal Google Drive.</p>
+            <button
+              className="btn-primary mt-4"
+              onClick={() => {
+                setBusy(true);
+                void api.post<{ status?: string; error?: string }>("/backups", { serviceId: service._id })
+                  .then((result) => show(result.status === "completed" ? "Backup completed and verified" : result.error || "Backup failed", result.status === "completed" ? "ok" : "err"))
+                  .catch((error: Error) => show(error.message, "err"))
+                  .finally(() => setBusy(false));
+              }}
+              disabled={busy}
+            >
+              {busy ? "Creating backup…" : "Create backup now"}
+            </button>
+            <p className="mt-3 text-xs text-muted">Archives are encrypted before upload and verified after upload. VPS/VDS full-disk snapshots are not supported by the current Docker-only node agent.</p>
+          </GlassCard>
+        </div>
       )}
 
       {tab === "Network" && (
