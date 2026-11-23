@@ -9,6 +9,8 @@ export class Backup {
   // Denormalized owner for auditable customer isolation; optional for legacy records.
   @Prop({ type: Types.ObjectId, ref: "User", index: true })
   ownerId?: Types.ObjectId;
+  @Prop({ enum: ["customer", "admin"], index: true })
+  driveOwnerType?: "customer" | "admin";
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
