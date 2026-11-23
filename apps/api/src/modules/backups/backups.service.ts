@@ -193,13 +193,15 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     trigger = "manual",
     destination = "gdrive",
   ) {
-    if (!serviceIds.length || serviceIds.length > 500) throw new BadRequestException("Select between 1 and 500 services");
+    if (!serviceIds.length || serviceIds.length > 200) throw new BadRequestException("Select between 1 and 200 services");
     if (!["gdrive", "local"].includes(destination)) throw new BadRequestException("Invalid backup destination");
     if (!["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore"].includes(trigger)) throw new BadRequestException("Invalid backup trigger");
     if (user.role === "customer" && destination !== "gdrive") throw new BadRequestException("Customer backups must use the customer's connected Google Drive");
     const uniqueIds = [...new Set(serviceIds)];
-    const services = [];
-    for (const serviceId of uniqueIds) services.push(await this.services.get(serviceId, user as never));
+    const requested = new Set(uniqueIds);
+    const available = await this.services.listFor(user as never);
+    const services = available.filter((service) => requested.has(service._id!.toString()));
+    if (services.length !== uniqueIds.length) throw new BadRequestException("One or more selected services were not found or are not owned by this account");
     const ownerType = user.role === "customer" ? "customer" : "admin";
     const job = await this.jobs.create({
       requestedBy: new Types.ObjectId(user.id),
