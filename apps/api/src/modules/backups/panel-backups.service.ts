@@ -572,6 +572,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       record.progress = 100;
       record.completedAt = new Date();
       await record.save();
+      await this.notifications.notify(user.id, "backup", "Selected Admin backup finished", `Selected backup job ${record.status}. Review its manifest for any exclusions or failures.`).catch(() => undefined);
       await this.audit.log({
         actorId: user.id,
         action: record.mode === "customers" ? "backups.panel.customers.completed" : "backups.panel.services.completed",
@@ -585,6 +586,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       record.currentStep = "Failed";
       record.error = error instanceof Error ? error.message : "Selected backup failed";
       await record.save();
+      await this.notifications.notify(user.id, "backup", "Selected Admin backup failed", record.error ?? "The selected backup job failed.").catch(() => undefined);
       await this.audit.log({
         actorId: user.id,
         action: "backups.panel.selected.failed",
