@@ -5,8 +5,11 @@ import { HydratedDocument, Types } from "mongoose";
 export class PanelBackup {
   @Prop({ type: Types.ObjectId, ref: "User", required: true, index: true })
   createdBy!: Types.ObjectId;
-  @Prop({ enum: ["running", "completed", "partial", "failed"], default: "running", index: true })
-  status!: "running" | "completed" | "partial" | "failed";
+  @Prop({ enum: ["queued", "running", "completed", "partial", "failed"], default: "queued", index: true })
+  status!: "queued" | "running" | "completed" | "partial" | "failed";
+  @Prop({ default: 0 }) progress!: number;
+  @Prop() currentStep?: string;
+  @Prop() startedAt?: Date;
   @Prop() customerCount?: number;
   @Prop() serviceCount?: number;
   @Prop() nodeCount?: number;
