@@ -128,6 +128,8 @@ export class BackupsService {
       driveOwnerType: destination === "gdrive" ? (user.role === "customer" ? "customer" : "admin") : undefined,
       destination,
       status: "running",
+      progress: 0,
+      currentStep: "Preparing service snapshot",
       trigger,
       createdBy: new Types.ObjectId(user.id),
     });
@@ -139,10 +141,16 @@ export class BackupsService {
       }, "POST", 10 * 60 * 1000);
       backup.sizeBytes = result.sizeBytes;
       backup.checksum = result.checksum;
+      backup.progress = 20;
+      backup.currentStep = "Snapshot created";
+      await backup.save();
       if (destination === "gdrive") {
         const tempDir = await mkdtemp(join(tmpdir(), "nimbus-backup-"));
         const archivePath = join(tempDir, `${backup._id!.toString()}.tar`);
         try {
+          backup.currentStep = "Downloading archive from node";
+          backup.progress = 30;
+          await backup.save();
           const hash = createHash("sha256");
           const digestStream = new Transform({
             transform(chunk: Buffer, _encoding, callback) {
@@ -157,11 +165,17 @@ export class BackupsService {
           );
           const digest = hash.digest();
           const downloadedInfo = await stat(archivePath);
+          backup.currentStep = "Verifying archive checksum";
+          backup.progress = 50;
+          await backup.save();
           if (Number(result.sizeBytes) !== downloadedInfo.size) throw new BadRequestException("Downloaded archive size does not match the node manifest");
           if (digest.toString("base64") !== result.checksum && digest.toString("hex") !== result.checksum) {
             throw new BadRequestException("Downloaded archive failed checksum verification");
           }
           const encryptedPath = join(tempDir, `${backup._id!.toString()}.tar.enc`);
+          backup.currentStep = "Encrypting archive";
+          backup.progress = 60;
+          await backup.save();
           const encrypted = await this.encryptArchiveFile(archivePath, encryptedPath);
           backup.encryptionAlgorithm = "aes-256-gcm";
           backup.encryptionIv = encrypted.iv;
@@ -172,12 +186,18 @@ export class BackupsService {
             : user;
           const customer = await this.users.findById(service.ownerId).select("displayName username").lean();
           const customerName = customer?.displayName || customer?.username || "customer";
+          backup.currentStep = "Uploading to Google Drive";
+          backup.progress = 75;
+          await backup.save();
           backup.remoteFileId = await this.uploadGoogleDriveArchive(
             encryptedPath,
             `nimbus-${serviceId}-${backup._id!.toString()}.tar.enc`,
             driveOwner,
             { serviceId, serviceName: service.name, serviceType: String(service.type), customerName, customerId: service.ownerId.toString() },
           );
+          backup.currentStep = "Verifying upload and cleaning node archive";
+          backup.progress = 95;
+          await backup.save();
           try {
             await this.nodes.agentCall(node, "/backups/delete", { serviceId, backupId: backup._id!.toString() });
           } catch {
@@ -188,9 +208,12 @@ export class BackupsService {
         }
       }
       backup.status = "completed";
+      backup.progress = 100;
+      backup.currentStep = "Completed";
       backup.completedAt = new Date();
     } catch (err) {
       backup.status = "failed";
+      backup.currentStep = "Failed";
       backup.error = (err as Error).message;
     }
     await backup.save();
