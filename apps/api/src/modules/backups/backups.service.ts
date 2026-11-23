@@ -249,6 +249,40 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async applyFullPanelRetention(schedule: FullPanelScheduleDocument, user: { id: string; role: string }) {
+    if (!schedule.retention || schedule.retention <= 0) return;
+    const completedJobs = await this.jobs.find({ ownerId: schedule.ownerId, mode: "full-panel", status: "completed" }).sort({ createdAt: -1 }).exec();
+    for (const oldJob of completedJobs.slice(schedule.retention)) {
+      const fileIds = new Set<string>();
+      for (const artifact of Object.values(oldJob.panelArtifacts ?? {}) as Array<Record<string, unknown>>) {
+        if (typeof artifact?.fileId === "string") fileIds.add(artifact.fileId);
+      }
+      const backupIds: string[] = [];
+      for (const result of oldJob.results ?? []) {
+        if (typeof result.backupId === "string") backupIds.push(result.backupId);
+        if (typeof result.driveFileId === "string") fileIds.add(result.driveFileId);
+      }
+      const accessToken = await this.integrations.googleDriveAccessToken("admin");
+      const failures: string[] = [];
+      for (const fileId of fileIds) {
+        try {
+          await axios.delete("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId), { headers: { authorization: "Bearer " + accessToken } });
+        } catch (error) {
+          const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+          if (status !== 404 && status !== 410) failures.push(fileId + ": " + (error instanceof Error ? error.message : "Drive delete failed"));
+        }
+      }
+      if (failures.length) {
+        console.error("[backup-retention] could not remove old Full Panel artifacts:", failures.slice(0, 5).join("; "));
+        continue;
+      }
+      if (backupIds.length) {
+        await this.backups.deleteMany({ _id: { $in: backupIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id)) }, driveOwnerType: "admin" });
+      }
+      await this.jobs.deleteOne({ _id: oldJob._id });
+      await this.audit.log({ actorId: user.id, action: "backups.full-panel.retention-delete", targetType: "backup-job", targetId: oldJob._id!.toString(), detail: "retention=" + schedule.retention, sensitive: true });
+    }
+  }
   private async applyScheduleRetention(schedule: BackupScheduleDocument, user: { id: string; role: string }) {
     if (!schedule.retention || schedule.retention <= 0) return;
     const completed = await this.backups.find({ serviceId: schedule.serviceId, status: "completed" }).sort({ createdAt: -1 }).select("_id").lean();
