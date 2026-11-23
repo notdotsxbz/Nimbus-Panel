@@ -947,6 +947,25 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async encryptArchiveFile(sourcePath: string, destinationPath: string) {
+    const key = createHash("sha256").update(env.integrationEncryptionKey).digest();
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    await pipeline(createReadStream(sourcePath), cipher, createWriteStream(destinationPath, { mode: 0o600 }));
+    return {
+      algorithm: "aes-256-gcm",
+      iv: iv.toString("base64"),
+      authTag: cipher.getAuthTag().toString("base64"),
+      keyVersion: "integration-key-v1",
+    };
+  }
+
+  private async hashFile(path: string, encoding: "hex" | "base64" = "hex"): Promise<string> {
+    const hash = createHash("sha256");
+    for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+    return hash.digest(encoding);
+  }
+
   private decryptArchive(
     encrypted: Buffer,
     metadata: { algorithm: string; iv: string; authTag: string; keyVersion: string },
@@ -1049,6 +1068,101 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
           authorization: "Bearer " + accessToken,
           "content-length": "0",
           "content-range": "bytes */" + archive.length,
+        },
+        timeout: 30_000,
+        validateStatus: (status) => status === 308 || status === 200 || status === 201,
+      });
+      if (probe.status === 200 || probe.status === 201) finalData = probe.data as { id?: string };
+    }
+    if (!finalData?.id) throw new BadRequestException("Google Drive did not confirm the completed resumable upload");
+    return finalData.id;
+  }
+
+  private async uploadResumableDriveFile(
+    accessToken: string,
+    metadata: Record<string, unknown>,
+    archivePath: string,
+    totalBytes: number,
+  ): Promise<string> {
+    const start = await axios.post(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name",
+      metadata,
+      {
+        headers: {
+          authorization: "Bearer " + accessToken,
+          "content-type": "application/json",
+          "x-upload-content-type": "application/octet-stream",
+          "x-upload-content-length": String(totalBytes),
+        },
+        timeout: 30_000,
+      },
+    );
+    const sessionUri = start.headers.location as string | undefined;
+    if (!sessionUri) throw new BadRequestException("Google Drive did not return a resumable upload session");
+    const chunkSize = 8 * 1024 * 1024;
+    let offset = 0;
+    let finalData: { id?: string } | undefined;
+    while (offset < totalBytes) {
+      const end = Math.min(offset + chunkSize, totalBytes) - 1;
+      let retries = 0;
+      let chunkFinished = false;
+      while (!chunkFinished) {
+        try {
+          const response = await axios.put(sessionUri, createReadStream(archivePath, { start: offset, end }), {
+            headers: {
+              authorization: "Bearer " + accessToken,
+              "content-type": "application/octet-stream",
+              "content-length": String(end - offset + 1),
+              "content-range": "bytes " + offset + "-" + end + "/" + totalBytes,
+            },
+            timeout: 10 * 60 * 1000,
+            maxBodyLength: Infinity,
+            validateStatus: (status) => status === 308 || status === 200 || status === 201,
+          });
+          if (response.status === 308) {
+            const range = String(response.headers.range ?? "");
+            const match = /(\d+)-(\d+)$/.exec(range);
+            offset = match ? Number(match[2]) + 1 : 0;
+          } else {
+            finalData = response.data as { id?: string };
+            offset = totalBytes;
+          }
+          chunkFinished = true;
+        } catch (error) {
+          retries += 1;
+          if (retries > 5) throw error;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * (2 ** retries), 15_000)));
+          const probe = await axios.put(sessionUri, Buffer.alloc(0), {
+            headers: {
+              authorization: "Bearer " + accessToken,
+              "content-length": "0",
+              "content-range": "bytes */" + totalBytes,
+            },
+            timeout: 30_000,
+            validateStatus: (status) => status === 308 || status === 200 || status === 201,
+          });
+          if (probe.status === 200 || probe.status === 201) {
+            finalData = probe.data as { id?: string };
+            offset = totalBytes;
+            chunkFinished = true;
+          } else {
+            const range = String(probe.headers.range ?? "");
+            const match = /(\d+)-(\d+)$/.exec(range);
+            const confirmedOffset = match ? Number(match[2]) + 1 : 0;
+            if (confirmedOffset !== offset) {
+              offset = confirmedOffset;
+              chunkFinished = true;
+            }
+          }
+        }
+      }
+    }
+    if (!finalData?.id) {
+      const probe = await axios.put(sessionUri, Buffer.alloc(0), {
+        headers: {
+          authorization: "Bearer " + accessToken,
+          "content-length": "0",
+          "content-range": "bytes */" + totalBytes,
         },
         timeout: 30_000,
         validateStatus: (status) => status === 308 || status === 200 || status === 201,
