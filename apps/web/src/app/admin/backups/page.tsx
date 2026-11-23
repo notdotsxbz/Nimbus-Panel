@@ -25,6 +25,7 @@ export default function AdminBackups() {
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [restoreCommand, setRestoreCommand] = useState("");
+  const [selectedBackupIds, setSelectedBackupIds] = useState<string[]>([]);
   const [serviceId, setServiceId] = useState("");
   const [busy, setBusy] = useState(false);
   const { show, node } = useToast();
@@ -89,6 +90,28 @@ export default function AdminBackups() {
     } catch (err) {
       show(err instanceof Error ? err.message : "Could not queue selected backup", "err");
     } finally { setBusy(false); }
+  };
+
+  const restoreSelected = async () => {
+    if (!selectedBackupIds.length) return;
+    if (!window.confirm(`Restore ${selectedBackupIds.length} selected service backups? Current files for those services will be replaced. A safety backup will be created before each restore.`)) return;
+    setBusy(true);
+    let restored = 0;
+    let failed = 0;
+    let safetyWarnings = 0;
+    for (const id of selectedBackupIds) {
+      try {
+        const result = await api.post<{ safetyBackupStored?: boolean }>(`/backups/${id}/restore`);
+        restored += 1;
+        if (!result.safetyBackupStored) safetyWarnings += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setSelectedBackupIds([]);
+    show(`Restored ${restored}; failed ${failed}; safety warnings ${safetyWarnings}`, failed || safetyWarnings ? "err" : "ok");
+    await load();
+    setBusy(false);
   };
 
   const createBackup = async () => {
@@ -182,10 +205,15 @@ export default function AdminBackups() {
         </GlassCard>
       ) : null}
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted">{selectedBackupIds.length} service backup(s) selected</p>
+        <button className="btn-primary" disabled={busy || selectedBackupIds.length === 0} onClick={() => void restoreSelected()}>Restore selected services</button>
+      </div>
       <GlassCard className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-muted">
+              <th className="px-3 py-3 font-medium">Select</th>
               <th className="px-5 py-3 font-medium">Service</th>
               <th className="px-5 py-3 font-medium">Destination</th>
               <th className="px-5 py-3 font-medium">Trigger</th>
@@ -197,6 +225,7 @@ export default function AdminBackups() {
           <tbody>
             {rows.map(b => (
               <tr key={b._id} className="border-b border-white/5 last:border-0">
+                <td className="px-3 py-3"><input type="checkbox" disabled={b.status !== "completed"} checked={selectedBackupIds.includes(b._id)} onChange={event => setSelectedBackupIds(current => event.target.checked ? [...current, b._id] : current.filter(id => id !== b._id))} /></td>
                 <td className="px-5 py-3 font-medium">{typeof b.serviceId === "object" ? b.serviceId?.name : "—"}</td>
                 <td className="px-5 py-3 text-xs uppercase text-muted">{b.destination}</td>
                 <td className="px-5 py-3 text-xs text-muted">{b.trigger}</td>
@@ -205,7 +234,7 @@ export default function AdminBackups() {
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
               </tr>
             ))}
-            {rows.length === 0 ? <tr><td colSpan={6} className="px-5 py-10 text-center text-muted">No backups recorded yet</td></tr> : null}
+            {rows.length === 0 ? <tr><td colSpan={7} className="px-5 py-10 text-center text-muted">No Admin Drive backups recorded yet</td></tr> : null}
           </tbody>
         </table>
       </GlassCard>
