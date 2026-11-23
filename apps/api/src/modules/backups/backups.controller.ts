@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, StreamableFile } from "@nestjs/common";
 import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
 
