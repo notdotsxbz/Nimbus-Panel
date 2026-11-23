@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { GlassCard, Modal, useToast } from "@/components/glass";
 
 type FirebaseStatus = { connected: boolean; projectId: string | null; webConfigured?: boolean; connectedAt: string | null };
-type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; reconnectRequired?: boolean };
+type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; accountEmail?: string | null; reconnectRequired?: boolean };
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -153,10 +153,11 @@ export default function AdminSettings() {
 
         <GlassCard className="p-6">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="font-semibold">Google Drive Backups</h2>
-            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected for all owners" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
+            <h2 className="font-semibold">Admin Google Drive</h2>
+            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Admin Drive connected" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
           </div>
-          <p className="mt-2 text-sm text-muted">One shared Google Drive connection is used by backups for every owner account. Nimbus verifies backup checksums before upload.</p>
+          <p className="mt-2 text-sm text-muted">This separate Drive is reserved for administrator backups and full-panel recovery. Each customer connects an independent personal Drive from Account Settings.</p>
+          {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Connected account: <span className="font-mono">{drive.accountEmail}</span></p> : null}
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
           <div className="mt-4 flex gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
