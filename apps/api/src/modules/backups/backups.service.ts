@@ -400,6 +400,9 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
           result.checksum,
         );
         backup.verificationStatus = "verified";
+        // Remove the temporary plaintext node archive only after Drive read-back verification succeeds.
+        await this.nodes.agentCall(node, "/backups/delete", { serviceId, backupId: backup._id!.toString() }, "POST", 30_000)
+          .catch((error) => console.error("[backups] could not remove temporary plaintext archive:", error instanceof Error ? error.message : "unknown error"));
       }
       if (destination !== "gdrive") backup.verificationStatus = "verified";
       backup.status = "completed";
@@ -508,7 +511,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Keep a fresh node-local safety snapshot before replacing service data.
-    const safetyBackup = await this.create(service._id!.toString(), user, "pre-restore", "local", true);
+    const safetyBackup = await this.create(service._id!.toString(), user, "pre-restore", "gdrive", true);
     if (safetyBackup.status !== "completed") {
       throw new BadRequestException("Could not create a safety backup. The existing service data was not changed.");
     }
@@ -516,6 +519,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     const restoreRequest = { serviceId: service._id!.toString(), backupId };
     await this.nodes.agentCall(node, "/backups/restore", restoreRequest, "POST", 10 * 60 * 1000);
     await this.nodes.agentCall(node, "/backups/restore-commit", restoreRequest, "POST", 10 * 60 * 1000);
+    await this.nodes.agentCall(node, "/backups/delete", restoreRequest, "POST", 30_000).catch(() => undefined);
     await this.audit.log({
       actorId: user.id,
       action: "backups.restore",
