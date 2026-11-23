@@ -85,6 +85,7 @@ export class BackupsService {
         const ownerName = String(ownerRecord?.displayName || ownerRecord?.username || ownerRecord?.email || service.ownerId.toString());
         const encrypted = this.encryptArchive(archive);
         backup.encryptionMetadata = encrypted.metadata;
+        backup.manifest = { ...(backup.manifest ?? {}), encryption: encrypted.metadata, archiveChecksum: result.checksum };
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           encrypted.data,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
@@ -219,7 +220,7 @@ export class BackupsService {
     checksum: string,
   ): Promise<string> {
     const accessToken = await this.integrations.googleDriveAccessToken(ownerType, ownerId);
-    const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, ownerId, serviceType, serviceName, customerFolderName);
+    const parentFolderId = await this.integrations.googleDriveBackupFolder(ownerType, customerId, serviceType, serviceName, customerFolderName);
     let metadata;
     try {
       metadata = await axios.post(
