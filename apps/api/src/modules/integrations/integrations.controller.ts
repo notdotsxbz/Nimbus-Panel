@@ -53,6 +53,11 @@ export class IntegrationsController {
     return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state, user);
   }
 
+  @Post("google-drive/test")
+  testGoogleDriveConnection(@CurrentUser() user: AuthUser) {
+    return this.integrations.testGoogleDriveConnection(user);
+  }
+
   @Delete("google-drive")
   disconnectGoogleDrive(@CurrentUser() user: AuthUser) {
     return this.integrations.disconnectGoogleDrive(user);
