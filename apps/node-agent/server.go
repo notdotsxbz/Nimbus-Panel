@@ -570,7 +570,7 @@ func extractTarSafely(archivePath, destination string) error {
 			if err := os.MkdirAll(target, 0o750); err != nil { return err }
 		case tar.TypeReg, tar.TypeRegA:
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil { return err }
-			mode := os.FileMode(header.Mode) & 0o640
+			mode := os.FileMode(header.Mode) & 0o750
 			if mode == 0 { mode = 0o600 }
 			out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 			if err != nil { return err }
