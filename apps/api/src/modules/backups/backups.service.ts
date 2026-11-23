@@ -257,7 +257,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         try {
           const manifestArtifact = await this.findAdminDriveArtifact(oldJob._id!.toString(), "manifest");
           fileIds.add(manifestArtifact.fileId);
-        } catch {
+        } catch (error) {
+          if (!(error instanceof NotFoundException)) throw error;
           // A previously removed manifest is already outside the retained Drive set.
         }
       }
