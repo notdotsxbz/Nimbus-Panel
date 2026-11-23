@@ -343,8 +343,8 @@ export default function ServicePage() {
               className="btn-primary mt-4"
               onClick={() => {
                 setBusy(true);
-                void api.post<{ status?: string; error?: string }>("/backups", { serviceId: service._id })
-                  .then((result) => show(result.status === "completed" ? "Backup completed and verified" : result.error || "Backup failed", result.status === "completed" ? "ok" : "err"))
+                void api.post<{ jobId: string; status: string }>("/backups", { serviceId: service._id })
+                  .then((result) => show(`Backup job queued (${result.jobId.slice(0, 8)}) — track its progress in Backups`, "info"))
                   .catch((error: Error) => show(error.message, "err"))
                   .finally(() => setBusy(false));
               }}
