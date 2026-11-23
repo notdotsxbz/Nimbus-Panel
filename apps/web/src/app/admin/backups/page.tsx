@@ -14,25 +14,31 @@ interface BackupRow {
   createdAt: string;
 }
 interface ServiceOption { _id: string; name: string; type: string; }
-interface PanelBackupRow { _id: string; status: string; progress: number; currentStep?: string; customerCount?: number; serviceCount?: number; nodeCount?: number; totalSizeBytes?: number; createdAt: string; error?: string; }
+interface CustomerOption { _id: string; username: string; email: string; role: string; }
+interface PanelBackupRow { _id: string; mode?: string; status: string; progress: number; currentStep?: string; customerCount?: number; serviceCount?: number; nodeCount?: number; totalSizeBytes?: number; createdAt: string; error?: string; }
 
 export default function AdminBackups() {
   const [rows, setRows] = useState<BackupRow[]>([]);
   const [panelRows, setPanelRows] = useState<PanelBackupRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<string[]>([]);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [serviceId, setServiceId] = useState("");
   const [busy, setBusy] = useState(false);
   const { show, node } = useToast();
 
   const load = async () => {
     try {
-      const [backupRows, serviceRows, fullBackups] = await Promise.all([
+      const [backupRows, serviceRows, fullBackups, userRows] = await Promise.all([
         api.get<BackupRow[]>("/backups"),
         api.get<ServiceOption[]>("/services"),
         api.get<PanelBackupRow[]>("/backups/admin/full"),
+        api.get<{ items: CustomerOption[] }>("/users"),
       ]);
       setRows(backupRows);
       setServices(serviceRows);
+      setCustomers(userRows.items.filter(user => user.role === "customer"));
       setPanelRows(fullBackups);
       setServiceId(current => current || serviceRows[0]?._id || "");
     } catch (err) {
@@ -51,6 +57,23 @@ export default function AdminBackups() {
       await load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Could not queue full panel backup", "err");
+    } finally { setBusy(false); }
+  };
+
+  const createSelectedBackup = async (mode: "customers" | "services") => {
+    const ids = mode === "customers" ? selectedCustomerIds : selectedServiceIds;
+    if (!ids.length) {
+      show(mode === "customers" ? "Select at least one customer" : "Select at least one service", "err");
+      return;
+    }
+    if (!window.confirm(`Start a backup for ${ids.length} selected ${mode}?`)) return;
+    setBusy(true);
+    try {
+      await api.post("/backups/admin/selected", mode === "customers" ? { customerIds: ids } : { serviceIds: ids });
+      show(`Selected ${mode} backup queued`, "ok");
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Could not queue selected backup", "err");
     } finally { setBusy(false); }
   };
 
@@ -94,7 +117,7 @@ export default function AdminBackups() {
           {panelRows.map(item => (
             <div key={item._id} className="rounded-xl border border-white/10 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-medium">{item._id}</div>
+                <div className="text-sm font-medium">{item._id} · {item.mode ?? "full"}</div>
                 <span className={`text-xs ${item.status === "completed" ? "text-emerald-400" : item.status === "failed" ? "text-red-400" : item.status === "partial" ? "text-amber-400" : "text-muted"}`}>{item.status}</span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
@@ -109,6 +132,27 @@ export default function AdminBackups() {
             </div>
           ))}
           {panelRows.length === 0 ? <p className="text-sm text-muted">No full panel backups yet.</p> : null}
+        </div>
+      </GlassCard>
+
+      <GlassCard className="p-5">
+        <h2 className="font-semibold">Selected Customer / Service Backups</h2>
+        <p className="mt-1 text-sm text-muted">Queue encrypted backups for chosen customers or individual services. Each customer's service files are kept in their own Admin Drive folder.</p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div>
+            <label className="label">Customers</label>
+            <select multiple className="input min-h-36 w-full" value={selectedCustomerIds} onChange={event => setSelectedCustomerIds(Array.from(event.target.selectedOptions).map(option => option.value))}>
+              {customers.map(customer => <option key={customer._id} value={customer._id}>{customer.username} · {customer.email}</option>)}
+            </select>
+            <button className="btn-primary mt-3" disabled={busy || selectedCustomerIds.length === 0} onClick={() => void createSelectedBackup("customers")}>Back up selected customers ({selectedCustomerIds.length})</button>
+          </div>
+          <div>
+            <label className="label">Services</label>
+            <select multiple className="input min-h-36 w-full" value={selectedServiceIds} onChange={event => setSelectedServiceIds(Array.from(event.target.selectedOptions).map(option => option.value))}>
+              {services.map(service => <option key={service._id} value={service._id}>{service.name} · {service.type}</option>)}
+            </select>
+            <button className="btn-primary mt-3" disabled={busy || selectedServiceIds.length === 0} onClick={() => void createSelectedBackup("services")}>Back up selected services ({selectedServiceIds.length})</button>
+          </div>
         </div>
       </GlassCard>
 
