@@ -92,6 +92,40 @@ export default function CustomerBackups() {
     } finally { setBusy(false); }
   };
 
+  const download = async (id: string) => {
+    setBusy(true);
+    try {
+      const response = await api.raw(`/backups/${id}/download`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { message?: string };
+        throw new Error(body.message ?? "Backup download failed");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `nimbus-backup-${id}.tar`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Backup download failed", "err");
+    } finally { setBusy(false); }
+  };
+
+  const deleteBackup = async (id: string) => {
+    if (!window.confirm("Delete this backup from your Google Drive? This will not delete your service or its live files.")) return;
+    setBusy(true);
+    try {
+      await api.del(`/backups/${id}`);
+      setRows(current => current.filter(row => row._id !== id));
+      show("Backup deleted", "ok");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Backup deletion failed", "err");
+    } finally { setBusy(false); }
+  };
+
   const restore = async (id: string) => {
     if (!confirm("Restore this backup? The current service data may be replaced after the restore is verified.")) return;
     setBusy(true);
@@ -171,7 +205,11 @@ export default function CustomerBackups() {
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
                 <td className="px-5 py-3 text-right">
                   {b.status === "completed" ? (
-                    <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void restore(b._id)}>Restore</button>
+                    <div className="flex justify-end gap-1">
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void download(b._id)}>Download</button>
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs" disabled={busy} onClick={() => void restore(b._id)}>Restore</button>
+                      <button className="btn-ghost !px-2.5 !py-1 text-xs text-red-400" disabled={busy} onClick={() => void deleteBackup(b._id)}>Delete</button>
+                    </div>
                   ) : null}
                 </td>
               </tr>
