@@ -1134,7 +1134,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     confirmed: boolean,
   ) {
     if (confirmed !== true) throw new BadRequestException("Explicit confirmation is required before restoring service data");
-    if (!backupIds.length || backupIds.length > 200) throw new BadRequestException("Select between 1 and 200 completed backups");
+    if (!backupIds.length || backupIds.length > 1000) throw new BadRequestException("Select between 1 and 1000 completed backups");
     const uniqueIds = [...new Set(backupIds)];
     const selected = [];
     for (const backupId of uniqueIds) {
