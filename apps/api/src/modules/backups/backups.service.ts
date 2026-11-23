@@ -1016,14 +1016,18 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
 
     // Keep a fresh node-local safety snapshot before replacing service data.
     const safetyBackup = await this.create(service._id!.toString(), user, "pre-restore", "gdrive", true);
+    const restoreRequest = { serviceId: service._id!.toString(), backupId };
     if (safetyBackup.status !== "completed") {
+      await this.nodes.agentCall(node, "/backups/delete", restoreRequest, "POST", 30_000).catch(() => undefined);
       throw new BadRequestException("Could not create a safety backup. The existing service data was not changed.");
     }
 
-    const restoreRequest = { serviceId: service._id!.toString(), backupId };
-    await this.nodes.agentCall(node, "/backups/restore", restoreRequest, "POST", 10 * 60 * 1000);
-    await this.nodes.agentCall(node, "/backups/restore-commit", restoreRequest, "POST", 10 * 60 * 1000);
-    await this.nodes.agentCall(node, "/backups/delete", restoreRequest, "POST", 30_000).catch(() => undefined);
+    try {
+      await this.nodes.agentCall(node, "/backups/restore", restoreRequest, "POST", 10 * 60 * 1000);
+      await this.nodes.agentCall(node, "/backups/restore-commit", restoreRequest, "POST", 10 * 60 * 1000);
+    } finally {
+      await this.nodes.agentCall(node, "/backups/delete", restoreRequest, "POST", 30_000).catch(() => undefined);
+    }
     backup.lastRestoredAt = new Date();
     await backup.save();
     await this.audit.log({
