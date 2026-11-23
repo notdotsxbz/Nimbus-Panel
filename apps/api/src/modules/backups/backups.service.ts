@@ -692,7 +692,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         await this.notifications.notify(job.requestedBy.toString(), "backup", job.status === "completed" ? "Backup job completed" : "Backup job failed", job.completed + " of " + job.total + " backup tasks completed; " + job.failed + " failed.");
       }
       if (job.mode === "full-panel" && job.status === "completed" && fullPanelSchedule) {
-        await this.applyFullPanelRetention(fullPanelSchedule, user);
+        try {
+          await this.applyFullPanelRetention(fullPanelSchedule, user);
+        } catch (error) {
+          console.error("[backup-retention] Full Panel retention failed:", error);
+        }
       }
       await this.audit.log({
         actorId: job.requestedBy.toString(),
