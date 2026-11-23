@@ -8,6 +8,8 @@ interface BackupRow {
   _id: string;
   destination: string;
   status: string;
+  progress?: number;
+  currentStep?: string;
   trigger: string;
   sizeBytes?: number;
   createdAt: string;
@@ -55,13 +57,13 @@ export default function CustomerBackups() {
       setServices(serviceRows);
       setDrive(driveStatus);
       setSchedules(scheduleRows);
-      if (!serviceId && serviceRows.length) setServiceId(serviceRows[0]._id);
+      setServiceId(current => current || serviceRows[0]?._id || "");
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to load backups", "err");
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); const timer = setInterval(() => { void load(); }, 10000); return () => clearInterval(timer); }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -350,7 +352,7 @@ export default function CustomerBackups() {
               <tr key={b._id} className="border-b border-white/5 last:border-0">
                 <td className="px-5 py-3 font-medium">{typeof b.serviceId === "object" ? b.serviceId?.name : "—"}</td>
                 <td className="tnum px-5 py-3 text-xs">{b.sizeBytes ? `${(b.sizeBytes / 1048576).toFixed(1)} MB` : "—"}</td>
-                <td className="px-5 py-3 text-xs">{b.status}</td>
+                <td className="px-5 py-3 text-xs"><div>{b.status}</div>{b.status === "running" ? <div className="mt-1 text-[11px] text-muted">{b.currentStep ?? "Working"} · {b.progress ?? 0}%</div> : null}</td>
                 <td className="tnum px-5 py-3 text-xs text-muted">{new Date(b.createdAt).toLocaleString()}</td>
                 <td className="px-5 py-3 text-right">
                   {b.status === "completed" ? (
