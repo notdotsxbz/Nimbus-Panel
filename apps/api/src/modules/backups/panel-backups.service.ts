@@ -162,7 +162,37 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
       const metadataPath = join(tempDir, "system-metadata.json");
       const manifestPath = join(tempDir, "backup-manifest.json");
 
-      await updateProgress("Dumping panel database", 5);
+      // Service snapshots are completed first so their backup records and Drive
+      // file IDs are present in the subsequent MongoDB dump.
+      const serviceBackups: Array<Record<string, unknown>> = [];
+      const backupIds: Types.ObjectId[] = [];
+      let serviceFailures = 0;
+      for (let index = 0; index < eligibleServices.length; index += 1) {
+        const service = eligibleServices[index];
+        const serviceBackup = await this.backups.create(service._id!.toString(), user, "manual", "gdrive");
+        backupIds.push(serviceBackup._id as Types.ObjectId);
+        serviceBackups.push({
+          backupId: serviceBackup._id!.toString(),
+          serviceId: service._id!.toString(),
+          ownerId: service.ownerId.toString(),
+          nodeId: service.nodeId.toString(),
+          serviceName: service.name,
+          serviceType: String(service.type),
+          status: serviceBackup.status,
+          sizeBytes: serviceBackup.sizeBytes ?? null,
+          checksum: serviceBackup.checksum ?? null,
+          remoteFileId: serviceBackup.remoteFileId ?? null,
+          encryptionAlgorithm: serviceBackup.encryptionAlgorithm ?? null,
+          encryptionIv: serviceBackup.encryptionIv ?? null,
+          encryptionTag: serviceBackup.encryptionTag ?? null,
+          storedSizeBytes: serviceBackup.storedSizeBytes ?? null,
+        });
+        if (serviceBackup.status !== "completed") serviceFailures += 1;
+        const progress = 5 + Math.round(((index + 1) / Math.max(eligibleServices.length, 1)) * 45);
+        await updateProgress(`Backing up service ${index + 1} of ${eligibleServices.length}: ${service.name}`, progress);
+      }
+
+      await updateProgress("Dumping panel database and backup records", 55);
       // Keep the MongoDB URI out of process arguments; mongodump reads a
       // mode-0600 config file instead.
       await writeFile(mongoConfigPath, `uri: ${JSON.stringify(env.mongoUri)}\n`, { mode: 0o600 });
@@ -171,14 +201,14 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         maxBuffer: 10 * 1024 * 1024,
       });
 
-      await updateProgress("Encrypting and uploading panel database", 15);
+      await updateProgress("Encrypting and uploading panel database", 65);
       const databaseArtifact = await this.backups.uploadAdminPanelArtifact(
         databasePath,
         `nimbus-database-${record._id!.toString()}.archive.gz`,
         ["Panel", "Database"],
         user,
       );
-      await updateProgress("Encrypting and uploading panel configuration", 25);
+      await updateProgress("Encrypting and uploading panel configuration", 75);
       const configurationArtifact = await this.backups.uploadAdminPanelArtifact(
         configPath,
         `nimbus-environment-${record._id!.toString()}.env`,
@@ -217,40 +247,13 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
         })),
       };
       await writeFile(metadataPath, JSON.stringify(systemMetadata, null, 2), { mode: 0o600 });
-      await updateProgress("Uploading infrastructure metadata", 30);
+      await updateProgress("Uploading infrastructure metadata", 85);
       const metadataArtifact = await this.backups.uploadAdminPanelArtifact(
         metadataPath,
         `nimbus-system-metadata-${record._id!.toString()}.json`,
         ["Panel", "System Metadata"],
         user,
       );
-
-      const serviceBackups: Array<Record<string, unknown>> = [];
-      const backupIds: Types.ObjectId[] = [];
-      let serviceFailures = 0;
-      for (let index = 0; index < eligibleServices.length; index += 1) {
-        const service = eligibleServices[index];
-        const serviceBackup = await this.backups.create(service._id!.toString(), user, "manual", "gdrive");
-        backupIds.push(serviceBackup._id as Types.ObjectId);
-        serviceBackups.push({
-          backupId: serviceBackup._id!.toString(),
-          serviceId: service._id!.toString(),
-          ownerId: service.ownerId.toString(),
-          serviceName: service.name,
-          serviceType: String(service.type),
-          status: serviceBackup.status,
-          sizeBytes: serviceBackup.sizeBytes ?? null,
-          checksum: serviceBackup.checksum ?? null,
-          remoteFileId: serviceBackup.remoteFileId ?? null,
-          encryptionAlgorithm: serviceBackup.encryptionAlgorithm ?? null,
-          encryptionIv: serviceBackup.encryptionIv ?? null,
-          encryptionTag: serviceBackup.encryptionTag ?? null,
-          storedSizeBytes: serviceBackup.storedSizeBytes ?? null,
-        });
-        if (serviceBackup.status !== "completed") serviceFailures += 1;
-        const progress = 35 + Math.round(((index + 1) / Math.max(eligibleServices.length, 1)) * 55);
-        await updateProgress(`Backing up service ${index + 1} of ${eligibleServices.length}: ${service.name}`, progress);
-      }
 
       const completeManifest = {
         ...manifest,
