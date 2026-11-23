@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -247,26 +247,39 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async createPanelDatabaseArtifact(jobId: string) {
-    const tempDir = await mkdtemp(join(tmpdir(), "nimbus-panel-db-"));
+    const configDir = await mkdtemp(join(tmpdir(), "nimbus-panel-db-config-"));
+    const stagingDir = join(process.cwd(), "backup-staging");
+    const archivePath = join(stagingDir, "nimbus-database-" + jobId + ".archive.gz");
+    const partialPath = archivePath + ".partial";
     try {
-      const configPath = join(tempDir, "mongodump.yml");
-      const archivePath = join(tempDir, "nimbus-database.archive.gz.enc");
-      // The MongoDB URI is written only to a mode-0600 temporary config file,
-      // never passed as a process argument or written to logs.
+      await mkdir(stagingDir, { recursive: true, mode: 0o700 });
+      await chmod(stagingDir, 0o700);
+      const configPath = join(configDir, "mongodump.yml");
+      // Keep the MongoDB URI in a mode-0600 temporary config file, never in process arguments or logs.
       await writeFile(configPath, "uri: " + JSON.stringify(env.mongoUri) + "\n", { mode: 0o600 });
-      await execFileAsync("mongodump", ["--config", configPath, "--db", "nimbus", "--archive=" + archivePath, "--gzip"], {
-        timeout: 4 * 60 * 60 * 1000,
-        maxBuffer: 4 * 1024 * 1024,
-      });
-      return this.uploadPanelArtifactFile(archivePath, "nimbus-database-" + jobId + ".archive.gz.enc", "Database", jobId, "database");
+      try {
+        await stat(archivePath);
+      } catch {
+        await rm(partialPath, { force: true });
+        await execFileAsync("mongodump", ["--config", configPath, "--db", "nimbus", "--archive=" + partialPath, "--gzip"], {
+          timeout: 4 * 60 * 60 * 1000,
+          maxBuffer: 4 * 1024 * 1024,
+        });
+        await chmod(partialPath, 0o600);
+        await rename(partialPath, archivePath);
+      }
+      const uploaded = await this.uploadPanelArtifactFile(archivePath, "nimbus-database-" + jobId + ".archive.gz.enc", "Database", jobId, "database");
+      await rm(archivePath, { force: true });
+      return uploaded;
     } catch (error) {
       const message = error instanceof Error ? error.message : "mongodump failed";
       if (message.includes("ENOENT") || message.includes("not found")) {
         throw new BadRequestException("mongodump is not installed on the panel server. Install MongoDB Database Tools before running a Full Panel Backup.");
       }
-      throw new BadRequestException("Panel database backup failed: " + message.slice(0, 500));
+      throw new BadRequestException("Panel database backup failed: " + message.slice(0, 400) + ". If a complete local dump exists, it is preserved under " + archivePath);
     } finally {
-      await rm(tempDir, { recursive: true, force: true });
+      await rm(configDir, { recursive: true, force: true });
+      await rm(partialPath, { force: true });
     }
   }
 
