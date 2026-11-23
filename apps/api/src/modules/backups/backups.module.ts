@@ -5,12 +5,16 @@ import { NodesModule } from "../nodes/nodes.module";
 import { ServicesModule } from "../services/services.module";
 import { IntegrationsModule } from "../integrations/integrations.module";
 import { Backup, BackupSchema } from "./backup.schema";
+import { User, UserSchema } from "../users/user.schema";
 import { BackupsController } from "./backups.controller";
 import { BackupsService } from "./backups.service";
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Backup.name, schema: BackupSchema }]),
+    MongooseModule.forFeature([
+      { name: Backup.name, schema: BackupSchema },
+      { name: User.name, schema: UserSchema },
+    ]),
     NodesModule,
     ServicesModule,
     IntegrationsModule,
