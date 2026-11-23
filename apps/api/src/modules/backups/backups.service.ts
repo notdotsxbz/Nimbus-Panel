@@ -886,6 +886,24 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     return this.enqueueBackupJob(selected.map((service) => service._id!.toString()), user, "manual", "gdrive");
   }
 
+  async adminCustomerOptions(user: { id: string; role: string }) {
+    if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
+    const [users, services] = await Promise.all([
+      this.backups.db.collection("users").find({ role: "customer" }).project({ displayName: 1, username: 1, email: 1 }).toArray(),
+      this.services.listFor(user as never, {}, 1000),
+    ]);
+    const counts = new Map<string, number>();
+    for (const service of services) {
+      const ownerId = service.ownerId.toString();
+      counts.set(ownerId, (counts.get(ownerId) ?? 0) + 1);
+    }
+    return users.map((customer) => ({
+      id: customer._id.toString(),
+      name: String(customer.displayName || customer.username || customer.email || customer._id.toString()),
+      serviceCount: counts.get(customer._id.toString()) ?? 0,
+    }));
+  }
+
   async driveSummary(user: { id: string; role: string }) {
     const filter = user.role === "customer"
       ? { ownerId: new Types.ObjectId(user.id), driveOwnerType: "customer", status: "completed" }
