@@ -5,7 +5,7 @@ import type { AuthUser } from "../../common/auth.decorators";
 import { User, type UserDocument } from "../users/user.schema";
 import { ServicesService } from "../services/services.service";
 import { BackupsService } from "./backups.service";
-import { BackupSchedule, BackupScheduleDocument } from "./backup-schedule.schema";
+import { BackupSchedule, type BackupScheduleDocument } from "./backup-schedule.schema";
 import { NotificationsService } from "../notifications/notifications.service";
 import { AuditService } from "../audit/audit.service";
 import { IntegrationsService } from "../integrations/integrations.service";
