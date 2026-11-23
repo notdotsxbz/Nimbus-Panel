@@ -84,7 +84,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("Retention days must be between 1 and 365");
     }
     await this.services.get(dto.serviceId, user);
-    await this.integrations.googleDriveAccessToken(user);
+    if (dto.enabled !== false) await this.integrations.googleDriveAccessToken(user);
     const nextRunAt = this.nextRun(dto.frequency, backupTime, new Date());
     const schedule = await this.schedules.findOneAndUpdate(
       { serviceId: new Types.ObjectId(dto.serviceId), ownerId: new Types.ObjectId(user.id) },
