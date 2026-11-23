@@ -76,17 +76,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
 
   async getFullPanelSchedule(user: { id: string; role: string }) {
     if (!["owner", "admin"].includes(user.role)) throw new BadRequestException("Admin permission required");
-    const schedule = await this.fullPanelSchedules.findOne({ ownerId: new Types.ObjectId(user.id) });
-    return schedule ?? {
-      ownerId: user.id,
-      enabled: false,
-      frequency: "daily",
-      time: "02:00",
-      retention: 5,
-      notifyOnCompletion: true,
-      nextRunAt: null,
-      lastRunAt: null,
-    };
+    return this.fullPanelSchedules.findOneAndUpdate(
+      { ownerId: new Types.ObjectId(user.id) },
+      { $setOnInsert: { enabled: false, frequency: "daily", time: "02:00", retention: 5, notifyOnCompletion: true } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
   }
 
   async saveFullPanelSchedule(dto: {
