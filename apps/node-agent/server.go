@@ -1518,7 +1518,7 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "could not create safety backup; restore cancelled: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		safetyChecksum, _, err := checksumFile(safetyArchive)
+		safetyChecksum, safetySize, err := checksumFile(safetyArchive)
 		if err != nil {
 			restartOriginal()
 			http.Error(w, "could not verify safety backup; restore cancelled", http.StatusInternalServerError)
@@ -1615,6 +1615,7 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 			"serviceRunning": wasRunning,
 			"safetyBackupId": safetyID,
 			"safetyBackupChecksum": safetyChecksum,
+			"safetyBackupSizeBytes": safetySize,
 			"safetyBackupSizeBytes": safetySize,
 		})
 	default:
