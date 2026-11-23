@@ -18,6 +18,7 @@ interface BackupRow {
 interface ServiceOption { _id: string; name: string; type: string; }
 interface BackupJobRow {
   _id: string;
+  mode?: string;
   status: string;
   total: number;
   completed: number;
@@ -127,6 +128,33 @@ export default function AdminBackups() {
     }
   };
 
+  const prepareFullPanelRecovery = async (jobId: string) => {
+    if (!confirm("Prepare a maintenance-mode recovery script for the panel database and configuration? You must run the generated command over SSH as root. Customer service archives are restored separately from the manifest.")) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ command: string; scriptPath: string }>(`/backups/admin/full/${jobId}/prepare-restore`, { confirm: true });
+      show(`Recovery script prepared: ${result.scriptPath}. Run this on the VPS: ${result.command}`, "info");
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Recovery preparation failed", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreFullPanelServices = async (jobId: string) => {
+    if (!confirm("Queue restores for every customer service listed in this Full Panel manifest? Each affected service may be stopped briefly and will receive a safety backup first.")) return;
+    setBusy(true);
+    try {
+      const result = await api.post<{ jobId: string; total: number; skipped: number }>(`/backups/admin/full/${jobId}/restore-services`, { confirm: true });
+      show(`Customer service restore queued: ${result.total} services (${result.jobId.slice(0, 8)}). ${result.skipped} manifest entries skipped.`, "info");
+      await load();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Service restore could not be queued", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const createFullPanelBackup = async () => {
     if (!summary) return;
     if (!confirm(`Create a Full Panel Backup? This includes the panel database, encrypted configuration, system metadata and all ${summary.serviceCount} eligible customer services. VPS/VDS disk images are not included.`)) return;
@@ -188,6 +216,12 @@ export default function AdminBackups() {
               <span className="font-mono text-xs">{job._id.slice(0, 8)}</span>
               <span className="text-xs text-muted">{job.completed}/{job.total} completed · {job.failed} failed</span>
               <span className="text-xs uppercase">{job.status}</span>
+              {job.mode === "full-panel" ? (
+                <div className="flex flex-wrap gap-2">
+                  {job.status === "completed" ? <button className="btn-ghost text-xs" disabled={busy} onClick={() => void prepareFullPanelRecovery(job._id)}>Prepare DB/config recovery</button> : null}
+                  <button className="btn-ghost text-xs" disabled={busy} onClick={() => void restoreFullPanelServices(job._id)}>Restore services from manifest</button>
+                </div>
+              ) : null}
             </div>
           ))}
           {jobs.length === 0 ? <p className="text-xs text-muted">No backup jobs yet</p> : null}
