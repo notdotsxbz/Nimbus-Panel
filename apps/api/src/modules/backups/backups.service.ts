@@ -389,7 +389,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         backup.manifest = { ...(backup.manifest ?? {}), encryption: encrypted.metadata, archiveChecksum: result.checksum };
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           encrypted.data,
-          `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
+          `nimbus-${serviceId}-${backup._id!.toString()}.tar.gz`,
           driveOwnerType,
           driveOwnerId?.toString(),
           service.type,
