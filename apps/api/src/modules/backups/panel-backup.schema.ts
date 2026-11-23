@@ -7,6 +7,8 @@ export class PanelBackup {
   createdBy!: Types.ObjectId;
   @Prop({ enum: ["full", "customers", "services"], default: "full", index: true })
   mode!: "full" | "customers" | "services";
+  @Prop({ enum: ["manual", "scheduled"], default: "manual" })
+  trigger!: "manual" | "scheduled";
   @Prop({ type: [{ type: Types.ObjectId, ref: "User" }], default: [] })
   selectedCustomerIds!: Types.ObjectId[];
   @Prop({ type: [{ type: Types.ObjectId, ref: "Service" }], default: [] })
