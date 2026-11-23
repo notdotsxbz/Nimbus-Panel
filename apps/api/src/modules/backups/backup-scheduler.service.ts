@@ -176,7 +176,7 @@ export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
 
   private async applyRetention(schedule: BackupScheduleDocument, user: AuthUser) {
     if (schedule.retentionMode === "never") return;
-    const rows = await this.backups.list(user, schedule.serviceId.toString());
+    const rows = await this.backups.listForRetention(user, schedule.serviceId.toString());
     const sorted = [...rows].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     const expired = schedule.retentionMode === "count"
       ? sorted.slice(schedule.retentionCount)
