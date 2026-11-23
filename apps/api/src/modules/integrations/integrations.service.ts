@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { BadRequestException, Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 import { env } from "../../config/env";
@@ -158,13 +158,13 @@ export class IntegrationsService implements OnModuleInit {
     if (actor.role === "customer") {
       return {
         driveKey: `google-drive:customer:${actor.id}`,
-        configKey: `google-oauth-config:customer:${actor.id}`,
+        configKey: "google-oauth-config",
         ownerType: "customer" as const,
       };
     }
     return {
       driveKey: "google-drive:admin",
-      configKey: "google-oauth-config:admin",
+      configKey: "google-oauth-config",
       ownerType: "admin" as const,
     };
   }
@@ -175,28 +175,41 @@ export class IntegrationsService implements OnModuleInit {
       this.settings.findOne({ key: keys.driveKey }).select("connectedAt").lean(),
       this.settings.findOne({ key: keys.configKey }).select("_id").lean(),
     ]);
-    // Existing installations used one shared key. Treat it as the legacy
-    // Admin connection only; never expose it to customer accounts.
+    // Existing installations stored the Admin refresh token under the
+    // unscoped legacy key. It remains Admin-only during migration.
     const legacySaved = !saved && keys.ownerType === "admin"
       ? await this.settings.findOne({ key: "google-drive" }).select("connectedAt").lean()
       : null;
-    const legacyConfig = !config && keys.ownerType === "admin"
-      ? await this.settings.findOne({ key: "google-oauth-config" }).select("_id").lean()
-      : null;
-    if ((!saved && !legacySaved) || (!config && !legacyConfig)) {
-      return { connected: false, connectedAt: null };
+    if ((!saved && !legacySaved) || !config) {
+      return { connected: false, connectedAt: null, oauthConfigured: Boolean(config) };
     }
     try {
       await this.googleDriveAccessToken(actor);
-      return { connected: true, connectedAt: saved?.connectedAt ?? legacySaved?.connectedAt ?? null };
+      return { connected: true, connectedAt: saved?.connectedAt ?? legacySaved?.connectedAt ?? null, oauthConfigured: true };
     } catch {
-      return { connected: false, connectedAt: saved?.connectedAt ?? legacySaved?.connectedAt ?? null, reconnectRequired: true };
+      return { connected: false, connectedAt: saved?.connectedAt ?? legacySaved?.connectedAt ?? null, reconnectRequired: true, oauthConfigured: true };
     }
   }
 
-  async beginGoogleDriveConnect(clientId: string, clientSecret: string, actor: AuthUser, origin?: string) {
-    if (!clientId || !clientSecret || clientId.length > 512 || clientSecret.length > 1024) {
-      throw new BadRequestException("Google OAuth Client ID and Client Secret are required");
+  async beginGoogleDriveConnect(clientId: string | undefined, clientSecret: string | undefined, actor: AuthUser, origin?: string) {
+    const keys = this.googleDriveSettingKeys(actor);
+    let oauthConfig: { clientId: string; clientSecret: string };
+    if (actor.role === "customer") {
+      if (clientId || clientSecret) throw new ForbiddenException("Customers cannot change the Nimbus OAuth application credentials");
+      const configured = await this.settings.findOne({ key: keys.configKey });
+      if (!configured) throw new BadRequestException("Google Drive has not been configured by the Nimbus administrator yet");
+      oauthConfig = JSON.parse(this.decrypt(configured.encryptedValue)) as { clientId: string; clientSecret: string };
+    } else {
+      if (actor.role !== "owner" && actor.role !== "admin") throw new ForbiddenException("Only an Admin can configure Google OAuth");
+      if (!clientId || !clientSecret || clientId.length > 512 || clientSecret.length > 1024) {
+        throw new BadRequestException("Google OAuth Client ID and Client Secret are required");
+      }
+      oauthConfig = { clientId, clientSecret };
+      await this.settings.findOneAndUpdate(
+        { key: keys.configKey },
+        { $set: { encryptedValue: this.encrypt(JSON.stringify(oauthConfig)), connectedAt: new Date(), updatedBy: actor.id } },
+        { upsert: true, new: true },
+      );
     }
     let panelOrigin: URL;
     try { panelOrigin = new URL(origin || env.webUrl); }
@@ -207,21 +220,15 @@ export class IntegrationsService implements OnModuleInit {
     if (panelOrigin.pathname !== "/" || panelOrigin.search || panelOrigin.hash || panelOrigin.username || panelOrigin.password) {
       throw new BadRequestException("Invalid panel origin for Google OAuth");
     }
-    const keys = this.googleDriveSettingKeys(actor);
     const redirectUri = panelOrigin.origin + (actor.role === "customer" ? "/dashboard/backups" : "/admin/settings");
-    await this.settings.findOneAndUpdate(
-      { key: keys.configKey },
-      { $set: { encryptedValue: this.encrypt(JSON.stringify({ clientId, clientSecret })), connectedAt: new Date(), updatedBy: actor.id } },
-      { upsert: true, new: true },
-    );
     const state = randomBytes(24).toString("hex");
     await this.settings.create({
       key: "google-oauth-state:" + state,
-      encryptedValue: this.encrypt(JSON.stringify({ actorId: actor.id, driveKey: keys.driveKey, configKey: keys.configKey, redirectUri })),
+      encryptedValue: this.encrypt(JSON.stringify({ actorId: actor.id, driveKey: keys.driveKey, redirectUri })),
       connectedAt: new Date(),
     });
     const params = new URLSearchParams({
-      client_id: clientId,
+      client_id: oauthConfig.clientId,
       redirect_uri: redirectUri,
       response_type: "code",
       scope: "https://www.googleapis.com/auth/drive.file",
@@ -240,13 +247,13 @@ export class IntegrationsService implements OnModuleInit {
       throw new BadRequestException("Google connection request expired. Start again from Settings.");
     }
     const pendingData = JSON.parse(this.decrypt(pending.encryptedValue)) as {
-      actorId: string; driveKey: string; configKey: string; redirectUri: string;
+      actorId: string; driveKey: string; redirectUri: string;
     };
     if (pendingData.actorId !== actor.id) {
       throw new BadRequestException("This Google authorization belongs to a different Nimbus account");
     }
     await this.settings.deleteOne({ key: pendingKey });
-    const configDoc = await this.settings.findOne({ key: pendingData.configKey });
+    const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
     if (!configDoc) throw new BadRequestException("Google OAuth settings are missing");
     const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
     const body = new URLSearchParams({
@@ -306,7 +313,7 @@ export class IntegrationsService implements OnModuleInit {
   async googleDriveAccessToken(actor: Pick<AuthUser, "id" | "role">): Promise<string> {
     const keys = this.googleDriveSettingKeys(actor);
     try {
-      return await this.refreshGoogleDriveToken(keys.driveKey, keys.configKey);
+      return await this.refreshGoogleDriveToken(keys.driveKey, "google-oauth-config");
     } catch (error) {
       // Backward compatibility for the previous shared Admin Drive connection.
       if (keys.ownerType !== "admin") throw error;
