@@ -14,7 +14,7 @@ interface BackupRow {
   serviceId: { name?: string } | string;
 }
 interface ServiceOption { _id: string; name: string; type: string; }
-interface DriveStatus { connected: boolean; connectedAt: string | null; reconnectRequired?: boolean; }
+interface DriveStatus { connected: boolean; connectedAt: string | null; reconnectRequired?: boolean; accountEmail?: string | null; }
 
 export default function CustomerBackups() {
   const [rows, setRows] = useState<BackupRow[]>([]);
@@ -126,7 +126,7 @@ export default function CustomerBackups() {
           ) : null}
         </div>
         {drive.connected ? (
-          <p className="mt-3 text-xs text-emerald-400">Connected{drive.connectedAt ? ` · ${new Date(drive.connectedAt).toLocaleString()}` : ""}</p>
+          <p className="mt-3 text-xs text-emerald-400">Connected{drive.accountEmail ? ` as ${drive.accountEmail}` : ""}{drive.connectedAt ? ` · ${new Date(drive.connectedAt).toLocaleString()}` : ""}</p>
         ) : (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted">Nimbus securely handles the OAuth application setup. You only need to choose your Google account and approve Drive access. The customer callback URI must be authorized by the Nimbus administrator.</p>
