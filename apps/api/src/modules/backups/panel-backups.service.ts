@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -173,6 +173,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     const installDir = process.env.NIMBUS_INSTALL_DIR || "/opt/nimbus";
     const pendingRoot = join(installDir, "var", "pending-backups");
     await mkdir(pendingRoot, { recursive: true, mode: 0o700 });
+    await chmod(pendingRoot, 0o700);
     const tempDir = await mkdtemp(join(pendingRoot, `${record._id!.toString()}-`));
     let preserveSourceArtifacts = false;
     const updateProgress = async (step: string, progress: number) => {
@@ -498,6 +499,7 @@ export class PanelBackupsService implements OnModuleInit, OnModuleDestroy {
     const restoreRoot = join(installDir, "var", "restore-staging");
     const restoreDir = join(restoreRoot, id);
     await mkdir(restoreRoot, { recursive: true, mode: 0o700 });
+    await chmod(restoreRoot, 0o700);
     try {
       await mkdir(restoreDir, { recursive: false, mode: 0o700 });
     } catch {
