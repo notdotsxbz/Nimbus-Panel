@@ -1,12 +1,31 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { Res } from "@nestjs/common";
-import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
+import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
+import { PanelBackupsService } from "./panel-backups.service";
 
 @Controller("backups")
 export class BackupsController {
-  constructor(private readonly backups: BackupsService) {}
+  constructor(private readonly backups: BackupsService, private readonly panelBackups: PanelBackupsService) {}
+
+  @Get("admin/full")
+  @Roles("owner", "admin")
+  listFullPanelBackups(@CurrentUser() user: AuthUser) {
+    return this.panelBackups.list(user);
+  }
+
+  @Get("admin/full/:id")
+  @Roles("owner", "admin")
+  getFullPanelBackup(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.panelBackups.get(id, user);
+  }
+
+  @Post("admin/full")
+  @Roles("owner", "admin")
+  createFullPanelBackup(@CurrentUser() user: AuthUser) {
+    return this.panelBackups.createFullPanelBackup(user);
+  }
 
   @Get()
   list(@CurrentUser() user: AuthUser, @Query("serviceId") serviceId?: string) {
