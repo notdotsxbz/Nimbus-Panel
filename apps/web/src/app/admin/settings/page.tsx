@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { GlassCard, Modal, useToast } from "@/components/glass";
 
 type FirebaseStatus = { connected: boolean; projectId: string | null; webConfigured?: boolean; connectedAt: string | null };
-type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; reconnectRequired?: boolean };
+type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; reconnectRequired?: boolean; accountEmail?: string | null };
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -158,6 +158,7 @@ export default function AdminSettings() {
           </div>
           <p className="mt-2 text-sm text-muted">This separate Admin Google Drive is used for staff-triggered service backups and Admin backup operations. Customer accounts connect their own Google Drive. Nimbus verifies backup checksums before upload.</p>
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
+          {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Admin account: {drive.accountEmail}</p> : null}
           <div className="mt-4 flex gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
             {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
