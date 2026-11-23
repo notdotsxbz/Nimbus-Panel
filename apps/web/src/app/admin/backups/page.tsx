@@ -27,6 +27,15 @@ interface BackupJobRow {
   failed: number;
   createdAt: string;
 }
+interface FullPanelScheduleRow {
+  enabled: boolean;
+  frequency: "daily" | "weekly";
+  time: string;
+  retention: 0 | 5 | 10 | 30;
+  notifyOnCompletion: boolean;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+}
 interface AdminBackupSummary {
   customerCount: number;
   serviceCount: number;
@@ -41,6 +50,7 @@ export default function AdminBackups() {
   const [jobs, setJobs] = useState<BackupJobRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [customers, setCustomers] = useState<AdminCustomerOption[]>([]);
+  const [fullPanelSchedule, setFullPanelSchedule] = useState<FullPanelScheduleRow>({ enabled: false, frequency: "daily", time: "02:00", retention: 5, notifyOnCompletion: true });
   const [serviceId, setServiceId] = useState("");
   const [selectedBackupIds, setSelectedBackupIds] = useState<string[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
@@ -51,17 +61,19 @@ export default function AdminBackups() {
 
   const load = async () => {
     try {
-      const [backupRows, serviceRows, customerRows, backupSummary, backupJobs] = await Promise.all([
+      const [backupRows, serviceRows, customerRows, backupSummary, backupJobs, fullSchedule] = await Promise.all([
         api.get<BackupRow[]>("/backups"),
         api.get<ServiceOption[]>("/services"),
         api.get<AdminCustomerOption[]>("/backups/admin/customers"),
         api.get<AdminBackupSummary>("/backups/admin/summary"),
         api.get<BackupJobRow[]>("/backups/jobs"),
+        api.get<FullPanelScheduleRow>("/backups/admin/full-schedule"),
       ]);
       setRows(backupRows);
       setServices(serviceRows);
       setCustomers(customerRows);
       setSummary(backupSummary);
+      setFullPanelSchedule(fullSchedule);
       setJobs(backupJobs);
       if (!serviceId && serviceRows.length) setServiceId(serviceRows[0]._id);
     } catch (err) {
@@ -176,6 +188,19 @@ export default function AdminBackups() {
       await load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Service restore could not be queued", "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveFullPanelSchedule = async () => {
+    setBusy(true);
+    try {
+      const saved = await api.patch<FullPanelScheduleRow>("/backups/admin/full-schedule", fullPanelSchedule);
+      setFullPanelSchedule(saved);
+      show("Full Panel backup schedule saved", "ok");
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Could not save Full Panel schedule", "err");
     } finally {
       setBusy(false);
     }
