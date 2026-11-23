@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, StreamableFile } from "@nestjs/common";
+import type { Response } from "express";
+import { Res } from "@nestjs/common";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
 
@@ -19,10 +21,30 @@ export class BackupsController {
     return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
   }
 
+  @Get(":id/download")
+  async download(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.backups.download(id, user);
+    response.setHeader("Content-Type", "application/octet-stream");
+    response.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    if (file.sizeBytes !== undefined) response.setHeader("Content-Length", String(file.sizeBytes));
+    return new StreamableFile(file.stream, {
+      type: "application/octet-stream",
+      disposition: `attachment; filename="${file.filename}"`,
+      length: file.sizeBytes,
+    });
+  }
+
+  @Delete(":id")
+  delete(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.backups.delete(id, user);
+  }
+
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.backups.restore(id, user);
   }
-
-
 }
