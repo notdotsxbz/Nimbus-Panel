@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, StreamableFile } from "@nestjs/common";
-import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
+import { CurrentUser, Roles, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
 
 @Controller("backups")
@@ -17,6 +17,21 @@ export class BackupsController {
     @Body() dto: { serviceId: string; trigger?: string; destination?: string },
   ) {
     return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
+  }
+
+  @Get("admin/summary")
+  @Roles("owner", "admin")
+  adminBackupSummary(@CurrentUser() user: AuthUser) {
+    return this.backups.adminBackupSummary(user);
+  }
+
+  @Post("admin/batch")
+  @Roles("owner", "admin")
+  createAdminBatch(
+    @Body() dto: { mode: "all-customers" | "selected-customers" | "selected-services"; customerIds?: string[]; serviceIds?: string[] },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.backups.createAdminBatch(dto, user);
   }
 
   @Get("schedule")
