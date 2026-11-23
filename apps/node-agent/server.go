@@ -484,8 +484,12 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := os.Rename(staging, dir); err != nil {
-			_ = os.Rename(previous, dir)
+			rollbackErr := os.Rename(previous, dir)
 			restartOriginal()
+			if rollbackErr != nil {
+				http.Error(w, "could not activate restored data and automatic rollback failed: "+rollbackErr.Error(), http.StatusInternalServerError)
+				return
+			}
 			http.Error(w, "could not activate restored data: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -506,9 +510,21 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 			verifyJSON, verifyErr := docker("inspect", containerName)
 			var verify []struct { State struct { Running bool `json:"Running"` } `json:"State"` }
 			if verifyErr != nil || json.Unmarshal([]byte(verifyJSON), &verify) != nil || len(verify) == 0 || !verify[0].State.Running {
-				_ = docker("stop", "--time", "10", containerName)
+				if verifyErr != nil || len(verify) == 0 {
+					http.Error(w, "restored service state could not be inspected; data was left in place and safety archive is "+safetyID, http.StatusInternalServerError)
+					return
+				}
+				if verify[0].State.Running {
+					if _, stopErr := docker("stop", "--time", "10", containerName); stopErr != nil {
+						http.Error(w, "restored service failed verification and could not be stopped for rollback; safety archive: "+safetyID, http.StatusInternalServerError)
+						return
+					}
+				}
 				failedDir := dir + ".restore-failed-" + req.BackupID
-				_ = os.Rename(dir, failedDir)
+				if renameErr := os.Rename(dir, failedDir); renameErr != nil {
+					http.Error(w, "restored service failed verification and rollback could not stage the failed data; safety archive: "+safetyID, http.StatusInternalServerError)
+					return
+				}
 				rollbackErr := os.Rename(previous, dir)
 				_, restartErr := docker("start", containerName)
 				if rollbackErr != nil || restartErr != nil {
