@@ -9,6 +9,9 @@ import { FileManager } from "@/components/file-manager";
 import { MinecraftProperties } from "@/components/minecraft-properties";
 import { SoftwareManager } from "@/components/software-manager";
 
+interface BackupRow { _id: string; status: string; createdAt: string; sizeBytes?: number; progress?: number; currentStep?: string; }
+interface DriveStatus { connected: boolean; accountEmail?: string | null; reconnectRequired?: boolean; }
+
 interface ServiceDetail {
   _id: string;
   name: string;
@@ -32,6 +35,9 @@ export default function ServicePage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [service, setService] = useState<ServiceDetail | null>(null);
+  const [backupRows, setBackupRows] = useState<BackupRow[]>([]);
+  const [driveStatus, setDriveStatus] = useState<DriveStatus>({ connected: false });
+  const [backupBusy, setBackupBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("Overview");
   const [confirm, setConfirm] = useState<"reinstall" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,7 +48,14 @@ export default function ServicePage() {
 
   const load = useCallback(async () => {
     try {
-      setService(await api.get<ServiceDetail>(`/services/${params.id}`));
+      const [serviceRow, backupList, drive] = await Promise.all([
+        api.get<ServiceDetail>(`/services/${params.id}`),
+        api.get<BackupRow[]>(`/backups?serviceId=${encodeURIComponent(params.id)}`),
+        api.get<DriveStatus>("/integrations/google-drive"),
+      ]);
+      setService(serviceRow);
+      setBackupRows(backupList);
+      setDriveStatus(drive);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 403 || err.status === 404)) {
         router.replace("/dashboard");
@@ -55,6 +68,29 @@ export default function ServicePage() {
   useEffect(() => {
     if (currentUser()) void load();
   }, [load]);
+
+  const connectDrive = async () => {
+    setBackupBusy(true);
+    try {
+      const result = await api.post<{ url: string }>("/integrations/google-drive/connect", {});
+      window.location.href = result.url;
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not start Google Drive connection", "err");
+      setBackupBusy(false);
+    }
+  };
+
+  const createDriveBackup = async () => {
+    if (!service) return;
+    setBackupBusy(true);
+    try {
+      await api.post("/backups", { serviceId: service._id, destination: "gdrive" });
+      show("Google Drive backup started", "ok");
+      await load();
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Could not start backup", "err");
+    } finally { setBackupBusy(false); }
+  };
 
   const power = async (action: "start" | "stop" | "restart" | "reinstall") => {
     setBusy(true);
@@ -258,21 +294,33 @@ export default function ServicePage() {
 
       {tab === "Backups" && (
         <GlassCard className="p-6">
-          <button
-            className="btn-primary"
-            onClick={() =>
-              void api
-                .post("/backups", { serviceId: service._id })
-                .then(() => show("Backup queued", "ok"))
-                .catch((e: Error) => show(e.message, "err"))
-            }
-          >
-            Create backup now
-          </button>
-          <p className="mt-3 text-xs text-muted">
-            Snapshots include sha256 integrity checksums. Scheduled backups can be enabled after
-            connecting Google Drive in Account → Backups.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">Google Drive Backups</h2>
+              <p className="mt-1 text-sm text-muted">{driveStatus.connected ? `Connected${driveStatus.accountEmail ? ` as ${driveStatus.accountEmail}` : ""}` : "Connect your personal Google Drive to store this service's backups."}</p>
+            </div>
+            {driveStatus.connected ? (
+              <button className="btn-primary" disabled={backupBusy || busy} onClick={() => void createDriveBackup()}>Backup Now</button>
+            ) : (
+              <button className="btn-primary" disabled={backupBusy || busy} onClick={() => void connectDrive()}>Connect Google Drive</button>
+            )}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted">
+            <span>{backupRows.length} backups</span>
+            <span>Last backup: {backupRows[0] ? new Date(backupRows[0].createdAt).toLocaleString() : "Never"}</span>
+            <a className="text-sky-400 hover:underline" href={`/dashboard/backups?serviceId=${service._id}`}>View history and configure automatic backups</a>
+          </div>
+          <div className="mt-4 space-y-2">
+            {backupRows.slice(0, 5).map(backup => (
+              <div key={backup._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/5 p-3 text-xs">
+                <span>{new Date(backup.createdAt).toLocaleString()}</span>
+                <span>{backup.status}{backup.status === "running" ? ` · ${backup.currentStep ?? "Working"} · ${backup.progress ?? 0}%` : ""}</span>
+                <span>{backup.sizeBytes ? `${(backup.sizeBytes / 1048576).toFixed(1)} MB` : "—"}</span>
+              </div>
+            ))}
+            {backupRows.length === 0 ? <p className="text-sm text-muted">No backups for this service yet.</p> : null}
+          </div>
+          <p className="mt-3 text-xs text-muted">Backups are encrypted before upload and verified with SHA-256 checksums. Restores create a safety snapshot first.</p>
         </GlassCard>
       )}
 
