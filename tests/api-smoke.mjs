@@ -94,6 +94,10 @@ async function call(path, { method = "GET", token, body } = {}) {
   check("Admin can read Admin Drive backup summary", adminDriveBackupSummary.status === 200 && typeof adminDriveBackupSummary.body?.totalBackups === "number", `status=${adminDriveBackupSummary.status}`);
   const adminBackupJobs = await call("/backups/jobs", { token: owner });
   check("Admin can inspect backup jobs", adminBackupJobs.status === 200 && Array.isArray(adminBackupJobs.body), `status=${adminBackupJobs.status}`);
+  const adminRecoveryConfirmation = await call("/backups/admin/full/000000000000000000000000/prepare-restore", { method: "POST", token: owner, body: { confirm: false } });
+  check("Full Panel recovery requires explicit Admin confirmation", adminRecoveryConfirmation.status === 400, `status=${adminRecoveryConfirmation.status}`);
+  const adminManifestConfirmation = await call("/backups/admin/full/000000000000000000000000/restore-services", { method: "POST", token: owner, body: { confirm: false } });
+  check("Manifest service restore requires explicit Admin confirmation", adminManifestConfirmation.status === 400, `status=${adminManifestConfirmation.status}`);
 
   // Users CRUD + RBAC
   const users = await call("/users", { token: owner });
