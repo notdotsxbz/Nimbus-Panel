@@ -20,8 +20,8 @@ export class BackupsController {
   }
 
   @Post(":id/restore")
-  restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
-    return this.backups.restore(id, user);
+  restore(@Param("id") id: string, @Body() dto: { confirm?: boolean }, @CurrentUser() user: AuthUser) {
+    return this.backups.restore(id, user, dto.confirm === true);
   }
 
 
