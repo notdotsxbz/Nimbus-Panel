@@ -1291,8 +1291,20 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }
-    } else if (!backup.checksum) {
-      throw new BadRequestException("This backup has no integrity checksum and cannot be safely restored");
+    } else {
+      const tempDir = await mkdtemp(join(tmpdir(), "nimbus-local-restore-"));
+      try {
+        const archivePath = join(tempDir, "restore.tar.gz");
+        const source = await this.nodes.downloadBackupArchiveStream(node, service._id!.toString(), backupId);
+        await pipeline(source, createWriteStream(archivePath, { mode: 0o600 }));
+        const digest = Buffer.from(await this.hashFile(archivePath, "hex"), "hex");
+        if (!backup.checksum || !this.verifyChecksumDigest(digest, backup.checksum)) {
+          throw new BadRequestException("Local backup integrity verification failed. The service was not changed.");
+        }
+        await this.nodes.uploadBackupArchiveFile(node, service._id!.toString(), backupId, archivePath, backup.checksum);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     }
 
     // Keep a fresh node-local safety snapshot before replacing service data.
