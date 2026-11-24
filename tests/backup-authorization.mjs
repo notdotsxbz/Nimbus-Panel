@@ -34,7 +34,7 @@ async function rejectsCrossDriveDeletion() {
 
   await assert.rejects(
     svc.delete(backupId, { id: "eeeeeeeeeeeeeeeeeeeeeeee", role: "admin" }),
-    error => error?.status === 404,
+    error => error?.getStatus?.() === 404 || error?.status === 404,
     "an Admin must not delete a backup stored in a customer's personal Drive",
   );
   assert.equal(tokenCalls, 0, "Drive credentials must not be requested for a denied delete");
