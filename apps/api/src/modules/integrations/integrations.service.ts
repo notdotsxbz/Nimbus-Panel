@@ -253,8 +253,9 @@ export class IntegrationsService implements OnModuleInit {
     const pendingData = JSON.parse(this.decrypt(pending.encryptedValue)) as {
       actorId: string; driveKey: string; redirectUri: string;
     };
-    if (pendingData.actorId !== actor.id) {
-      throw new BadRequestException("This Google authorization belongs to a different Nimbus account");
+    const currentKeys = this.googleDriveSettingKeys(actor);
+    if (pendingData.actorId !== actor.id || pendingData.driveKey !== currentKeys.driveKey) {
+      throw new BadRequestException("This Google authorization belongs to a different Nimbus account or permission context");
     }
     await this.settings.deleteOne({ key: pendingKey });
     const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
