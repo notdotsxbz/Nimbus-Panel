@@ -277,7 +277,7 @@ export class IntegrationsService implements OnModuleInit {
     const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
     if (!configDoc) throw new BadRequestException("An administrator must configure the Google OAuth application first");
     const { clientId } = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string };
-    const redirectUri = new URL("/backups", env.webUrl).toString();
+    const redirectUri = new URL("/dashboard/backups", env.webUrl).toString();
     if (!redirectUri.startsWith("https://") && !redirectUri.startsWith("http://localhost:")) {
       throw new BadRequestException("Google Drive requires a secure panel URL");
     }
