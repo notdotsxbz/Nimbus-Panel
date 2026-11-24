@@ -11,6 +11,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import type { Request } from "express";
+import { SkipThrottle } from "@nestjs/throttler";
 import { Public } from "../../common/public.decorator";
 import { Roles } from "../../common/auth.decorators";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
@@ -109,11 +110,13 @@ export class NodesController {
   }
 
   @Public()
+  @SkipThrottle()
   @Put("agent/heartbeat")
   async heartbeat(@Req() req: Request, @Body() hb: Record<string, number | string>) {
     const nodeId = req.headers["x-nimbus-node"] as string | undefined;
     const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
     if (!nodeId || !token) throw new UnauthorizedException("Missing agent credentials");
+    if (!hb || typeof hb !== "object" || Array.isArray(hb)) throw new UnauthorizedException("Invalid heartbeat payload");
     const node = await this.nodes.authenticateAgent(nodeId, token);
     return this.nodes.heartbeat(node, hb as never);
   }
