@@ -149,7 +149,7 @@ export class BackupsService {
           return fileId;
         }
         const range = String(response.headers.range ?? "");
-        const match = /^bytes=0-(\\d+)$/.exec(range);
+        const match = /^bytes=0-(\d+)$/.exec(range);
         offset = match ? Number(match[1]) + 1 : 0;
         if (offset > archive.length) throw new BadRequestException("Google Drive returned an invalid upload offset");
         attempts = 0;
@@ -171,7 +171,7 @@ export class BackupsService {
           if (fileId && Number(status.data?.size) === archive.length) return fileId;
           throw new BadRequestException("Google Drive returned an unexpected upload completion response");
         }
-        const match = /^bytes=0-(\\d+)$/.exec(String(status.headers.range ?? ""));
+        const match = /^bytes=0-(\d+)$/.exec(String(status.headers.range ?? ""));
         offset = match ? Number(match[1]) + 1 : 0;
       }
     }
