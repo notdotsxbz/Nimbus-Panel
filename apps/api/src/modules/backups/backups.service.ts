@@ -62,6 +62,7 @@ export class BackupsService {
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           archive,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
+          user.role === "customer" ? user.id : undefined,
         );
       }
       backup.status = "completed";
@@ -101,8 +102,11 @@ export class BackupsService {
   }
 
   /** Google Drive resumable upload. Drive requires chunks in multiples of 256 KiB. */
-  private async uploadGoogleDriveArchive(archive: Buffer, filename: string): Promise<string> {
-    const token = await this.integrations.googleDriveAccessToken();
+  private async uploadGoogleDriveArchive(archive: Buffer, filename: string, customerId?: string): Promise<string> {
+    const getToken = () => customerId
+      ? this.integrations.customerGoogleDriveAccessToken(customerId)
+      : this.integrations.googleDriveAccessToken();
+    const token = await getToken();
     const initiation = await axios.post(
       "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size",
       { name: filename, mimeType: "application/octet-stream" },
@@ -129,7 +133,7 @@ export class BackupsService {
       try {
         const response = await axios.put(session, chunk, {
           headers: {
-            authorization: `Bearer ${await this.integrations.googleDriveAccessToken()}`,
+            authorization: `Bearer ${await getToken()}`,
             "content-type": "application/octet-stream",
             "content-length": String(chunk.length),
             "content-range": archive.length
@@ -159,7 +163,7 @@ export class BackupsService {
         await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * 2 ** attempts, 15_000)));
         const status = await axios.put(session, Buffer.alloc(0), {
           headers: {
-            authorization: `Bearer ${await this.integrations.googleDriveAccessToken()}`,
+            authorization: `Bearer ${await getToken()}`,
             "content-length": "0",
             "content-range": `bytes */${archive.length}`,
           },
