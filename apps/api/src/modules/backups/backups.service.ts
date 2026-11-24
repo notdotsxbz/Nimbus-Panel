@@ -637,7 +637,12 @@ export class BackupsService {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
     const service = await this.services.get(backup.serviceId.toString(), user);
-    if (user.role === "customer" && backup.driveOwnerType !== "customer") throw new NotFoundException("Backup not found");
+    // Enforce the same Drive-owner boundary for deletion as for listing,
+    // downloading and restoring. Staff must not use a service backup ID to
+    // delete a customer's personal Drive copy.
+    if (backup.driveOwnerType !== (user.role === "customer" ? "customer" : "admin")) {
+      throw new NotFoundException("Backup not found");
+    }
 
     if (backup.destination === "gdrive" && backup.remoteFileId) {
       const driveOwner = backup.driveOwnerType === "customer"
