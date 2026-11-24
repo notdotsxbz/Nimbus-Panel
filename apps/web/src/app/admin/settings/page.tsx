@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { GlassCard, Modal, useToast } from "@/components/glass";
 
 type FirebaseStatus = { connected: boolean; projectId: string | null; webConfigured?: boolean; connectedAt: string | null };
-type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; reconnectRequired?: boolean };
+type ConnectionStatus = { connected: boolean; zoneId?: string | null; connectedAt: string | null; reconnectRequired?: boolean; accountEmail?: string | null };
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -108,6 +108,26 @@ export default function AdminSettings() {
     } catch (error) { show(error instanceof Error ? error.message : "Could not start Google connection", "err"); setBusy(false); }
   };
 
+  const testDrive = async () => {
+    setBusy(true);
+    try {
+      const result = await api.post<{ connected: boolean; accountEmail?: string | null }>("/integrations/google-drive/test");
+      show(`Admin Google Drive verified${result.accountEmail ? ` as ${result.accountEmail}` : ""}`, "ok");
+    } catch (error) { show(error instanceof Error ? error.message : "Google Drive test failed", "err"); }
+    finally { setBusy(false); }
+  };
+
+  const openDriveFolder = async () => {
+    const tab = window.open("about:blank", "_blank");
+    setBusy(true);
+    try {
+      const result = await api.get<{ url: string }>("/backups/drive-folder");
+      if (tab) tab.location.href = result.url;
+      else show("Allow pop-ups to open your Google Drive folder", "err");
+    } catch (error) { tab?.close(); show(error instanceof Error ? error.message : "Could not open backup folder", "err"); }
+    finally { setBusy(false); }
+  };
+
   const disconnectDrive = async () => {
     if (!window.confirm("Disconnect Google Drive? New Drive backups will no longer upload.")) return;
     setBusy(true);
@@ -127,7 +147,7 @@ export default function AdminSettings() {
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Firebase Authentication</h2>
             <span className={`rounded-full px-2.5 py-1 text-xs ${firebase.connected && firebase.webConfigured ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>
-              {firebase.connected && firebase.webConfigured ? "Connected for all owners" : "Setup required"}
+              {firebase.connected && firebase.webConfigured ? "Admin Drive connected" : "Setup required"}
             </span>
           </div>
           <p className="mt-2 text-sm text-muted">Shared Firebase Authentication for every owner account on this Nimbus installation. One owner connects it once; all other owners can see the same connection status and use the same project. Customer registration and Google sign-in use this shared project.</p>
@@ -154,12 +174,15 @@ export default function AdminSettings() {
         <GlassCard className="p-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Google Drive Backups</h2>
-            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Connected for all owners" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
+            <span className={`rounded-full px-2.5 py-1 text-xs ${drive.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-white/10 text-muted"}`}>{drive.connected ? "Admin Drive connected" : drive.reconnectRequired ? "Reconnect required" : "Not connected"}</span>
           </div>
-          <p className="mt-2 text-sm text-muted">One shared Google Drive connection is used by backups for every owner account. Nimbus verifies backup checksums before upload.</p>
+          <p className="mt-2 text-sm text-muted">This separate Admin Google Drive is used for Admin backup operations. Customer accounts connect their own Drive with individual encrypted tokens. In Google Cloud Console, authorize both redirect URIs: https://panel.qubixhost.cyou/admin/settings and https://panel.qubixhost.cyou/dashboard/backups. Nimbus encrypts archives and verifies uploads.</p>
           {drive.reconnectRequired ? <p className="mt-2 text-sm text-amber-400">The saved Google authorization could not be refreshed. Reconnect Google Drive.</p> : null}
-          <div className="mt-4 flex gap-2">
+          {drive.accountEmail ? <p className="mt-2 text-xs text-muted">Admin account: {drive.accountEmail}</p> : null}
+          <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn-primary" onClick={() => setDriveOpen(true)}>{drive.connected ? "Reconnect Google Drive" : "Connect Google Drive"}</button>
+            {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void testDrive()}>Test Connection</button> : null}
+            {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void openDriveFolder()}>Open Backup Folder</button> : null}
             {drive.connected ? <button className="btn-ghost" disabled={busy} onClick={() => void disconnectDrive()}>Disconnect</button> : null}
           </div>
         </GlassCard>

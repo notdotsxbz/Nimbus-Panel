@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -31,6 +33,7 @@ func NewAgentServer(cfg *Config) *AgentServer {
 	s.mux = http.NewServeMux()
 	s.mux.Handle("/services/", s.auth(http.HandlerFunc(s.handleService)))
 	s.mux.Handle("/backups/", s.auth(http.HandlerFunc(s.handleBackup)))
+	s.mux.Handle("/backups/upload", s.auth(http.HandlerFunc(s.handleBackupUpload)))
 	s.mux.Handle("/files/", s.auth(http.HandlerFunc(handleFiles(s))))
 	s.mux.Handle("/logs/", s.auth(http.HandlerFunc(handleLogs(s))))
 	s.mux.Handle("/exec/", s.auth(http.HandlerFunc(handleExec(s))))
@@ -97,7 +100,7 @@ func minecraftLogHasVersion(logs, expected string) bool {
 func versionOutputHasExpected(output, expected string) bool {
 	expected = strings.TrimSpace(strings.TrimPrefix(expected, "v"))
 	if expected == "" || len(expected) > 100 { return false }
-	pattern := regexp.MustCompile(`(?i)(?:^|[^0-9])v?` + regexp.QuoteMeta(expected) + `(?:$|[^0-9])`)
+	pattern := regexp.MustCompile(`(?i)(^|[^0-9])v?` + regexp.QuoteMeta(expected) + `($|[^0-9])`)
 	return pattern.MatchString(output)
 }
 
@@ -337,49 +340,56 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleBackup creates tar+sha256 snapshots and staged restores.
+// handleBackup creates, downloads, deletes and safely restores service archives.
 func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 	op := strings.TrimPrefix(r.URL.Path, "/backups/")
-	var req struct {
-		ServiceID string `json:"serviceId"`
-		BackupID  string `json:"backupId"`
+	var request map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid backup request", http.StatusBadRequest)
+		return
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	dir, err := s.servicePath(req.ServiceID)
+	serviceID := request["serviceId"]
+	backupID := request["backupId"]
+	expectedChecksum := request["checksum"]
+	validServiceID := regexp.MustCompile("^[a-f0-9]{24}$").MatchString(serviceID)
+	validBackupID := regexp.MustCompile("^[a-f0-9]{24}$").MatchString(backupID)
+	safetyBackupID := regexp.MustCompile("^pre-restore-[a-f0-9]{24}-[0-9]+$").MatchString(backupID)
+	if !validServiceID || (!validBackupID && !safetyBackupID) ||
+		(safetyBackupID && op != "download" && op != "delete") {
+		http.Error(w, "invalid service or backup id", http.StatusBadRequest)
+		return
+	}
+	dir, err := s.servicePath(serviceID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	backupDir := filepath.Join(s.cfg.DataDir, "backups")
-	_ = os.MkdirAll(backupDir, 0o750)
-	target := filepath.Join(backupDir, req.BackupID+".tar.zst")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		http.Error(w, "could not prepare backup directory", http.StatusInternalServerError)
+		return
+	}
+	target := filepath.Join(backupDir, backupID+".tar")
 
 	switch op {
 	case "create":
-		out, err := os.Create(target)
+		if _, err := os.Stat(target); err == nil {
+			http.Error(w, "backup id already exists", http.StatusConflict)
+			return
+		}
+		if err := createTarArchive(dir, target); err != nil {
+			_ = os.Remove(target)
+			http.Error(w, "could not create service archive: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		checksum, size, err := checksumFile(target)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			_ = os.Remove(target)
+			http.Error(w, "could not verify service archive", http.StatusInternalServerError)
 			return
 		}
-		tar := command("tar", "-cf", "-", "-C", dir, ".")
-		tar.Stdout = out
-		if err := tar.Run(); err != nil {
-			out.Close()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		out.Close()
-		sum, size, err := checksumFile(target)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, map[string]any{"checksum": sum, "sizeBytes": size})
+		writeJSON(w, map[string]any{"checksum": checksum, "sizeBytes": size})
 	case "download":
-		if req.BackupID == "" || strings.ContainsAny(req.BackupID, "/\\\\") || strings.Contains(req.BackupID, "..") {
-			http.Error(w, "invalid backup id", http.StatusBadRequest)
-			return
-		}
 		in, err := os.Open(target)
 		if err != nil {
 			http.Error(w, "backup archive not found", http.StatusNotFound)
@@ -393,28 +403,271 @@ func (s *AgentServer) handleBackup(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-		w.Header().Set("Content-Disposition", "attachment; filename="+req.BackupID+".tar.zst")
-		_, _ = io.Copy(w, in)
+		w.Header().Set("Content-Disposition", "attachment; filename="+backupID+".tar")
+		if _, err := io.Copy(w, in); err != nil {
+			return
+		}
+	case "delete":
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			http.Error(w, "could not delete backup archive", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"deleted": true})
 	case "restore":
-		// Stage into a sibling directory; the control plane flips the symlink
-		// only after checksum verification — never silently overwrites data.
-		staging := dir + ".restore-staging"
-		if err := os.RemoveAll(staging); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if expectedChecksum == "" {
+			http.Error(w, "restore checksum is required", http.StatusBadRequest)
 			return
 		}
+		actualChecksum, _, err := checksumFile(target)
+		if err != nil {
+			http.Error(w, "backup archive not found", http.StatusNotFound)
+			return
+		}
+		if actualChecksum != expectedChecksum {
+			http.Error(w, "backup archive checksum mismatch", http.StatusBadRequest)
+			return
+		}
+
+		containerName := "nimbus-" + serviceID
+		wasRunning := false
+		if output, inspectErr := docker("inspect", "--format", "{{.State.Running}}", containerName); inspectErr == nil {
+			wasRunning = strings.TrimSpace(output) == "true"
+		} else if !strings.Contains(strings.ToLower(output), "no such object") {
+			http.Error(w, "could not inspect service container: "+strings.TrimSpace(output), http.StatusInternalServerError)
+			return
+		}
+		startOriginal := func() {
+			if wasRunning {
+				_, _ = docker("start", containerName)
+			}
+		}
+		if wasRunning {
+			if _, err := docker("stop", containerName); err != nil {
+				http.Error(w, "could not stop service before restore", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		safetyID := fmt.Sprintf("pre-restore-%s-%d", backupID, time.Now().UnixNano())
+		safetyPath := filepath.Join(backupDir, safetyID+".tar")
+		if err := createTarArchive(dir, safetyPath); err != nil {
+			startOriginal()
+			http.Error(w, "could not create pre-restore safety snapshot", http.StatusInternalServerError)
+			return
+		}
+		safetyChecksum, safetySize, err := checksumFile(safetyPath)
+		if err != nil {
+			startOriginal()
+			http.Error(w, "could not verify pre-restore safety snapshot", http.StatusInternalServerError)
+			return
+		}
+
+		staging := dir + ".restore-staging-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		if err := os.MkdirAll(staging, 0o750); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			startOriginal()
+			http.Error(w, "could not create restore staging directory", http.StatusInternalServerError)
 			return
 		}
-		if err := run("tar", "-xf", target, "-C", staging); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if err := extractTarSafely(target, staging); err != nil {
+			_ = os.RemoveAll(staging)
+			startOriginal()
+			http.Error(w, "backup archive could not be safely extracted: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, map[string]any{"staged": staging})
+
+		rollbackDir := dir + ".restore-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err := os.Rename(dir, rollbackDir); err != nil {
+			_ = os.RemoveAll(staging)
+			startOriginal()
+			http.Error(w, "could not preserve current service data for rollback", http.StatusInternalServerError)
+			return
+		}
+		if err := os.Rename(staging, dir); err != nil {
+			_ = os.Rename(rollbackDir, dir)
+			startOriginal()
+			http.Error(w, "could not install restored service data", http.StatusInternalServerError)
+			return
+		}
+		if wasRunning {
+			if _, err := docker("start", containerName); err != nil {
+				_ = os.RemoveAll(dir)
+				_ = os.Rename(rollbackDir, dir)
+				startOriginal()
+				http.Error(w, "restored service did not start; previous data was rolled back", http.StatusInternalServerError)
+				return
+			}
+			state, err := docker("inspect", "--format", "{{.State.Running}}", containerName)
+			if err != nil || strings.TrimSpace(state) != "true" {
+				_, _ = docker("stop", containerName)
+				_ = os.RemoveAll(dir)
+				_ = os.Rename(rollbackDir, dir)
+				startOriginal()
+				http.Error(w, "restored service failed running verification; previous data was rolled back", http.StatusInternalServerError)
+				return
+			}
+		}
+		_ = os.RemoveAll(rollbackDir)
+		writeJSON(w, map[string]any{
+			"status": "restored",
+			"running": wasRunning,
+			"safetyBackupId": safetyID,
+			"safetyBackupChecksum": safetyChecksum,
+			"safetyBackupSizeBytes": safetySize,
+		})
 	default:
 		http.Error(w, "unknown operation", http.StatusNotFound)
 	}
+}
+
+// handleBackupUpload streams a verified archive from the control plane to this node.
+func (s *AgentServer) handleBackupUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	query := r.URL.Query()
+	serviceID := query.Get("serviceId")
+	backupID := query.Get("backupId")
+	expectedChecksum := query.Get("checksum")
+	expectedSize, sizeErr := strconv.ParseInt(query.Get("sizeBytes"), 10, 64)
+	if !regexp.MustCompile("^[a-f0-9]{24}$").MatchString(serviceID) ||
+		!regexp.MustCompile("^[a-f0-9]{24}$").MatchString(backupID) ||
+		expectedChecksum == "" || sizeErr != nil || expectedSize <= 0 || expectedSize > (1<<40) {
+		http.Error(w, "invalid backup upload metadata", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.servicePath(serviceID); err != nil {
+		http.Error(w, "invalid service id", http.StatusBadRequest)
+		return
+	}
+	backupDir := filepath.Join(s.cfg.DataDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		http.Error(w, "could not prepare backup directory", http.StatusInternalServerError)
+		return
+	}
+	target := filepath.Join(backupDir, backupID+".tar")
+	if existingChecksum, existingSize, err := checksumFile(target); err == nil {
+		if existingChecksum == expectedChecksum && existingSize == expectedSize {
+			writeJSON(w, map[string]any{"uploaded": true, "alreadyPresent": true, "sizeBytes": existingSize, "checksum": existingChecksum})
+			return
+		}
+		http.Error(w, "a different archive already exists for this backup id", http.StatusConflict)
+		return
+	}
+	temp, err := os.CreateTemp(backupDir, backupID+".upload-*.tmp")
+	if err != nil {
+		http.Error(w, "could not create upload staging file", http.StatusInternalServerError)
+		return
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	hash := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(temp, hash), http.MaxBytesReader(w, r.Body, expectedSize+1))
+	if copyErr != nil {
+		_ = temp.Close()
+		http.Error(w, "backup upload stream failed", http.StatusBadRequest)
+		return
+	}
+	if size != expectedSize || base64.StdEncoding.EncodeToString(hash.Sum(nil)) != expectedChecksum {
+		_ = temp.Close()
+		http.Error(w, "backup upload size or checksum mismatch", http.StatusBadRequest)
+		return
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		http.Error(w, "could not sync uploaded archive", http.StatusInternalServerError)
+		return
+	}
+	if err := temp.Close(); err != nil {
+		http.Error(w, "could not close uploaded archive", http.StatusInternalServerError)
+		return
+	}
+	if err := os.Link(tempPath, target); err != nil {
+		if existingChecksum, existingSize, checkErr := checksumFile(target); checkErr == nil &&
+			existingChecksum == expectedChecksum && existingSize == expectedSize {
+			writeJSON(w, map[string]any{"uploaded": true, "alreadyPresent": true, "sizeBytes": existingSize, "checksum": existingChecksum})
+			return
+		}
+		http.Error(w, "could not atomically install uploaded archive", http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]any{"uploaded": true, "sizeBytes": size, "checksum": expectedChecksum})
+}
+
+func createTarArchive(sourceDir, archivePath string) error {
+	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(archivePath)
+		return err
+	}
+	output, err := exec.Command("tar", "-cf", archivePath, "-C", sourceDir, ".").CombinedOutput()
+	if err != nil {
+		_ = os.Remove(archivePath)
+		return fmt.Errorf("tar failed: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func extractTarSafely(archivePath, destination string) error {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	reader := tar.NewReader(file)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		name := filepath.Clean(filepath.FromSlash(header.Name))
+		if name == "." {
+			continue
+		}
+		if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("archive contains an unsafe path")
+		}
+		target := filepath.Join(destination, name)
+		relative, err := filepath.Rel(destination, target)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("archive path escapes the restore directory")
+		}
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o750); err != nil {
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+				return err
+			}
+			mode := os.FileMode(header.Mode) & 0o750
+			if mode == 0 {
+				mode = 0o600
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.Copy(out, reader)
+			closeErr := out.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		default:
+			return fmt.Errorf("archive contains unsupported links or special files")
+		}
+	}
+	return nil
 }
 
 // docker executes ONLY whitelisted docker subcommands — never arbitrary shell.
@@ -429,12 +682,17 @@ func run(name string, args ...string) error {
 }
 
 func checksumFile(path string) (string, int64, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return "", 0, err
 	}
-	sum := sha256.Sum256(data)
-	return base64.StdEncoding.EncodeToString(sum[:]), int64(len(data)), nil
+	defer file.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, file)
+	if err != nil {
+		return "", 0, err
+	}
+	return base64.StdEncoding.EncodeToString(hash.Sum(nil)), size, nil
 }
 
 func reply(w http.ResponseWriter, err error, payload map[string]string) {

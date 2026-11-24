@@ -3,11 +3,11 @@ import { Roles, CurrentUser, type AuthUser } from "../../common/auth.decorators"
 import { IntegrationsService } from "./integrations.service";
 
 @Controller("integrations")
-@Roles("owner", "admin")
 export class IntegrationsController {
   constructor(private readonly integrations: IntegrationsService) {}
 
   @Get("firebase")
+  @Roles("owner", "admin")
   status() {
     return this.integrations.firebaseStatus();
   }
@@ -18,8 +18,8 @@ export class IntegrationsController {
     return this.integrations.connectFirebase(dto.serviceAccountJson, user.id, dto.webConfig);
   }
 
-
   @Get("cloudflare")
+  @Roles("owner", "admin")
   cloudflareStatus() {
     return this.integrations.cloudflareStatus();
   }
@@ -36,27 +36,31 @@ export class IntegrationsController {
     return this.integrations.disconnectCloudflare(user.id);
   }
 
+  // Google Drive is intentionally available to customers as well as staff.
+  // The service scopes every connection and OAuth state to the signed-in user.
   @Get("google-drive")
-  googleDriveStatus() {
-    return this.integrations.googleDriveStatus();
+  googleDriveStatus(@CurrentUser() user: AuthUser) {
+    return this.integrations.googleDriveStatus(user);
   }
 
   @Post("google-drive/connect")
-  @Roles("owner")
-  beginGoogleDriveConnect(@Body() dto: { clientId: string; clientSecret: string }, @CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
-    return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user.id, origin);
+  beginGoogleDriveConnect(@Body() dto: { clientId?: string; clientSecret?: string }, @CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
+    return this.integrations.beginGoogleDriveConnect(dto.clientId, dto.clientSecret, user, origin);
   }
 
   @Post("google-drive/exchange")
-  @Roles("owner")
-  exchangeGoogleDriveCode(@Body() dto: { code: string; state: string }) {
-    return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state);
+  exchangeGoogleDriveCode(@Body() dto: { code: string; state: string }, @CurrentUser() user: AuthUser) {
+    return this.integrations.exchangeGoogleDriveCode(dto.code, dto.state, user);
+  }
+
+  @Post("google-drive/test")
+  testGoogleDriveConnection(@CurrentUser() user: AuthUser) {
+    return this.integrations.testGoogleDriveConnection(user);
   }
 
   @Delete("google-drive")
-  @Roles("owner")
   disconnectGoogleDrive(@CurrentUser() user: AuthUser) {
-    return this.integrations.disconnectGoogleDrive(user.id);
+    return this.integrations.disconnectGoogleDrive(user);
   }
 
   @Delete("firebase")

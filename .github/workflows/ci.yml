@@ -120,6 +120,8 @@ jobs:
         run: |
           npm run build --workspace @nimbus/shared
           npm run build --workspace @nimbus/api
+      - name: Backup ownership authorization regression tests
+        run: node tests/backup-authorization.mjs
       - name: Boot API and run smoke tests
         run: |
           node apps/api/dist/main.js &

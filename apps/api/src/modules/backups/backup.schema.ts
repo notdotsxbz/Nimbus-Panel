@@ -6,14 +6,26 @@ import type { BackupDestination, BackupStatus } from "@nimbus/shared";
 export class Backup {
   @Prop({ type: Types.ObjectId, ref: "Service", required: true, index: true })
   serviceId!: Types.ObjectId;
+  // Denormalized owner for auditable customer isolation; optional for legacy records.
+  @Prop({ type: Types.ObjectId, ref: "User", index: true })
+  ownerId?: Types.ObjectId;
+  @Prop({ enum: ["customer", "admin"], index: true })
+  driveOwnerType?: "customer" | "admin";
   @Prop({ enum: ["gdrive", "s3", "local"], required: true }) destination!: BackupDestination;
   @Prop({ enum: ["pending", "running", "completed", "failed"], default: "pending" })
   status!: BackupStatus;
-  @Prop() sizeBytes?: number;
-  @Prop() checksum?: string; // sha256 integrity verification
+  @Prop({ default: 0 }) progress!: number;
+  @Prop() currentStep?: string;
+  @Prop() sizeBytes?: number; // plaintext archive size
+  @Prop() storedSizeBytes?: number; // encrypted archive size in Google Drive
+  @Prop() checksum?: string; // plaintext SHA-256 integrity verification
+  @Prop({ enum: ["aes-256-gcm"] }) encryptionAlgorithm?: "aes-256-gcm";
+  @Prop() encryptionIv?: string;
+  @Prop() encryptionTag?: string;
+  @Prop({ default: false }) localArchiveCleanupPending?: boolean;
   @Prop() remoteFileId?: string;
   @Prop({ type: Types.ObjectId, ref: "User" }) createdBy?: Types.ObjectId;
-  @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall"], default: "manual" })
+  @Prop({ enum: ["manual", "scheduled", "pre-update", "pre-reinstall", "pre-restore-safety"], default: "manual" })
   trigger!: string;
   @Prop() error?: string;
   @Prop() completedAt?: Date;

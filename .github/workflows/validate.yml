@@ -1,0 +1,54 @@
+name: Validate Nimbus changes
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  node-agent:
+    name: Node Agent tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: apps/node-agent/go.sum
+      - name: Run Go tests
+        working-directory: apps/node-agent
+        run: go test ./...
+      - name: Run Go vet
+        working-directory: apps/node-agent
+        run: go vet ./...
+
+  api:
+    name: API build and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build --workspace @nimbus/shared
+      - run: npm run build --workspace @nimbus/api
+      - run: npm run typecheck --workspace @nimbus/api
+
+  web:
+    name: Web production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build --workspace @nimbus/shared
+      - run: NEXT_PUBLIC_API_URL=https://panel.example.invalid npm run build --workspace @nimbus/web
