@@ -40,6 +40,17 @@ export class BackupsController {
     return this.backups.create(dto.serviceId, user, dto.trigger ?? "manual", dto.destination ?? "gdrive");
   }
 
+  @Post("selected")
+  createSelected(@CurrentUser() user: AuthUser, @Body() dto: { serviceIds: string[]; destination?: string }) {
+    return this.backups.createSelected(dto?.serviceIds, user, dto?.destination ?? "local");
+  }
+
+  @Post("selected/restore")
+  restoreSelected(@CurrentUser() user: AuthUser, @Body() dto: { backupIds: string[]; confirm?: boolean }) {
+    if (dto?.confirm !== true) throw new BadRequestException("Explicit restore confirmation is required");
+    return this.backups.restoreSelected(dto.backupIds, user);
+  }
+
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser, @Body() dto: { confirm?: boolean }) {
     if (dto?.confirm !== true) throw new BadRequestException("Explicit restore confirmation is required");
