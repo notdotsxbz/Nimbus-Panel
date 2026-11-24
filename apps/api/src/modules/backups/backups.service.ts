@@ -81,6 +81,45 @@ export class BackupsService {
     return backup;
   }
 
+  /** Selectively back up services the actor is permitted to access. */
+  async createSelected(serviceIds: string[], user: { id: string; role: string }, destination = "local") {
+    if (!Array.isArray(serviceIds) || serviceIds.length === 0 || serviceIds.length > 25 ||
+        new Set(serviceIds).size !== serviceIds.length ||
+        serviceIds.some((id) => !Types.ObjectId.isValid(id))) {
+      throw new BadRequestException("Select between 1 and 25 distinct valid service IDs");
+    }
+    if (!["local", "gdrive"].includes(destination)) throw new BadRequestException("Unsupported backup destination");
+    // Validate the entire selection before performing any backup operation.
+    await Promise.all(serviceIds.map((id) => this.services.get(id, user as never)));
+    const results = [];
+    for (const serviceId of serviceIds) {
+      results.push(await this.create(serviceId, user, "manual", destination));
+    }
+    return { results };
+  }
+
+  /** Restore selected local backups after checking every service's ownership first. */
+  async restoreSelected(backupIds: string[], user: { id: string; role: string }) {
+    if (!Array.isArray(backupIds) || backupIds.length === 0 || backupIds.length > 25 ||
+        new Set(backupIds).size !== backupIds.length ||
+        backupIds.some((id) => !Types.ObjectId.isValid(id))) {
+      throw new BadRequestException("Select between 1 and 25 distinct valid backup IDs");
+    }
+    const backups = await this.backups.find({ _id: { $in: backupIds.map((id) => new Types.ObjectId(id)) } });
+    if (backups.length !== backupIds.length) throw new NotFoundException("One or more backups were not found");
+    for (const backup of backups) {
+      await this.services.get(backup.serviceId.toString(), user as never);
+      if (backup.status !== "completed" || backup.destination !== "local") {
+        throw new BadRequestException("All selected backups must be completed local backups");
+      }
+    }
+    const results = [];
+    for (const backupId of backupIds) {
+      results.push({ backupId, result: await this.restore(backupId, user) });
+    }
+    return { results };
+  }
+
   /** Restore into a staging dir — data is swapped only after verification. */
   async restore(backupId: string, user: { id: string; role: string }) {
     const backup = await this.backups.findById(backupId);
