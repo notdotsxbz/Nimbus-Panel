@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { CurrentUser, type AuthUser } from "../../common/auth.decorators";
 import { BackupsService } from "./backups.service";
 import { IntegrationsService } from "../integrations/integrations.service";
@@ -41,7 +41,8 @@ export class BackupsController {
   }
 
   @Post(":id/restore")
-  restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+  restore(@Param("id") id: string, @CurrentUser() user: AuthUser, @Body() dto: { confirm?: boolean }) {
+    if (dto?.confirm !== true) throw new BadRequestException("Explicit restore confirmation is required");
     return this.backups.restore(id, user);
   }
 
