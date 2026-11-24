@@ -266,6 +266,102 @@ export class IntegrationsService implements OnModuleInit {
     return result.access_token;
   }
 
+
+  /** Customer Drive connections use the panel's OAuth application, never the admin refresh token. */
+  async customerGoogleDriveStatus(userId: string) {
+    const doc = await this.settings.findOne({ key: "customer-google-drive:" + userId }).select("connectedAt").lean();
+    return { connected: Boolean(doc), connectedAt: doc?.connectedAt ?? null };
+  }
+
+  async beginCustomerGoogleDriveConnect(userId: string) {
+    const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
+    if (!configDoc) throw new BadRequestException("An administrator must configure the Google OAuth application first");
+    const { clientId } = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string };
+    const redirectUri = new URL("/backups", env.webUrl).toString();
+    if (!redirectUri.startsWith("https://") && !redirectUri.startsWith("http://localhost:")) {
+      throw new BadRequestException("Google Drive requires a secure panel URL");
+    }
+    const state = randomBytes(24).toString("hex");
+    await this.settings.create({
+      key: "customer-google-oauth-state:" + state,
+      encryptedValue: this.encrypt(JSON.stringify({ userId, redirectUri })),
+      connectedAt: new Date(),
+    });
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "https://www.googleapis.com/auth/drive.file",
+      access_type: "offline",
+      prompt: "consent",
+      state,
+    });
+    return { url: "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString(), redirectUri };
+  }
+
+  async exchangeCustomerGoogleDriveCode(userId: string, code: string, state: string) {
+    if (!code || !/^[a-f0-9]{48}$/.test(state)) throw new BadRequestException("Invalid Google OAuth callback");
+    const key = "customer-google-oauth-state:" + state;
+    const pending = await this.settings.findOneAndDelete({ key });
+    if (!pending || !pending.connectedAt || Date.now() - pending.connectedAt.getTime() > 600_000) {
+      throw new BadRequestException("Google OAuth request expired");
+    }
+    const data = JSON.parse(this.decrypt(pending.encryptedValue)) as { userId: string; redirectUri: string };
+    if (data.userId !== userId) throw new BadRequestException("OAuth state does not belong to this user");
+    const configDoc = await this.settings.findOne({ key: "google-oauth-config" });
+    if (!configDoc) throw new BadRequestException("Google OAuth is not configured");
+    const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: data.redirectUri,
+      }),
+    });
+    const result = await response.json() as { refresh_token?: string; error_description?: string; error?: string };
+    if (!response.ok || !result.refresh_token) {
+      throw new BadRequestException(result.error_description ?? result.error ?? "Google did not issue a refresh token; reconnect with consent");
+    }
+    await this.settings.findOneAndUpdate(
+      { key: "customer-google-drive:" + userId },
+      { $set: { encryptedValue: this.encrypt(JSON.stringify({ refreshToken: result.refresh_token })), connectedAt: new Date(), updatedBy: userId } },
+      { upsert: true },
+    );
+    return { connected: true };
+  }
+
+  async customerGoogleDriveAccessToken(userId: string): Promise<string> {
+    const [tokenDoc, configDoc] = await Promise.all([
+      this.settings.findOne({ key: "customer-google-drive:" + userId }),
+      this.settings.findOne({ key: "google-oauth-config" }),
+    ]);
+    if (!tokenDoc || !configDoc) throw new BadRequestException("Connect your own Google Drive first");
+    const { refreshToken } = JSON.parse(this.decrypt(tokenDoc.encryptedValue)) as { refreshToken: string };
+    const config = JSON.parse(this.decrypt(configDoc.encryptedValue)) as { clientId: string; clientSecret: string };
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+    const data = await response.json() as { access_token?: string; error_description?: string; error?: string };
+    if (!response.ok || !data.access_token) throw new BadRequestException(data.error_description ?? data.error ?? "Reconnect your Google Drive");
+    return data.access_token;
+  }
+
+  async disconnectCustomerGoogleDrive(userId: string) {
+    await this.settings.deleteOne({ key: "customer-google-drive:" + userId });
+    return { connected: false };
+  }
+
   async disconnectGoogleDrive(actorId: string) {
     await this.settings.deleteMany({ key: { $in: ["google-drive", "google-oauth-config"] } });
     await this.settings.deleteMany({ key: { $regex: "^google-oauth-state:" } });
