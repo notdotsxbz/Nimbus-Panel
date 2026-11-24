@@ -280,6 +280,7 @@ export class NodesService {
       architecture?: string;
     },
   ) {
+    if (!hb || typeof hb !== "object") throw new BadRequestException("Heartbeat payload is required");
     node.online = true;
     node.lastHeartbeatAt = new Date();
     if (typeof hb.os === "string" && /^[a-z0-9._-]{1,64}$/i.test(hb.os)) node.detectedOs = hb.os.toLowerCase();
