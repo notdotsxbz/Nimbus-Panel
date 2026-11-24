@@ -38,6 +38,7 @@ export class BackupsService {
   }
 
   async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local") {
+    if (!["local", "gdrive"].includes(destination)) throw new BadRequestException("Unsupported backup destination");
     const service = await this.services.get(serviceId, user as never);
     const node = await this.nodes.get(service.nodeId.toString());
     const backup = await this.backups.create({
@@ -85,6 +86,11 @@ export class BackupsService {
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
+    // Remote archives are not currently downloaded back to the agent. Never
+    // silently restore a possibly unrelated local archive with the same ID.
+    if (backup.destination !== "local") {
+      throw new BadRequestException("Remote backup restoration is unavailable until verified archive retrieval is implemented");
+    }
     const node = await this.nodes.get(service.nodeId.toString());
     await this.nodes.agentCall(node, "/backups/restore", {
       serviceId: service._id!.toString(),
