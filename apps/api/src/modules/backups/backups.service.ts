@@ -26,9 +26,15 @@ export class BackupsService {
   ) {}
 
   async list(user: { id: string; role: string }, serviceId?: string) {
-    const filter: Record<string, unknown> = serviceId ? { serviceId } : {};
-    if (serviceId) await this.services.get(serviceId, user as never); // ownership check
-    return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
+    if (serviceId) {
+      const service = await this.services.get(serviceId, user as never);
+      return this.backups.find({ serviceId: service._id }).sort({ createdAt: -1 }).limit(100);
+    }
+    // Derive the allowed service IDs from the ownership-enforced service query.
+    // Never return all customers' backup metadata to a customer.
+    const visibleServices = await this.services.listFor(user as never);
+    const allowedIds = visibleServices.map((service) => service._id);
+    return this.backups.find({ serviceId: { $in: allowedIds } }).sort({ createdAt: -1 }).limit(100);
   }
 
   async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local") {
