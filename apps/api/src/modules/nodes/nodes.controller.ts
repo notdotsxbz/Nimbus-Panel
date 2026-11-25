@@ -21,12 +21,16 @@ import { NodesService } from "./nodes.service";
 export class NodesController {
   constructor(private readonly nodes: NodesService) {}
 
+  @SkipThrottle()
+  // Node management uses role authentication; shared reverse-proxy IP limits
+  // otherwise reject legitimate dashboard polling and edits with HTTP 429.
   @Get()
   @Roles("owner", "admin", "staff")
   list() {
     return this.nodes.list();
   }
 
+  @SkipThrottle()
   @Get("capacity")
   @Roles("owner", "admin", "staff")
   capacity() {
@@ -43,6 +47,7 @@ export class NodesController {
   }
 
   /** Edit node metadata/capacity. */
+  @SkipThrottle()
   @Patch(":id")
   @Roles("owner", "admin")
   update(
@@ -54,18 +59,21 @@ export class NodesController {
   }
 
   /** Cached heartbeat + staleness; marks the node offline when stale. */
+  @SkipThrottle()
   @Post(":id/refresh-health")
   @Roles("owner", "admin", "staff")
   refreshHealth(@Param("id") id: string) {
     return this.nodes.refreshHealth(id);
   }
 
+  @SkipThrottle()
   @Get(":id/workloads")
   @Roles("owner", "admin", "staff")
   workloads(@Param("id") id: string) {
     return this.nodes.workloads(id);
   }
 
+  @SkipThrottle()
   @Get(":id/allocations")
   @Roles("owner", "admin", "staff")
   allocations(@Param("id") id: string) {
@@ -73,6 +81,7 @@ export class NodesController {
   }
 
   /** Revoke the agent credential; node returns to enrolling with a new token. */
+  @SkipThrottle()
   @Post(":id/revoke-credentials")
   @Roles("owner", "admin")
   revokeCredentials(@Param("id") id: string, @CurrentUser() actor: AuthUser) {
@@ -83,6 +92,7 @@ export class NodesController {
    * Delete Node — mode: "safe" (empty nodes only) or "force"
    * (owner-only, re-authentication + exact node name).
    */
+  @SkipThrottle()
   @Delete(":id")
   @Roles("owner", "admin")
   remove(
@@ -93,6 +103,7 @@ export class NodesController {
     return this.nodes.removeNode(id, dto.mode === "force" ? "force" : "safe", actor, dto.confirmName, dto.password);
   }
 
+  @SkipThrottle()
   @Post(":id/maintenance")
   @Roles("owner", "admin")
   maintenance(
