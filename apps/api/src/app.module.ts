@@ -28,7 +28,7 @@ import { SoftwareModule } from "./modules/software/software.module";
     ThrottlerModule.forRoot([
       {
         ttl: parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? "60000", 10),
-        limit: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "100", 10),
+        limit: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "300", 10),
       },
     ]),
     AuthModule,
