@@ -71,6 +71,7 @@ export default function AdminNodes() {
   const [reauthPassword, setReauthPassword] = useState("");
   const [deleteInfo, setDeleteInfo] = useState<{ workloads: { name: string; type: string; status: string }[]; allocationsInUse: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
   const { show, node } = useToast();
   const [role, setRole] = useState<string>("customer");
 
@@ -118,7 +119,9 @@ export default function AdminNodes() {
 
   const create = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (creating) return;
     const f = new FormData(e.currentTarget);
+    setCreating(true);
     try {
       const res = await api.post<{ node: NodeRow; enrollmentToken: string }>("/nodes", {
         name: f.get("name"),
@@ -131,11 +134,16 @@ export default function AdminNodes() {
         ramTotalMb: Number(f.get("ramTotalMb")),
         diskTotalGb: Number(f.get("diskTotalGb")),
       });
+      // Show the saved node immediately, even if the subsequent list refresh fails.
+      setNodes((existing) => existing.some((n) => n._id === res.node._id) ? existing : [...existing, res.node]);
       setOpen(false);
       setEnroll({ name: res.node.name, token: res.enrollmentToken });
+      show("Node registered. Install the agent to bring it online.", "ok");
       void load();
     } catch (err) {
-      show(err instanceof Error ? err.message : "Failed to add node", "err");
+      show(err instanceof Error ? `Node creation failed: ${err.message}` : "Failed to add node", "err");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -282,19 +290,21 @@ export default function AdminNodes() {
       {/* Add node */}
       <Modal open={open} title="Add Node" onClose={() => setOpen(false)}>
         <form onSubmit={create} className="grid grid-cols-2 gap-4">
-          <div className="col-span-2"><label className="label" htmlFor="n-name">Name</label><input id="n-name" name="name" required className="input" /></div>
-          <div><label className="label" htmlFor="n-ip">IP address</label><input id="n-ip" name="ip" required className="input" placeholder="103.45.67.89" /></div>
-          <div><label className="label" htmlFor="n-sshport">SSH port</label><input id="n-sshport" name="sshPort" type="number" defaultValue={22} className="input" /></div>
-          <div><label className="label" htmlFor="n-sshuser">SSH user</label><input id="n-sshuser" name="sshUsername" defaultValue="root" className="input" /></div>
+          <p className="col-span-2 text-xs text-muted">Step 1 of 2: register your VPS. Step 2 will give you a one-time installation command. Use the public IP and real hardware specifications of the node VPS.</p>
+          <div className="col-span-2"><label className="label" htmlFor="n-name">Node name</label><input id="n-name" name="name" required className="input" placeholder="minecraft-1" /></div>
+          <div><label className="label" htmlFor="n-ip">IP address</label><input id="n-ip" name="ip" required className="input" placeholder="103.45.67.89" autoComplete="off" /></div>
+          <div><label className="label" htmlFor="n-sshport">SSH port</label><input id="n-sshport" name="sshPort" type="number" min={1} max={65535} defaultValue={22} required className="input" /></div>
+          <div><label className="label" htmlFor="n-sshuser">SSH user</label><input id="n-sshuser" name="sshUsername" defaultValue="ubuntu" required className="input" /></div>
           <div>
             <label className="label" htmlFor="n-os">Operating system</label>
             <select id="n-os" name="os" className="input"><option value="ubuntu">Ubuntu</option><option value="debian">Debian</option></select>
           </div>
           <div className="col-span-2"><label className="label" htmlFor="n-location">Location</label><input id="n-location" name="location" className="input" placeholder="Frankfurt, DE" /></div>
+          <p className="col-span-2 text-xs text-muted">On the node VPS, run <code>nproc</code> for CPU, <code>free -m</code> for RAM, and <code>df -BG /</code> for disk. These are capacity limits, not values to guess.</p>
           <div><label className="label" htmlFor="n-cpu">CPU cores</label><input id="n-cpu" name="cpuCores" type="number" min={1} required className="input" /></div>
           <div><label className="label" htmlFor="n-ram">RAM (MB)</label><input id="n-ram" name="ramTotalMb" type="number" min={1024} required className="input" /></div>
           <div><label className="label" htmlFor="n-disk">Disk (GB)</label><input id="n-disk" name="diskTotalGb" type="number" min={10} required className="input" /></div>
-          <div className="col-span-2"><button className="btn-primary w-full">Create & issue enrollment token</button></div>
+          <div className="col-span-2"><button type="submit" disabled={creating} className="btn-primary w-full disabled:opacity-50">{creating ? "Registering node…" : "Register node & get installation command"}</button></div>
         </form>
       </Modal>
 
@@ -302,7 +312,8 @@ export default function AdminNodes() {
       <Modal open={enroll !== null} title={`Enroll ${enroll?.name ?? ""}`} onClose={() => setEnroll(null)}>
         <p className="text-sm text-muted">Run this on the node (Ubuntu/Debian). The token is single-use and expires in 30 minutes.</p>
         <pre className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-black/60 p-4 font-mono text-xs leading-relaxed">{enrollCommand(enroll?.token ?? "", enroll?.forceReenroll === true)}</pre>
-        <button className="btn-ghost mt-4 w-full text-xs" onClick={() => void navigator.clipboard.writeText(enroll?.token ?? "")}>Copy token</button>
+        <p className="mt-3 text-xs text-muted">Run the command on the separate node VPS, not on the panel VPS. Keep this command private: it contains a single-use token.</p>
+        <button className="btn-ghost mt-4 w-full text-xs" onClick={() => void navigator.clipboard.writeText(enrollCommand(enroll?.token ?? "", enroll?.forceReenroll === true))}>Copy installation command</button>
       </Modal>
 
       {/* Node details */}
