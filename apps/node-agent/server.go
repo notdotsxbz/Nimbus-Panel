@@ -216,6 +216,19 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 	case "stop":
 		_, err := docker("stop", "--time", "30", "nimbus-"+serviceID)
 		reply(w, err, map[string]string{"status": "offline"})
+	case "delete":
+		// Remove only the service's named container. Keep /data for manual recovery.
+		// Never accept arbitrary Docker names or host paths from the request.
+		name := "nimbus-" + serviceID
+		if _, err := docker("inspect", name); err != nil {
+			http.Error(w, "service container not found; manual cleanup may be required", http.StatusNotFound)
+			return
+		}
+		if _, err := docker("rm", "-f", name); err != nil {
+			http.Error(w, "could not remove service container: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, map[string]any{"status": "deleted", "dataRetained": true})
 	case "restart":
 		_, err := docker("restart", "nimbus-"+serviceID)
 		reply(w, err, map[string]string{"status": "online"})
