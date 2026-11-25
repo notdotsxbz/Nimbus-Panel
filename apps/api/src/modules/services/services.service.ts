@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
 import type { PowerAction, ServiceStatus } from "@nimbus/shared";
@@ -30,7 +30,28 @@ export interface CreateServiceDto {
 }
 
 @Injectable()
-export class ServicesService {
+export class ServicesService implements OnModuleInit, OnModuleDestroy {
+  private expiryTimer?: ReturnType<typeof setInterval>;
+  private sweeping = false;
+
+  onModuleInit() {
+    void this.runExpirySweep();
+    this.expiryTimer = setInterval(() => { void this.runExpirySweep(); }, 60_000);
+    this.expiryTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.expiryTimer) clearInterval(this.expiryTimer);
+  }
+
+  private async runExpirySweep() {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try { await this.expireSweep(); }
+    catch (error) { console.error("Service expiry sweep failed", error); }
+    finally { this.sweeping = false; }
+  }
+
   constructor(
     @InjectModel(Service.name) private readonly services: Model<ServiceDocument>,
     @InjectModel(User.name) private readonly users: Model<UserDocument>,
