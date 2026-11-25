@@ -33,6 +33,9 @@ export class NodesController {
     return this.nodes.findCapacity(0, 0);
   }
 
+  // Node enrollment is an authenticated admin operation. Shared reverse-proxy IP
+  // rate limits must not block legitimate node registration.
+  @SkipThrottle()
   @Post()
   @Roles("owner", "admin")
   create(@Body() dto: Parameters<NodesService["create"]>[0], @CurrentUser() actor: AuthUser) {
