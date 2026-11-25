@@ -58,6 +58,7 @@ const GB = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 
 export default function AdminNodes() {
   const [nodes, setNodes] = useState<NodeRow[]>([]);
+  const [nodesLoadError, setNodesLoadError] = useState(false);
   const [open, setOpen] = useState(false);
   const [enroll, setEnroll] = useState<{ name: string; token: string; forceReenroll?: boolean } | null>(null);
   const [detail, setDetail] = useState<NodeRow | null>(null);
@@ -83,7 +84,9 @@ export default function AdminNodes() {
     try {
       const res = await api.get<{ items?: NodeRow[] } | NodeRow[]>("/nodes");
       setNodes(Array.isArray(res) ? res : res.items ?? []);
+      setNodesLoadError(false);
     } catch (err) {
+      setNodesLoadError(true);
       show(err instanceof Error ? err.message : "Failed to load nodes", "err");
     }
   }, [show]);
@@ -280,7 +283,8 @@ export default function AdminNodes() {
             </div>
           </GlassCard>
         ))}
-        {nodes.length === 0 ? (
+        {nodesLoadError ? <p className="text-sm text-red-400 md:col-span-2 xl:col-span-3">Could not refresh the node list. Your registered nodes may still exist. Try refreshing later.</p> : null}
+        {nodes.length === 0 && !nodesLoadError ? (
           <GlassCard className="p-10 text-center text-sm text-muted md:col-span-2 xl:col-span-3">
             No nodes yet. Add your first compute node to start hosting services.
           </GlassCard>
