@@ -117,6 +117,9 @@ export class ServicesService {
   /** Start / stop / restart / reinstall with state validation and real node confirmation. */
   async power(id: string, action: PowerAction, actor: AuthUser) {
     const service = await this.get(id, actor);
+    if (service.expiresAt && service.expiresAt.getTime() <= Date.now()) {
+      throw new ForbiddenException("Service allocation has expired");
+    }
     if (service.subscriptionStatus !== "active") {
       throw new ForbiddenException("Service is not active");
     }
@@ -166,14 +169,55 @@ export class ServicesService {
     return service;
   }
 
-  async suspend(id: string, actor: AuthUser) {
-    const service = await this.services.findByIdAndUpdate(
-      id,
-      { status: "suspended", subscriptionStatus: "suspended" },
-      { new: true },
-    );
-    await this.audit.log({ actorId: actor.id, action: "services.suspend", targetId: id, sensitive: true });
+  /** Time-limited allocations are validated server-side, not only in the UI. */
+  async setExpiry(id: string, days: number | null | undefined, actor: AuthUser) {
+    if (days !== null && (!Number.isInteger(days) || days === undefined || days < 1 || days > 3650)) {
+      throw new BadRequestException("Duration must be 1–3650 days, or null for unlimited");
+    }
+    const service = await this.get(id, actor);
+    service.expiresAt = days === null ? undefined : new Date(Date.now() + days! * 86_400_000);
+    if (service.subscriptionStatus === "expired" && (!service.expiresAt || service.expiresAt > new Date())) {
+      service.subscriptionStatus = "suspended";
+    }
+    await service.save();
+    await this.audit.log({ actorId: actor.id, action: "services.expiry", targetType: "service", targetId: id, sensitive: true });
     return service;
+  }
+
+  async suspend(id: string, actor: AuthUser) {
+    const service = await this.get(id, actor);
+    if (service.subscriptionStatus === "suspended") return service;
+    // Do not claim suspension until the node confirms the container stopped.
+    if (service.containerId && service.status !== "offline" && service.status !== "suspended") {
+      const node = await this.nodes.get(service.nodeId.toString());
+      await this.nodes.agentCall(node, `/services/${service.containerId}/stop`);
+    }
+    service.status = "suspended";
+    service.subscriptionStatus = "suspended";
+    await service.save();
+    await this.audit.log({ actorId: actor.id, action: "services.suspend", targetType: "service", targetId: id, sensitive: true });
+    return service;
+  }
+
+  async unsuspend(id: string, actor: AuthUser) {
+    const service = await this.get(id, actor);
+    if (service.expiresAt && service.expiresAt <= new Date()) throw new BadRequestException("Extend the expiry date before unsuspending");
+    if (service.subscriptionStatus !== "suspended") throw new BadRequestException("Service is not suspended");
+    service.subscriptionStatus = "active";
+    service.status = "offline";
+    await service.save();
+    await this.audit.log({ actorId: actor.id, action: "services.unsuspend", targetType: "service", targetId: id, sensitive: true });
+    return service;
+  }
+
+  async remove(id: string, actor: AuthUser) {
+    const service = await this.get(id, actor);
+    // Never remove the database record until the node confirms cleanup.
+    const node = await this.nodes.get(service.nodeId.toString());
+    await this.nodes.agentCall(node, `/services/${service.containerId ?? service._id}/delete`);
+    await this.services.deleteOne({ _id: service._id });
+    await this.audit.log({ actorId: actor.id, action: "services.delete", targetType: "service", targetId: id, sensitive: true });
+    return { deleted: true };
   }
 
   async expireSweep(): Promise<number> {
