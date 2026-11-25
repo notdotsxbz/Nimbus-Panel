@@ -136,7 +136,7 @@ export class ServicesService {
     service.activity.push({ at: new Date(), action, ok: true });
     await service.save();
     try {
-      const result = await this.nodes.agentCall(node, `/services/${service.containerId ?? service._id}/${action}`);
+      const result = await this.nodes.agentCall(node, `/services/${service._id}/${action}`);
       // Real confirmation replaces the optimistic state.
       service.status = (result?.status as ServiceStatus) ?? (action === "start" ? "online" : action === "stop" ? "offline" : service.status);
       service.activity.push({ at: new Date(), action: `${action}.confirmed`, ok: true });
@@ -176,6 +176,7 @@ export class ServicesService {
     }
     const service = await this.get(id, actor);
     service.expiresAt = days === null ? undefined : new Date(Date.now() + days! * 86_400_000);
+    // Extending an expired allocation does not automatically restart a stopped container.
     if (service.subscriptionStatus === "expired" && (!service.expiresAt || service.expiresAt > new Date())) {
       service.subscriptionStatus = "suspended";
     }
@@ -187,10 +188,11 @@ export class ServicesService {
   async suspend(id: string, actor: AuthUser) {
     const service = await this.get(id, actor);
     if (service.subscriptionStatus === "suspended") return service;
+    if (service.subscriptionStatus === "expired") throw new BadRequestException("Extend the expiry before suspending or restoring the service");
     // Do not claim suspension until the node confirms the container stopped.
     if (service.containerId && service.status !== "offline" && service.status !== "suspended") {
       const node = await this.nodes.get(service.nodeId.toString());
-      await this.nodes.agentCall(node, `/services/${service.containerId}/stop`);
+      await this.nodes.agentCall(node, `/services/${service._id}/stop`);
     }
     service.status = "suspended";
     service.subscriptionStatus = "suspended";
@@ -214,18 +216,32 @@ export class ServicesService {
     const service = await this.get(id, actor);
     // Never remove the database record until the node confirms cleanup.
     const node = await this.nodes.get(service.nodeId.toString());
-    await this.nodes.agentCall(node, `/services/${service.containerId ?? service._id}/delete`);
+    await this.nodes.agentCall(node, `/services/${service._id}/delete`);
     await this.services.deleteOne({ _id: service._id });
     await this.audit.log({ actorId: actor.id, action: "services.delete", targetType: "service", targetId: id, sensitive: true });
     return { deleted: true };
   }
 
+  /** Stop expired workloads before marking them expired; retry transient node failures. */
   async expireSweep(): Promise<number> {
-    const res = await this.services.updateMany(
-      { expiresAt: { $lte: new Date() }, subscriptionStatus: "active" },
-      { subscriptionStatus: "expired", status: "suspended" },
-    );
-    return res.modifiedCount;
+    const expired = await this.services.find({ expiresAt: { $lte: new Date() }, subscriptionStatus: "active" }).limit(100);
+    let stopped = 0;
+    for (const service of expired) {
+      try {
+        if (service.containerId && service.status !== "offline" && service.status !== "suspended") {
+          const node = await this.nodes.get(service.nodeId.toString());
+          await this.nodes.agentCall(node, `/services/${service._id}/stop`);
+        }
+        service.subscriptionStatus = "expired";
+        service.status = "suspended";
+        await service.save();
+        stopped++;
+      } catch (error) {
+        // Do not falsely report a workload as stopped when its node is unreachable.
+        console.error("Could not stop expired service", service._id.toString(), error);
+      }
+    }
+    return stopped;
   }
 
   async stats() {
