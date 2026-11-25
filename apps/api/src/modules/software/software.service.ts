@@ -834,10 +834,11 @@ export class SoftwareService implements OnModuleInit, OnModuleDestroy {
     }
     if (software.sourceType === "papermc") {
       const project = software.sourceConfig.project ?? "paper";
-      const response = await axios.get("https://api.papermc.io/v2/projects/" + encodeURIComponent(project) + "/versions", { timeout: 20000, headers: { Accept: "application/json" } });
-      const rows = (response.data as any).versions;
+      const response = await axios.get("https://fill.papermc.io/v3/projects/" + encodeURIComponent(project), { timeout: 20000, headers: { Accept: "application/json", "User-Agent": "NIMBUS-Software-Manager/1.0" } });
+      const groups = (response.data as any)?.versions;
+      const rows = Array.isArray(groups) ? groups : groups && typeof groups === "object" ? Object.values(groups).flatMap((group: any) => Array.isArray(group) ? group : []) : null;
       if (!Array.isArray(rows)) throw new BadRequestException("PaperMC release source returned an invalid response");
-      return rows.map((version: string) => ({ version, sourceUrl: "https://papermc.io/downloads/" + project, metadata: { project } }));
+      return [...new Set(rows.filter((version: unknown): version is string => typeof version === "string"))].map((version: string) => ({ version, sourceUrl: "https://papermc.io/downloads/" + project, metadata: { project } }));
     }
     if (software.sourceType === "papermc-v3") {
       const minecraftVersion = software.sourceConfig.minecraftVersion;

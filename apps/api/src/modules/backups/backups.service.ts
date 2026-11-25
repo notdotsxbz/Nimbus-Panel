@@ -26,12 +26,19 @@ export class BackupsService {
   ) {}
 
   async list(user: { id: string; role: string }, serviceId?: string) {
-    const filter: Record<string, unknown> = serviceId ? { serviceId } : {};
-    if (serviceId) await this.services.get(serviceId, user as never); // ownership check
-    return this.backups.find(filter).sort({ createdAt: -1 }).limit(100);
+    if (serviceId) {
+      const service = await this.services.get(serviceId, user as never);
+      return this.backups.find({ serviceId: service._id }).sort({ createdAt: -1 }).limit(100);
+    }
+    // Derive the allowed service IDs from the ownership-enforced service query.
+    // Never return all customers' backup metadata to a customer.
+    const visibleServices = await this.services.listFor(user as never);
+    const allowedIds = visibleServices.map((service) => service._id);
+    return this.backups.find({ serviceId: { $in: allowedIds } }).sort({ createdAt: -1 }).limit(100);
   }
 
   async create(serviceId: string, user: { id: string; role: string }, trigger: string, destination = "local") {
+    if (!["local", "gdrive"].includes(destination)) throw new BadRequestException("Unsupported backup destination");
     const service = await this.services.get(serviceId, user as never);
     const node = await this.nodes.get(service.nodeId.toString());
     const backup = await this.backups.create({
@@ -55,6 +62,7 @@ export class BackupsService {
         backup.remoteFileId = await this.uploadGoogleDriveArchive(
           archive,
           `nimbus-${serviceId}-${backup._id!.toString()}.tar.zst`,
+          user.role === "customer" ? user.id : undefined,
         );
       }
       backup.status = "completed";
@@ -73,12 +81,56 @@ export class BackupsService {
     return backup;
   }
 
+  /** Selectively back up services the actor is permitted to access. */
+  async createSelected(serviceIds: string[], user: { id: string; role: string }, destination = "local") {
+    if (!Array.isArray(serviceIds) || serviceIds.length === 0 || serviceIds.length > 25 ||
+        new Set(serviceIds).size !== serviceIds.length ||
+        serviceIds.some((id) => !Types.ObjectId.isValid(id))) {
+      throw new BadRequestException("Select between 1 and 25 distinct valid service IDs");
+    }
+    if (!["local", "gdrive"].includes(destination)) throw new BadRequestException("Unsupported backup destination");
+    // Validate the entire selection before performing any backup operation.
+    await Promise.all(serviceIds.map((id) => this.services.get(id, user as never)));
+    const results = [];
+    for (const serviceId of serviceIds) {
+      results.push(await this.create(serviceId, user, "manual", destination));
+    }
+    return { results };
+  }
+
+  /** Restore selected local backups after checking every service's ownership first. */
+  async restoreSelected(backupIds: string[], user: { id: string; role: string }) {
+    if (!Array.isArray(backupIds) || backupIds.length === 0 || backupIds.length > 25 ||
+        new Set(backupIds).size !== backupIds.length ||
+        backupIds.some((id) => !Types.ObjectId.isValid(id))) {
+      throw new BadRequestException("Select between 1 and 25 distinct valid backup IDs");
+    }
+    const backups = await this.backups.find({ _id: { $in: backupIds.map((id) => new Types.ObjectId(id)) } });
+    if (backups.length !== backupIds.length) throw new NotFoundException("One or more backups were not found");
+    for (const backup of backups) {
+      await this.services.get(backup.serviceId.toString(), user as never);
+      if (backup.status !== "completed" || backup.destination !== "local") {
+        throw new BadRequestException("All selected backups must be completed local backups");
+      }
+    }
+    const results = [];
+    for (const backupId of backupIds) {
+      results.push({ backupId, result: await this.restore(backupId, user) });
+    }
+    return { results };
+  }
+
   /** Restore into a staging dir — data is swapped only after verification. */
   async restore(backupId: string, user: { id: string; role: string }) {
     const backup = await this.backups.findById(backupId);
     if (!backup) throw new NotFoundException("Backup not found");
     if (backup.status !== "completed") throw new BadRequestException("Backup is not restorable");
     const service = await this.services.get(backup.serviceId.toString(), user as never);
+    // Remote archives are not currently downloaded back to the agent. Never
+    // silently restore a possibly unrelated local archive with the same ID.
+    if (backup.destination !== "local") {
+      throw new BadRequestException("Remote backup restoration is unavailable until verified archive retrieval is implemented");
+    }
     const node = await this.nodes.get(service.nodeId.toString());
     await this.nodes.agentCall(node, "/backups/restore", {
       serviceId: service._id!.toString(),
@@ -88,44 +140,85 @@ export class BackupsService {
     return { ok: true };
   }
 
-  private async uploadGoogleDriveArchive(archive: Buffer, filename: string): Promise<string> {
-    const accessToken = await this.integrations.googleDriveAccessToken();
-    let metadata;
-    try {
-      metadata = await axios.post(
-        "https://www.googleapis.com/drive/v3/files?fields=id,name",
-        { name: filename, mimeType: "application/octet-stream" },
-        { headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" } },
-      );
-    } catch (error) {
-      const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
-      throw new BadRequestException(details ?? "Google Drive could not create the backup file. Check the connected Google account and Drive permissions.");
+  /** Google Drive resumable upload. Drive requires chunks in multiples of 256 KiB. */
+  private async uploadGoogleDriveArchive(archive: Buffer, filename: string, customerId?: string): Promise<string> {
+    const getToken = () => customerId
+      ? this.integrations.customerGoogleDriveAccessToken(customerId)
+      : this.integrations.googleDriveAccessToken();
+    const token = await getToken();
+    const initiation = await axios.post(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size",
+      { name: filename, mimeType: "application/octet-stream" },
+      {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json; charset=UTF-8",
+          "x-upload-content-type": "application/octet-stream",
+          "x-upload-content-length": String(archive.length),
+        },
+        timeout: 30_000,
+      },
+    );
+    const session = initiation.headers.location as string | undefined;
+    if (!session || !session.startsWith("https://www.googleapis.com/upload/drive/")) {
+      throw new BadRequestException("Google Drive did not return a valid resumable upload session");
     }
-    const fileId = metadata.data?.id as string | undefined;
-    if (!fileId) throw new BadRequestException("Google Drive did not create a backup file");
-    try {
-      await axios.patch(
-        `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`,
-        archive,
-        {
+    const chunkSize = 8 * 1024 * 1024;
+    let offset = 0;
+    let attempts = 0;
+    while (offset < archive.length || (archive.length === 0 && offset === 0)) {
+      const end = Math.min(offset + chunkSize, archive.length);
+      const chunk = archive.subarray(offset, end);
+      try {
+        const response = await axios.put(session, chunk, {
           headers: {
-            authorization: `Bearer ${accessToken}`,
+            authorization: `Bearer ${await getToken()}`,
             "content-type": "application/octet-stream",
-            "content-length": String(archive.length),
+            "content-length": String(chunk.length),
+            "content-range": archive.length
+              ? `bytes ${offset}-${end - 1}/${archive.length}`
+              : "bytes */0",
           },
           maxBodyLength: Infinity,
-          maxContentLength: Infinity,
-          timeout: 10 * 60 * 1000,
-        },
-      );
-      return fileId;
-    } catch (error) {
-      await axios.delete(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
-        headers: { authorization: `Bearer ${accessToken}` },
-      }).catch(() => undefined);
-      const details = axios.isAxiosError(error) ? (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message : undefined;
-      throw new BadRequestException(details ?? "Google Drive upload failed. Reconnect the shared Drive account and try again.");
+          timeout: 120_000,
+          validateStatus: (status) => status === 308 || (status >= 200 && status < 300),
+        });
+        if (response.status !== 308) {
+          const fileId = response.data?.id as string | undefined;
+          if (!fileId) throw new BadRequestException("Google Drive upload finished without a file ID");
+          if (Number(response.data?.size) !== archive.length) {
+            throw new BadRequestException("Google Drive uploaded size does not match the archive");
+          }
+          return fileId;
+        }
+        const range = String(response.headers.range ?? "");
+        const match = /^bytes=0-(\d+)$/.exec(range);
+        offset = match ? Number(match[1]) + 1 : 0;
+        if (offset > archive.length) throw new BadRequestException("Google Drive returned an invalid upload offset");
+        attempts = 0;
+      } catch (error) {
+        if (++attempts > 5) throw error;
+        // Query committed bytes rather than assuming a failed request wrote nothing.
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * 2 ** attempts, 15_000)));
+        const status = await axios.put(session, Buffer.alloc(0), {
+          headers: {
+            authorization: `Bearer ${await getToken()}`,
+            "content-length": "0",
+            "content-range": `bytes */${archive.length}`,
+          },
+          timeout: 30_000,
+          validateStatus: (code) => code === 308 || (code >= 200 && code < 300),
+        });
+        if (status.status !== 308) {
+          const fileId = status.data?.id as string | undefined;
+          if (fileId && Number(status.data?.size) === archive.length) return fileId;
+          throw new BadRequestException("Google Drive returned an unexpected upload completion response");
+        }
+        const match = /^bytes=0-(\d+)$/.exec(String(status.headers.range ?? ""));
+        offset = match ? Number(match[1]) + 1 : 0;
+      }
     }
+    throw new BadRequestException("Google Drive upload did not complete");
   }
 
   /** Integrity verification helper (sha256) usable by scheduled verification jobs. */
