@@ -14,6 +14,7 @@ interface ServiceRow {
   ownerId: { _id: string; username: string } | string;
   nodeId: { _id: string; name: string } | string;
   expiresAt?: string;
+  subscriptionStatus?: string;
 }
 
 interface NodeOption {
@@ -43,6 +44,7 @@ export default function AdminServices() {
   const [serviceType, setServiceType] = useState("minecraft");
   const [softwareId, setSoftwareId] = useState("");
   const [versionId, setVersionId] = useState("");
+  const [workingId, setWorkingId] = useState<string | null>(null);
   const { show, node } = useToast();
 
   const load = async () => {
@@ -143,6 +145,7 @@ export default function AdminServices() {
         startupCommand: String(f.get("startupCommand") ?? "").split(/\r?\n/).map(value => value.trim()).filter(Boolean),
         softwareId,
         versionId,
+        expiresAt: f.get("durationDays") ? new Date(Date.now() + Number(f.get("durationDays")) * 86_400_000).toISOString() : undefined,
       });
       setOpen(false);
       if (created.status === "online") show("Service installed and container version verification completed.", "ok");
@@ -151,6 +154,29 @@ export default function AdminServices() {
     } catch (err) {
       show(err instanceof Error ? err.message : "Assignment failed", "err");
     }
+  };
+
+  const updateExpiry = async (service: ServiceRow) => {
+    const value = window.prompt("Service duration in days (1–3650). Leave blank for unlimited.", service.expiresAt ? String(Math.max(1, Math.ceil((new Date(service.expiresAt).getTime() - Date.now()) / 86_400_000))) : "");
+    if (value === null) return;
+    const days = value.trim() === "" ? null : Number(value);
+    if (days !== null && (!Number.isInteger(days) || days < 1 || days > 3650)) { show("Enter 1–3650 days or leave blank for unlimited", "err"); return; }
+    setWorkingId(service._id);
+    try { await api.patch(`/services/${service._id}/expiry`, { days }); show("Service duration updated", "ok"); await load(); }
+    catch (err) { show(err instanceof Error ? err.message : "Duration update failed", "err"); }
+    finally { setWorkingId(null); }
+  };
+
+  const serviceAction = async (service: ServiceRow, action: "suspend" | "unsuspend" | "delete") => {
+    if (!window.confirm(action === "delete" ? `Permanently delete "${service.name}" and its container? This cannot be undone.` : `${action === "suspend" ? "Suspend" : "Unsuspend"} "${service.name}"?`)) return;
+    setWorkingId(service._id);
+    try {
+      if (action === "delete") await api.del(`/services/${service._id}`);
+      else await api.post(`/services/${service._id}/${action}`, {});
+      show(`Service ${action === "delete" ? "deleted" : action === "suspend" ? "suspended" : "unsuspended"}`, "ok");
+      await load();
+    } catch (err) { show(err instanceof Error ? err.message : "Service operation failed", "err"); }
+    finally { setWorkingId(null); }
   };
 
   const nodeName = (n: ServiceRow["nodeId"]) => (typeof n === "object" ? n?.name : "—");
@@ -176,6 +202,8 @@ export default function AdminServices() {
               <th className="px-5 py-3 font-medium">Node</th>
               <th className="px-5 py-3 font-medium">Resources</th>
               <th className="px-5 py-3 font-medium">Status</th>
+              <th className="px-5 py-3 font-medium">Expires</th>
+              <th className="px-5 py-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -193,11 +221,13 @@ export default function AdminServices() {
                   {s.ramMb} MB · {s.diskGb} GB
                 </td>
                 <td className="px-5 py-3"><StatusBadge status={s.status} /></td>
+                <td className="px-5 py-3 text-xs">{s.expiresAt ? new Date(s.expiresAt).toLocaleDateString() : "Unlimited"}</td>
+                <td className="px-5 py-3"><div className="flex flex-wrap gap-2"><button disabled={workingId === s._id} className="btn-ghost text-xs" onClick={() => void updateExpiry(s)}>Duration</button><button disabled={workingId === s._id} className="btn-ghost text-xs" onClick={() => void serviceAction(s, s.subscriptionStatus === "suspended" ? "unsuspend" : "suspend")}>{s.subscriptionStatus === "suspended" ? "Unsuspend" : "Suspend"}</button><button disabled={workingId === s._id} className="btn-danger text-xs" onClick={() => void serviceAction(s, "delete")}>Delete</button></div></td>
               </tr>
             ))}
             {services.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-5 py-10 text-center text-muted">No services assigned yet</td>
+                <td colSpan={8} className="px-5 py-10 text-center text-muted">No services assigned yet</td>
               </tr>
             ) : null}
           </tbody>
@@ -258,6 +288,7 @@ export default function AdminServices() {
             <label className="label" htmlFor="s-cpu">CPU (%)</label>
             <input id="s-cpu" name="cpuPercent" type="number" min={10} max={400} defaultValue={100} required className="input" />
           </div>
+          <div className="col-span-2"><label className="label" htmlFor="s-duration">Duration (days, optional)</label><input id="s-duration" name="durationDays" type="number" min={1} max={3650} className="input" placeholder="Leave blank for unlimited" /></div>
           <div className="col-span-2">
             <label className="label" htmlFor="s-startup">Startup command (optional, one argument per line)</label>
             <textarea id="s-startup" name="startupCommand" rows={2} className="input" placeholder={"npm\nstart"} />
