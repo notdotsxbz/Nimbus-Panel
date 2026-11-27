@@ -1,18 +1,15 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-/** Short branded transition on initial load and route changes; never blocks indefinitely. */
+/** Short branded transition on initial document load only; never blocks indefinitely. */
 export function RocketLoadingScreen() {
-  const pathname = usePathname();
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    setVisible(true);
     const timer = window.setTimeout(() => setVisible(false), 850);
     return () => window.clearTimeout(timer);
-  }, [pathname]);
+  }, []);
 
   if (!visible) return null;
   return (

@@ -37,6 +37,7 @@ interface SoftwareVersionPage { items: SoftwareVersionRow[] }
 
 export default function AdminServices() {
   const [services, setServices] = useState<ServiceRow[]>([]);
+  const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [wizardLoading, setWizardLoading] = useState(false);
@@ -200,6 +201,13 @@ export default function AdminServices() {
     finally { setWorkingId(null); }
   };
 
+  const visibleServices = services.filter(service => {
+    const ownerId = typeof service.ownerId === "object" ? service.ownerId?._id : service.ownerId;
+    const owner = typeof service.ownerId === "object" ? service.ownerId?.username : users.find(user => user._id === ownerId)?.username;
+    const query = search.trim().toLowerCase();
+    return !query || [service.name, service._id, owner, ownerId].some(value => value?.toLowerCase().includes(query));
+  });
+
   const nodeName = (n: ServiceRow["nodeId"]) => (typeof n === "object" ? n?.name : "—");
   const ownerName = (o: ServiceRow["ownerId"]) => (typeof o === "object" ? o?.username : "—");
 
@@ -213,6 +221,7 @@ export default function AdminServices() {
         <button className="btn-primary" onClick={() => void openWizard()}>Assign Service</button>
       </header>
 
+      <div className="flex flex-wrap items-center gap-2"><input type="search" className="input max-w-md" aria-label="Search services by name or owner" placeholder="Search service name or owner…" value={search} onChange={event => setSearch(event.target.value)} /><button type="button" className="btn-ghost" onClick={() => setSearch("")} disabled={!search}>Clear</button><span className="text-xs text-muted">{visibleServices.length} of {services.length} services</span></div>
       <GlassCard className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
@@ -228,7 +237,7 @@ export default function AdminServices() {
             </tr>
           </thead>
           <tbody>
-            {services.map((s) => (
+            {visibleServices.map((s) => (
               <tr key={s._id} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03]">
                 <td className="px-5 py-3 font-medium">{s.name}</td>
                 <td className="px-5 py-3 text-xs uppercase tracking-wider text-muted">{s.type}</td>
@@ -246,9 +255,9 @@ export default function AdminServices() {
                 <td className="px-5 py-3"><div className="flex flex-wrap gap-2"><button disabled={workingId === s._id} className="btn-ghost text-xs" onClick={() => void updateExpiry(s)}>Duration</button><button disabled={workingId === s._id} className="btn-ghost text-xs" onClick={() => void serviceAction(s, s.subscriptionStatus === "suspended" ? "unsuspend" : "suspend")}>{s.subscriptionStatus === "suspended" ? "Unsuspend" : "Suspend"}</button><button disabled={workingId === s._id} className="btn-danger text-xs" onClick={() => void serviceAction(s, "delete")}>Delete</button></div></td>
               </tr>
             ))}
-            {services.length === 0 ? (
+            {visibleServices.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-5 py-10 text-center text-muted">No services assigned yet</td>
+                <td colSpan={8} className="px-5 py-10 text-center text-muted">{search.trim() ? "No matching services" : "No services assigned yet"}</td>
               </tr>
             ) : null}
           </tbody>

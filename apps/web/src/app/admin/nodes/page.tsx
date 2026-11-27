@@ -439,11 +439,12 @@ export default function AdminNodes() {
               audit log with your account and a timestamp.
             </p>
 
+            {deleteMode === "safe" && (!deleteInfo || deleteInfo.workloads.length > 0 || deleteInfo.allocationsInUse > 0) && <p className="text-sm text-amber-300" role="status">Safe Delete is unavailable until all workloads and in-use allocations are cleared. <a href="/admin/services" className="underline">Manage services</a>.</p>}
             <div className="flex gap-2">
               <button className="btn-ghost flex-1" onClick={() => setDeleteOpen(false)}>Cancel</button>
               <button
                 className="btn-danger flex-1"
-                disabled={busy || (deleteMode === "force" && (confirmName !== detail.name || !reauthPassword))}
+                disabled={busy || (deleteMode === "safe" && (!deleteInfo || deleteInfo.workloads.length > 0 || deleteInfo.allocationsInUse > 0)) || (deleteMode === "force" && (confirmName !== detail.name || !reauthPassword))}
                 onClick={() => void deleteNodeWithBody()}
               >
                 {busy ? "Deleting…" : deleteMode === "force" ? "Force Delete Node" : "Safe Delete Node"}
