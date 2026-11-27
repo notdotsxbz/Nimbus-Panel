@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { AppearanceSync } from "@/components/appearance-sync";
 import { BackgroundImage } from "@/components/background-image";
+import { RocketLoadingScreen } from "@/components/rocket-loading-screen";
 import { NO_FLASH_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans">
         <BackgroundImage />
         <AppearanceSync />
+        <RocketLoadingScreen />
         <div className="relative z-10 min-h-dvh">{children}</div>
       </body>
     </html>
