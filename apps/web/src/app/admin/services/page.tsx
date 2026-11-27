@@ -20,6 +20,7 @@ interface ServiceRow {
 
 interface NodeOption {
   nodeId: string;
+  name?: string;
   ramTotalMb: number;
   ramAllocatedMb: number;
   healthy: boolean;
@@ -37,7 +38,9 @@ interface SoftwareVersionPage { items: SoftwareVersionRow[] }
 export default function AdminServices() {
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState(1);
+  const [creating, setCreating] = useState(false);
+  const [wizardLoading, setWizardLoading] = useState(false);
+  const [nodeId, setNodeId] = useState("");
   const [users, setUsers] = useState<{ _id: string; username: string; role?: string }[]>([]);
   const [nodes, setNodes] = useState<NodeOption[]>([]);
   const [catalog, setCatalog] = useState<SoftwareCatalogRow[]>([]);
@@ -69,7 +72,7 @@ export default function AdminServices() {
     const page = await api.get<SoftwareVersionPage>("/software/" + id + "/versions?page=1&limit=100");
     const published = page.items.filter(item => item.publicationStatus === "published" && !item.deprecated && item.compatible !== false);
     setCatalogVersions(published);
-    setVersionId(published[0]?._id ?? "");
+    setVersionId((published.find(item => item.recommended) ?? published[0])?._id ?? "");
   };
 
   const changeCatalogSoftware = async (id: string) => {
@@ -94,8 +97,14 @@ export default function AdminServices() {
   };
 
   const openWizard = async () => {
-    setStep(1);
     setOpen(true);
+    setWizardLoading(true);
+    setNodes([]);
+    setNodeId("");
+    setCatalog([]);
+    setCatalogVersions([]);
+    setSoftwareId("");
+    setVersionId("");
     try {
       const [u, n, softwareRows] = await Promise.all([
         api.get<{ items: { _id: string; username: string; role?: string }[] }>("/users"),
@@ -104,6 +113,7 @@ export default function AdminServices() {
       ]);
       setUsers((u.items ?? []).filter(user => user.role === "customer"));
       setNodes(n);
+      setNodeId(n.length === 1 ? n[0].nodeId : "");
       setCatalog(softwareRows);
       if (!n.length) show("No healthy compute nodes with recent heartbeats. Check Admin → Nodes and the node agent before assigning services.", "err");
       setServiceType("minecraft");
@@ -114,7 +124,7 @@ export default function AdminServices() {
       if (first) await loadCatalogVersions(first._id);
     } catch {
       show("Could not load users, node capacity or software catalog", "err");
-    }
+    } finally { setWizardLoading(false); }
   };
 
   const assignOwner = async (serviceId: string, ownerId: string) => {
@@ -130,7 +140,9 @@ export default function AdminServices() {
 
   const create = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (creating || wizardLoading) return;
     const f = new FormData(e.currentTarget);
+    setCreating(true);
     try {
       if (!nodes.length) {
         show("No healthy compute node available. Verify the node agent heartbeat under Admin → Nodes.", "err");
@@ -162,7 +174,7 @@ export default function AdminServices() {
       void load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Assignment failed", "err");
-    }
+    } finally { setCreating(false); }
   };
 
   const updateExpiry = async (service: ServiceRow) => {
@@ -243,11 +255,14 @@ export default function AdminServices() {
         </table>
       </GlassCard>
 
-      <Modal open={open} title={`Assign Service — Step ${step} of 2`} onClose={() => setOpen(false)}>
+      <Modal open={open} title="Create a service" onClose={() => { if (!creating) setOpen(false); }}>
         <form onSubmit={create} className="grid grid-cols-2 gap-4">
+          <p className="col-span-2 text-sm text-muted">Choose a customer, software and node. The recommended version is selected automatically. Review the resource limits, then create the service.</p>
+          {wizardLoading && <p className="col-span-2 text-sm text-muted" role="status">Checking nodes, customers and available software…</p>}
+          {!wizardLoading && !nodes.length && <p className="col-span-2 text-sm text-amber-300">No healthy node found. <a className="underline" href="/admin/nodes">Set up a compute node</a> first.</p>}
           <div className="col-span-2">
             <label className="label" htmlFor="s-owner">Customer</label>
-            <select id="s-owner" name="ownerId" required className="input" onChange={() => setStep(2)}>
+            <select id="s-owner" name="ownerId" required className="input" defaultValue={users.length === 1 ? users[0]._id : ""}>
               <option value="">Select user…</option>
               {users.map((u) => (
                 <option key={u._id} value={u._id}>{u.username}</option>
@@ -276,11 +291,11 @@ export default function AdminServices() {
           </div>
           <div className="col-span-2">
             <label className="label" htmlFor="s-node">Node (only healthy nodes with capacity are listed)</label>
-            <select id="s-node" name="nodeId" required className="input">
+            <select id="s-node" name="nodeId" required className="input" value={nodeId} onChange={event => setNodeId(event.target.value)}>
               <option value="">Select node…</option>
               {nodes.map((n) => (
                 <option key={n.nodeId} value={n.nodeId}>
-                  {n.nodeId.slice(-6)} — {(n.ramTotalMb - n.ramAllocatedMb) / 1024} GB RAM free
+                  {n.name ?? n.nodeId.slice(-6)} — {((n.ramTotalMb - n.ramAllocatedMb) / 1024).toFixed(1)} GB RAM free
                 </option>
               ))}
             </select>
@@ -298,11 +313,11 @@ export default function AdminServices() {
             <input id="s-cpu" name="cpuPercent" type="number" min={10} max={400} defaultValue={100} required className="input" />
           </div>
           <div className="col-span-2"><label className="label" htmlFor="s-duration">Duration (days, optional)</label><input id="s-duration" name="durationDays" type="number" min={1} max={3650} className="input" placeholder="Leave blank for unlimited" /></div>
-          <div className="col-span-2">
+          <details className="col-span-2"><summary className="cursor-pointer text-sm text-muted">Advanced startup settings (optional)</summary><div className="mt-2">
             <label className="label" htmlFor="s-startup">Startup command (optional, one argument per line)</label>
             <textarea id="s-startup" name="startupCommand" rows={2} className="input" placeholder={"npm\nstart"} />
             <p className="mt-1 text-xs text-muted">Examples: npm then start, or python then app.py. Leave blank for software images that provide their own startup.</p>
-          </div>
+          </div></details>
           <div className="col-span-2">
             <label className="label" htmlFor="s-software">Approved software</label>
             <select id="s-software" name="softwareId" className="input" value={softwareId} onChange={event => void changeCatalogSoftware(event.target.value)}>
@@ -316,10 +331,10 @@ export default function AdminServices() {
               <option value="">Select published version…</option>
               {catalogVersions.map(item => <option key={item._id} value={item._id}>{item.version}{item.recommended ? " · Recommended" : ""}</option>)}
             </select>
-            {!catalogVersions.length ? <p className="mt-1 text-xs text-muted">No published installable versions for this software. Fetch and publish versions in Admin → Software &amp; Versions first.</p> : null}
+            {!catalogVersions.length ? <p className="mt-1 text-xs text-muted">No published installable versions. <a className="underline" href="/admin/software">Add or publish a version</a> first.</p> : null}
           </div>
           <div className="col-span-2">
-            <button className="btn-primary w-full">Review & Assign</button>
+            <button className="btn-primary w-full disabled:opacity-50" disabled={creating || wizardLoading || !nodes.length || !softwareId || !versionId}>{creating ? "Installing service… do not submit again" : "Create & install service"}</button>
           </div>
         </form>
       </Modal>
