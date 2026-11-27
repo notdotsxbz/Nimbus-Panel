@@ -241,7 +241,14 @@ export class ServicesService implements OnModuleInit, OnModuleDestroy {
     const service = await this.get(id, actor);
     // Never remove the database record until the node confirms cleanup.
     const node = await this.nodes.get(service.nodeId.toString());
-    await this.nodes.agentCall(node, `/services/${service._id}/delete`);
+    try {
+      const result = await this.nodes.agentCall(node, `/services/${service._id}/delete`);
+      if (result?.status !== "deleted") throw new Error("Agent did not confirm deletion");
+    } catch {
+      throw new BadRequestException("The compute node could not confirm container deletion. Verify the node is reachable and its NIMBUS agent supports the delete operation. The service record has been retained.");
+    }
+    // Release only allocations belonging to the deleted service.
+    await this.services.db.collection("allocations").updateMany({ serviceId: service._id }, { $unset: { serviceId: "" } });
     await this.services.deleteOne({ _id: service._id });
     await this.audit.log({ actorId: actor.id, action: "services.delete", targetType: "service", targetId: id, sensitive: true });
     return { deleted: true };
