@@ -61,12 +61,13 @@ export class ServicesService implements OnModuleInit, OnModuleDestroy {
 
   /** Customers see only their own services; staff sees all. */
   async listFor(user: AuthUser, filter: Record<string, unknown> = {}) {
-    const query: Record<string, unknown> = isStaffRole(user.role) ? { ...filter } : { ownerId: new Types.ObjectId(user.id), ...filter };
+    const query: Record<string, unknown> = isStaffRole(user.role) ? { ...filter } : { ...filter, ownerId: new Types.ObjectId(user.id) };
     return this.services.find(query).populate("nodeId", "name location online").limit(200);
   }
 
   /** Ownership-enforced read — the base for every per-service operation. */
   async get(id: string, user: AuthUser): Promise<ServiceDocument> {
+    if (!Types.ObjectId.isValid(id)) throw new BadRequestException("Invalid service ID");
     const service = await this.services.findById(id);
     if (!service) throw new NotFoundException("Service not found");
     const owner = (service.ownerId as Types.ObjectId).toString();
