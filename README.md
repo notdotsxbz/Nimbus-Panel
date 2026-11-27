@@ -203,6 +203,51 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for the complete command reference and
 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues.
 ---
 
+## 🛠️ Service allocation and lifecycle
+
+In **Admin → Services**, owners and admins can assign a published software version
+to a customer on a connected compute node. Set a **duration in days** (1–3650),
+or leave the duration empty for an unlimited allocation.
+
+For existing services, the admin service list provides **Duration**, **Suspend**,
+**Unsuspend**, and **Delete** actions:
+
+- **Duration** resets the expiry to the chosen number of days from now. An
+  empty value removes the expiry. Extending an expired service leaves it
+  suspended until an administrator explicitly unsuspends it.
+- **Suspend** requests a stop from the compute node before marking the
+  service suspended. Suspended or expired allocations cannot be started by
+  customers.
+- **Expiry** is checked by the API on startup and approximately every minute.
+  It stops expired workloads before marking them expired. If a node is
+  unreachable, the API logs the failure and retries later; do not assume an
+  unreachable workload has stopped.
+- **Delete** removes the managed Docker container and service database record
+  after node confirmation. **The node's service data directory is retained** for
+  manual recovery; deleting a service is not a secure data-erasure operation.
+
+**Compute node required:** The web/API control plane does not run customer
+containers. Install the NIMBUS agent on each compute node using the Node
+installer in step 7. Updating the panel alone does **not** update agents on
+other servers. The service-delete operation requires an agent version with
+the `/services/:id/delete` operation.
+
+**Operational caution:** Test suspend, expiry, and delete with a disposable
+service on each node before using these actions on customer workloads.
+Back up customer data before deletion. Live node-agent and authenticated
+end-to-end verification are separate from a successful web/API build.
+
+### Troubleshooting service actions
+
+If the admin page loads but service actions fail, check **Admin → Nodes**
+for an online, enrolled compute node and inspect the API and node-agent logs.
+A panel VPS with only `nimbus-api` and `nimbus-web` services installed is
+normal: the node agent can be on a different server. A successful HTTP 200
+for `/dashboard` only proves that page is served, not that provisioning,
+Google sign-in, backups, or node operations are functioning end to end.
+
+---
+
 ## 🎨 What's inside the panel
 
 | Area | Highlights |
