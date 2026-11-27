@@ -15,6 +15,7 @@ interface ServiceRow {
   nodeId: { _id: string; name: string } | string;
   expiresAt?: string;
   subscriptionStatus?: string;
+  activity?: { action: string; ok: boolean; detail?: string }[];
 }
 
 interface NodeOption {
@@ -104,6 +105,7 @@ export default function AdminServices() {
       setUsers((u.items ?? []).filter(user => user.role === "customer"));
       setNodes(n);
       setCatalog(softwareRows);
+      if (!n.length) show("No healthy compute nodes with recent heartbeats. Check Admin → Nodes and the node agent before assigning services.", "err");
       setServiceType("minecraft");
       const first = softwareRows.find(item => item.enabled && item.serviceTypes.includes("minecraft") && item.installationConfig?.method === "docker-image-template");
       setSoftwareId(first?._id ?? "");
@@ -130,6 +132,10 @@ export default function AdminServices() {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     try {
+      if (!nodes.length) {
+        show("No healthy compute node available. Verify the node agent heartbeat under Admin → Nodes.", "err");
+        return;
+      }
       if (!softwareId || !versionId) {
         show("Choose a published software version before assigning this service.", "err");
         return;
@@ -149,7 +155,10 @@ export default function AdminServices() {
       });
       setOpen(false);
       if (created.status === "online") show("Service installed and container version verification completed.", "ok");
-      else show("Service record created, but installation failed. Check the service status and operation history.", "err");
+      else {
+        const failure = [...(created.activity ?? [])].reverse().find(item => item.action === "install" && !item.ok);
+        show(`Service record created, but installation failed: ${failure?.detail ?? "Check node-agent connectivity and operation history."}`, "err");
+      }
       void load();
     } catch (err) {
       show(err instanceof Error ? err.message : "Assignment failed", "err");
