@@ -188,35 +188,29 @@ export default function AdminNodes() {
     }
   };
 
-  // DELETE with a JSON body is not supported by the api helper — use fetch directly.
+  // Use the shared same-origin API client; a localhost fallback breaks production.
   const deleteNodeWithBody = async () => {
-    if (!detail) return;
+    if (!detail || busy) return;
+    if (deleteMode === "safe" && (deleteInfo === null || deleteInfo.workloads.length > 0 || deleteInfo.allocationsInUse > 0)) {
+      show("Safe Delete requires a verified empty node. Remove or migrate workloads and allocations first.", "err");
+      return;
+    }
     setBusy(true);
     try {
-      const token = localStorage.getItem("nimbus.token");
-      const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-      const res = await fetch(`${base}/api/v1/nodes/${detail._id}`, {
-        method: "DELETE",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ mode: deleteMode, confirmName, password: reauthPassword || undefined }),
+      const result = await api.del<{ note?: string }>(`/nodes/${detail._id}`, {
+        mode: deleteMode,
+        confirmName: deleteMode === "force" ? confirmName : undefined,
+        password: deleteMode === "force" ? reauthPassword : undefined,
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detailMsg = Array.isArray((body as { message?: unknown }).message)
-          ? JSON.stringify((body as { message: unknown }).message)
-          : String((body as { message?: string }).message ?? res.statusText);
-        show(`Delete failed: ${detailMsg}`, "err");
-        if ((body as { workloads?: unknown }).workloads) setDeleteInfo((body as { workloads: { name: string; type: string; status: string }[]; allocationsInUse: number }));
-      } else {
-        setDeleteOpen(false);
-        setDetail(null);
-        show(String((body as { note?: string }).note ?? "Node deleted"), "ok");
-        void load();
-      }
+      setDeleteOpen(false);
+      setDetail(null);
+      show(result.note ?? "Node registration deleted", "ok");
+      await load();
     } catch (err) {
-      show(err instanceof Error ? err.message : "Delete failed", "err");
+      show(err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed", "err");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   const saveEdit = async (e: FormEvent<HTMLFormElement>) => {
