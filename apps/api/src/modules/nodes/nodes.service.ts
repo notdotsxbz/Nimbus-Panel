@@ -328,6 +328,7 @@ export class NodesService {
         const used = usage.get(n._id!.toString()) ?? { ram: 0, disk: 0 };
         return {
           nodeId: n._id!.toString(),
+          name: n.name,
           ramAllocatedMb: used.ram,
           ramTotalMb: n.ramTotalMb,
           diskAllocatedGb: used.disk,
