@@ -220,13 +220,20 @@ func (s *AgentServer) handleService(w http.ResponseWriter, r *http.Request) {
 		// Remove only the service's named container. Keep /data for manual recovery.
 		// Never accept arbitrary Docker names or host paths from the request.
 		name := "nimbus-" + serviceID
-		if _, err := docker("inspect", name); err != nil {
-			http.Error(w, "service container not found; manual cleanup may be required", http.StatusNotFound)
+		// A successful list verifies Docker is reachable; distinguish absence from daemon failure.
+		containers, err := docker("ps", "-a", "--filter", "name=^/"+name+"$", "--format", "{{.Names}}")
+		if err != nil {
+			http.Error(w, "could not verify service container: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		if _, err := docker("rm", "-f", name); err != nil {
-			http.Error(w, "could not remove service container: "+err.Error(), http.StatusBadGateway)
-			return
+		for _, existing := range strings.Split(containers, "\n") {
+			if strings.TrimSpace(existing) == name {
+				if _, err := docker("rm", "-f", name); err != nil {
+					http.Error(w, "could not remove service container: "+err.Error(), http.StatusBadGateway)
+					return
+				}
+				break
+			}
 		}
 		writeJSON(w, map[string]any{"status": "deleted", "dataRetained": true})
 	case "restart":
