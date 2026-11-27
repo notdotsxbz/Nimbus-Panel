@@ -309,7 +309,7 @@ export class NodesService {
 
   /** Nodes with real capacity for a requested footprint — never overcommits. */
   async findCapacity(ramMb: number, diskGb: number) {
-    const nodes = await this.nodes.find({ online: true, status: "active", maintenanceMode: false });
+    const nodes = await this.nodes.find({ online: true, status: "active", maintenanceMode: false, lastHeartbeatAt: { $gte: new Date(Date.now() - 60_000) } });
     const services = await this.services.find({}, "ramMb diskGb nodeId");
     const usage = new Map<string, { ram: number; disk: number }>();
     for (const s of services as { nodeId: { toString(): string }; ramMb: number; diskGb: number }[]) {
@@ -328,6 +328,7 @@ export class NodesService {
         const used = usage.get(n._id!.toString()) ?? { ram: 0, disk: 0 };
         return {
           nodeId: n._id!.toString(),
+          name: n.name,
           ramAllocatedMb: used.ram,
           ramTotalMb: n.ramTotalMb,
           diskAllocatedGb: used.disk,

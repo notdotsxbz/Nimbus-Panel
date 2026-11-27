@@ -199,7 +199,7 @@ export default function AdminSoftwarePage() {
     }
     const channel = String(data.get("channel") ?? "stable");
     try {
-      await api.post("/software/" + selected._id + "/versions", {
+      const created = await api.post<VersionRow>("/software/" + selected._id + "/versions", {
         version,
         releaseName: String(data.get("releaseName") ?? "").trim(),
         releaseDate: data.get("releaseDate") || undefined,
@@ -213,9 +213,13 @@ export default function AdminSoftwarePage() {
         signature: String(data.get("signature") ?? "").trim(),
         runtimeRequirements,
       });
+      if (data.get("publishNow") === "on") {
+        try { await api.patch(`/software/${selected._id}/versions/${created._id}`, { publicationStatus: "published" }); }
+        catch (error) { form.reset(); await openSoftware(selected); show("Version saved as pending: " + (error instanceof Error ? error.message : "Publication failed"), "err"); return; }
+      }
       form.reset();
       await openSoftware(selected);
-      show("Version added as pending approval", "ok");
+      show(data.get("publishNow") === "on" ? "Version added and published" : "Version added as pending approval", "ok");
     } catch (error) { show(error instanceof Error ? error.message : "Could not add version", "err"); }
   };
 
@@ -346,8 +350,8 @@ export default function AdminSoftwarePage() {
             <div className="flex gap-2 sm:col-span-2"><button className="btn-primary" type="submit">Save version metadata</button><button className="btn-ghost" type="button" onClick={() => setEditingVersion(null)}>Cancel</button></div>
           </form> : null}
           <form onSubmit={addManualVersion} className="mt-4 grid gap-2 rounded-lg border border-white/10 p-3 sm:grid-cols-2">
-            <input name="version" required className="input min-w-0" placeholder="Version number" aria-label="Version number" />
-            <input name="releaseName" className="input min-w-0" placeholder="Release name" />
+            <p className="text-sm font-medium sm:col-span-2">Quick add a version</p><input name="version" required className="input min-w-0" placeholder="Version number" aria-label="Version number" />
+            <details className="sm:col-span-2"><summary className="cursor-pointer text-xs text-muted">Optional release and compatibility details</summary><div className="mt-2 grid gap-2 sm:grid-cols-2"><input name="releaseName" className="input min-w-0" placeholder="Release name" />
             <input name="releaseDate" type="date" className="input min-w-0" aria-label="Release date" />
             <select name="channel" className="input min-w-0" defaultValue="stable"><option value="stable">Stable</option><option value="lts">LTS</option><option value="prerelease">Prerelease</option><option value="nightly">Nightly</option></select>
             <input name="sourceUrl" type="url" className="input min-w-0 sm:col-span-2" placeholder="HTTPS release source URL" />
@@ -357,7 +361,7 @@ export default function AdminSoftwarePage() {
             <input name="checksum" className="input min-w-0 sm:col-span-2" placeholder="Checksum (SHA-256 where available)" />
             <input name="signature" className="input min-w-0 sm:col-span-2" placeholder="Signature / verification reference" />
             <textarea name="runtimeRequirements" className="input min-w-0 font-mono sm:col-span-2" rows={2} placeholder='Runtime requirements JSON, e.g. {"java":"21"}' />
-            <button className="btn-ghost sm:col-span-2" type="submit">Add manual version for approval</button>
+            </div></details><label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" name="publishNow" /> Publish immediately after adding (only if you have verified this release)</label><button className="btn-primary sm:col-span-2" type="submit">Add version</button>
           </form>
           {selectedVersionIds.length > 0 && <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-white/10 p-3">
             <span className="self-center text-xs text-muted">{selectedVersionIds.length} selected</span>

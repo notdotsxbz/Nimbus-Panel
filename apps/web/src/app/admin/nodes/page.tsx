@@ -188,35 +188,29 @@ export default function AdminNodes() {
     }
   };
 
-  // DELETE with a JSON body is not supported by the api helper — use fetch directly.
+  // Use the shared same-origin API client; a localhost fallback breaks production.
   const deleteNodeWithBody = async () => {
-    if (!detail) return;
+    if (!detail || busy) return;
+    if (deleteMode === "safe" && (deleteInfo === null || deleteInfo.workloads.length > 0 || deleteInfo.allocationsInUse > 0)) {
+      show("Safe Delete requires a verified empty node. Remove or migrate workloads and allocations first.", "err");
+      return;
+    }
     setBusy(true);
     try {
-      const token = localStorage.getItem("nimbus.token");
-      const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-      const res = await fetch(`${base}/api/v1/nodes/${detail._id}`, {
-        method: "DELETE",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ mode: deleteMode, confirmName, password: reauthPassword || undefined }),
+      const result = await api.del<{ note?: string }>(`/nodes/${detail._id}`, {
+        mode: deleteMode,
+        confirmName: deleteMode === "force" ? confirmName : undefined,
+        password: deleteMode === "force" ? reauthPassword : undefined,
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detailMsg = Array.isArray((body as { message?: unknown }).message)
-          ? JSON.stringify((body as { message: unknown }).message)
-          : String((body as { message?: string }).message ?? res.statusText);
-        show(`Delete failed: ${detailMsg}`, "err");
-        if ((body as { workloads?: unknown }).workloads) setDeleteInfo((body as { workloads: { name: string; type: string; status: string }[]; allocationsInUse: number }));
-      } else {
-        setDeleteOpen(false);
-        setDetail(null);
-        show(String((body as { note?: string }).note ?? "Node deleted"), "ok");
-        void load();
-      }
+      setDeleteOpen(false);
+      setDetail(null);
+      show(result.note ?? "Node registration deleted", "ok");
+      await load();
     } catch (err) {
-      show(err instanceof Error ? err.message : "Delete failed", "err");
+      show(err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed", "err");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   const saveEdit = async (e: FormEvent<HTMLFormElement>) => {
@@ -294,17 +288,18 @@ export default function AdminNodes() {
       {/* Add node */}
       <Modal open={open} title="Add Node" onClose={() => setOpen(false)}>
         <form onSubmit={create} className="grid grid-cols-2 gap-4">
-          <p className="col-span-2 text-xs text-muted">Step 1 of 2: register your VPS. Step 2 will give you a one-time installation command. Use the public IP and real hardware specifications of the node VPS.</p>
+          <p className="col-span-2 text-xs text-muted">1. Enter your VPS details below. 2. Copy the generated installation command. 3. Run it on your compute VPS and check that its heartbeat becomes online.</p>
           <div className="col-span-2"><label className="label" htmlFor="n-name">Node name</label><input id="n-name" name="name" required className="input" placeholder="minecraft-1" /></div>
           <div><label className="label" htmlFor="n-ip">IP address</label><input id="n-ip" name="ip" required className="input" placeholder="103.45.67.89" autoComplete="off" /></div>
-          <div><label className="label" htmlFor="n-sshport">SSH port</label><input id="n-sshport" name="sshPort" type="number" min={1} max={65535} defaultValue={22} required className="input" /></div>
+          <details className="col-span-2"><summary className="cursor-pointer text-sm text-muted">Advanced connection settings (optional)</summary><div className="mt-3 grid grid-cols-2 gap-4"><div><label className="label" htmlFor="n-sshport">SSH port</label><input id="n-sshport" name="sshPort" type="number" min={1} max={65535} defaultValue={22} required className="input" /></div>
           <div><label className="label" htmlFor="n-sshuser">SSH user</label><input id="n-sshuser" name="sshUsername" defaultValue="ubuntu" required className="input" /></div>
           <div>
             <label className="label" htmlFor="n-os">Operating system</label>
             <select id="n-os" name="os" className="input"><option value="ubuntu">Ubuntu</option><option value="debian">Debian</option></select>
           </div>
           <div className="col-span-2"><label className="label" htmlFor="n-location">Location</label><input id="n-location" name="location" className="input" placeholder="Frankfurt, DE" /></div>
-          <p className="col-span-2 text-xs text-muted">On the node VPS, run <code>nproc</code> for CPU, <code>free -m</code> for RAM, and <code>df -BG /</code> for disk. These are capacity limits, not values to guess.</p>
+          </div></details><p className="col-span-2 text-xs text-muted">On the node VPS, run <code>nproc</code> for CPU, <code>free -m</code> for RAM, and <code>df -BG /</code> for disk. These are capacity limits, not values to guess.</p>
+          <div className="col-span-2 rounded-xl border border-white/10 p-3 text-xs text-muted"><button type="button" className="btn-ghost w-full" onClick={async () => { try { await navigator.clipboard.writeText("echo CPU; nproc; echo RAM_MB; free -m | head -2; echo DISK_GB; df -BG /"); show("Hardware check command copied. Run it on the compute VPS.", "ok"); } catch { show("Clipboard unavailable. Use the commands above.", "err"); } }}>Copy hardware check command</button></div>
           <div><label className="label" htmlFor="n-cpu">CPU cores</label><input id="n-cpu" name="cpuCores" type="number" min={1} required className="input" /></div>
           <div><label className="label" htmlFor="n-ram">RAM (MB)</label><input id="n-ram" name="ramTotalMb" type="number" min={1024} required className="input" /></div>
           <div><label className="label" htmlFor="n-disk">Disk (GB)</label><input id="n-disk" name="diskTotalGb" type="number" min={10} required className="input" /></div>

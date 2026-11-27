@@ -212,3 +212,20 @@ html.low-bandwidth .animate-rise { animation: none !important; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 ::selection { background: color-mix(in srgb, var(--nb-primary) 25%, transparent); }
+
+/* ASTREVONE branded rocket loading transition */
+.nimbus-rocket-loader { position: fixed; inset: 0; z-index: 99999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: #050814; color: #fff; animation: nimbus-loader-in .18s ease-out both; }
+.nimbus-rocket-stage { position: relative; height: 175px; width: 160px; display: flex; justify-content: center; align-items: center; }
+.nimbus-rocket { position: relative; z-index: 2; filter: drop-shadow(0 0 18px rgba(96,165,250,.35)); animation: nimbus-rocket-hover .55s ease-in-out infinite alternate; }
+.nimbus-rocket-flame { transform-origin: 50px 94px; animation: nimbus-flame .16s ease-in-out infinite alternate; }
+.nimbus-rocket-flame-inner { transform-origin: 50px 94px; animation: nimbus-flame .12s ease-in-out infinite alternate-reverse; }
+.nimbus-rocket-smoke { position: absolute; bottom: 0; width: 44px; height: 22px; border-radius: 50%; background: rgba(148,163,184,.22); filter: blur(12px); animation: nimbus-smoke .5s ease-in-out infinite alternate; }
+.nimbus-rocket-brand { font-size: 1.35rem; letter-spacing: .48em; margin-left: .48em; font-weight: 700; }
+.nimbus-rocket-powered { font-size: .78rem; color: #94a3b8; letter-spacing: .12em; animation: nimbus-powered-glow 1s ease-in-out infinite alternate; }
+.nimbus-rocket-powered strong { color: #e2e8f0; letter-spacing: .17em; }
+@keyframes nimbus-loader-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nimbus-rocket-hover { from { transform: translateY(3px); } to { transform: translateY(-5px); } }
+@keyframes nimbus-flame { from { transform: scaleY(.75); } to { transform: scaleY(1.15); } }
+@keyframes nimbus-smoke { from { transform: scale(1); opacity: .4; } to { transform: scale(1.5); opacity: .9; } }
+@keyframes nimbus-powered-glow { from { opacity: .55; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .nimbus-rocket-loader, .nimbus-rocket, .nimbus-rocket-flame, .nimbus-rocket-flame-inner, .nimbus-rocket-smoke, .nimbus-rocket-powered { animation: none !important; } }

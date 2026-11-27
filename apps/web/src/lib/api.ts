@@ -58,7 +58,8 @@ export const api = {
     request<T>(path, { method: "PUT", body: data ? JSON.stringify(data) : undefined }),
   patch: <T,>(path: string, data?: unknown) =>
     request<T>(path, { method: "PATCH", body: data ? JSON.stringify(data) : undefined }),
-  del: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
+  del: <T,>(path: string, data?: unknown) =>
+    request<T>(path, { method: "DELETE", body: data === undefined ? undefined : JSON.stringify(data) }),
   /** Raw fetch for non-JSON operations (file upload/download) with auth. */
   raw: (path: string, init: RequestInit = {}) => {
     const token = typeof window !== "undefined" ? localStorage.getItem("nimbus.token") : null;
