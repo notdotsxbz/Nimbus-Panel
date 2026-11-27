@@ -83,6 +83,9 @@ export class ServicesService implements OnModuleInit, OnModuleDestroy {
     const customer = await this.users.findById(dto.ownerId);
     if (!customer || customer.role !== "customer" || customer.suspended || customer.deletedAt) throw new BadRequestException("Choose an active customer account");
     const node = await this.nodes.get(dto.nodeId);
+    if (!node.lastHeartbeatAt || Date.now() - new Date(node.lastHeartbeatAt).getTime() > 60_000) {
+      throw new BadRequestException("Node Agent heartbeat is missing or stale. Bring the compute node online before provisioning.");
+    }
     if (!node.online || node.maintenanceMode) {
       throw new BadRequestException("Node is offline or in maintenance mode");
     }
